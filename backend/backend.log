@@ -1,0 +1,8 @@
+INFO:     Will watch for changes in these directories: ['/Users/syaikhipin/Documents/program/simpleaisharing/backend']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [30824] using WatchFiles
+Initializing database...
+Superuser already exists: admin@example.com
+Database initialized successfully!
+Starting FastAPI server...
+INFO:     Stopping reloader process [30824]

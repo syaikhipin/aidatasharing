@@ -1,0 +1,251 @@
+{
+  "backend": {
+    "start_time": "2025-06-26T10:48:49.351461",
+    "tests": {
+      "Health Check": {
+        "total": 3,
+        "passed": 3,
+        "tests": [
+          {
+            "name": "Health Check Endpoint",
+            "passed": true,
+            "details": "Status: 200"
+          },
+          {
+            "name": "API Documentation",
+            "passed": true,
+            "details": "Status: 200"
+          },
+          {
+            "name": "OpenAPI Schema",
+            "passed": true,
+            "details": "Status: 200"
+          }
+        ]
+      },
+      "Authentication": {
+        "total": 4,
+        "passed": 4,
+        "tests": [
+          {
+            "name": "User Registration",
+            "passed": true,
+            "details": "Status: 200"
+          },
+          {
+            "name": "User Login",
+            "passed": true,
+            "details": "Status: 200"
+          },
+          {
+            "name": "Protected Endpoint Access",
+            "passed": true,
+            "details": "Status: 200"
+          },
+          {
+            "name": "Invalid Token Handling",
+            "passed": true,
+            "details": "Status: 401"
+          }
+        ]
+      },
+      "Organization Management": {
+        "total": 1,
+        "passed": 0,
+        "tests": [
+          {
+            "name": "Get Organizations List",
+            "passed": false,
+            "details": "Status: 400"
+          }
+        ]
+      },
+      "User Management": {
+        "total": 2,
+        "passed": 1,
+        "tests": [
+          {
+            "name": "Get User Profile",
+            "passed": true,
+            "details": "Status: 200"
+          },
+          {
+            "name": "Update User Profile",
+            "passed": false,
+            "details": "Status: 405"
+          }
+        ]
+      },
+      "Dataset Operations": {
+        "total": 2,
+        "passed": 0,
+        "tests": [
+          {
+            "name": "Get Datasets List",
+            "passed": false,
+            "details": "Status: 403"
+          },
+          {
+            "name": "Create Dataset",
+            "passed": false,
+            "details": "Status: 422"
+          }
+        ]
+      },
+      "Model Management": {
+        "total": 1,
+        "passed": 0,
+        "tests": [
+          {
+            "name": "Get Models List",
+            "passed": false,
+            "details": "Status: 404"
+          }
+        ]
+      },
+      "MindsDB Integration": {
+        "total": 3,
+        "passed": 1,
+        "tests": [
+          {
+            "name": "MindsDB Status Check",
+            "passed": true,
+            "details": "Status: 200"
+          },
+          {
+            "name": "Execute MindsDB Query",
+            "passed": false,
+            "details": "Status: 404"
+          },
+          {
+            "name": "AI Query Processing",
+            "passed": false,
+            "details": "Status: 404"
+          }
+        ]
+      },
+      "Analytics API": {
+        "total": 2,
+        "passed": 0,
+        "tests": [
+          {
+            "name": "Usage Metrics",
+            "passed": false,
+            "details": "Status: 404"
+          },
+          {
+            "name": "Export Analytics",
+            "passed": false,
+            "details": "Status: 405"
+          }
+        ]
+      },
+      "Data Access API": {
+        "total": 2,
+        "passed": 0,
+        "tests": [
+          {
+            "name": "Get Access Requests",
+            "passed": false,
+            "details": "Status: 400"
+          },
+          {
+            "name": "Get Audit Trail",
+            "passed": false,
+            "details": "Status: 404"
+          }
+        ]
+      },
+      "Security & Permissions": {
+        "total": 3,
+        "passed": 1,
+        "tests": [
+          {
+            "name": "Unauthenticated Access Blocked",
+            "passed": false,
+            "details": "Status: 403"
+          },
+          {
+            "name": "Invalid Token Rejected",
+            "passed": true,
+            "details": "Status: 401"
+          },
+          {
+            "name": "CORS Headers Present",
+            "passed": false,
+            "details": "CORS headers: False"
+          }
+        ]
+      },
+      "Error Handling": {
+        "total": 3,
+        "passed": 3,
+        "tests": [
+          {
+            "name": "404 for Non-existent Resource",
+            "passed": true,
+            "details": "Status: 404"
+          },
+          {
+            "name": "Invalid JSON Handling",
+            "passed": true,
+            "details": "Status: 422"
+          },
+          {
+            "name": "Missing Required Fields",
+            "passed": true,
+            "details": "Status: 422"
+          }
+        ]
+      }
+    },
+    "summary": {
+      "total_tests": 26,
+      "passed_tests": 13,
+      "failed_tests": 13,
+      "success_rate": 50.0,
+      "end_time": "2025-06-26T10:48:50.150734"
+    },
+    "errors": []
+  },
+  "frontend": {
+    "start_time": "2025-06-26T10:48:51.278514",
+    "tests": {
+      "Landing Page": {
+        "total": 4,
+        "passed": 1,
+        "tests": [
+          {
+            "name": "Landing Page Loads",
+            "passed": true,
+            "details": "Title: AI Share Platform"
+          },
+          {
+            "name": "Navigation Present",
+            "passed": false,
+            "details": "Found 0 nav elements"
+          },
+          {
+            "name": "Login Button Present",
+            "passed": false,
+            "details": "Login button not found"
+          },
+          {
+            "name": "Register Button Present",
+            "passed": false,
+            "details": "Register button not found"
+          }
+        ]
+      },
+      "Authentication Pages": {
+        "total": 5,
+        "passed": 5,
+        "tests": [
+          {
+            "name": "Login Page Accessible",
+            "passed": true,
+            "details": "URL: http://localhost:3000/login"
+          },
+          {
+            "name": "Login Form Elements Present",
+            "passed": 

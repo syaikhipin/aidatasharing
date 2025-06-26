@@ -1,0 +1,477 @@
+{
+  "backend": {
+    "start_time": "2025-06-26T11:20:17.800864",
+    "tests": {
+      "Health Check": {
+        "total": 3,
+        "passed": 3,
+        "tests": [
+          {
+            "name": "Health Check Endpoint",
+            "passed": true,
+            "details": "Status: 200"
+          },
+          {
+            "name": "API Documentation",
+            "passed": true,
+            "details": "Status: 200"
+          },
+          {
+            "name": "OpenAPI Schema",
+            "passed": true,
+            "details": "Status: 200"
+          }
+        ]
+      },
+      "Authentication": {
+        "total": 4,
+        "passed": 4,
+        "tests": [
+          {
+            "name": "User Registration",
+            "passed": true,
+            "details": "Status: 200"
+          },
+          {
+            "name": "User Login",
+            "passed": true,
+            "details": "Status: 200"
+          },
+          {
+            "name": "Protected Endpoint Access",
+            "passed": true,
+            "details": "Status: 200"
+          },
+          {
+            "name": "Invalid Token Handling",
+            "passed": true,
+            "details": "Status: 401"
+          }
+        ]
+      },
+      "Organization Management": {
+        "total": 1,
+        "passed": 1,
+        "tests": [
+          {
+            "name": "Get Organizations List",
+            "passed": true,
+            "details": "Status: 200"
+          }
+        ]
+      },
+      "User Management": {
+        "total": 2,
+        "passed": 2,
+        "tests": [
+          {
+            "name": "Get User Profile",
+            "passed": true,
+            "details": "Status: 200"
+          },
+          {
+            "name": "Update User Profile",
+            "passed": true,
+            "details": "Status: 200"
+          }
+        ]
+      },
+      "Dataset Operations": {
+        "total": 2,
+        "passed": 1,
+        "tests": [
+          {
+            "name": "Get Datasets List",
+            "passed": true,
+            "details": "Status: 200"
+          },
+          {
+            "name": "Create Dataset",
+            "passed": false,
+            "details": "Status: 403"
+          }
+        ]
+      },
+      "Model Management": {
+        "total": 1,
+        "passed": 1,
+        "tests": [
+          {
+            "name": "Get Models List",
+            "passed": true,
+            "details": "Status: 200"
+          }
+        ]
+      },
+      "MindsDB Integration": {
+        "total": 3,
+        "passed": 1,
+        "tests": [
+          {
+            "name": "MindsDB Status Check",
+            "passed": true,
+            "details": "Status: 200"
+          },
+          {
+            "name": "Execute MindsDB Query",
+            "passed": false,
+            "details": "Status: 422"
+          },
+          {
+            "name": "AI Query Processing",
+            "passed": false,
+            "details": "Status: 422"
+          }
+        ]
+      },
+      "Analytics API": {
+        "total": 3,
+        "passed": 3,
+        "tests": [
+          {
+            "name": "Organization Analytics",
+            "passed": true,
+            "details": "Status: 200"
+          },
+          {
+            "name": "Usage Metrics",
+            "passed": true,
+            "details": "Status: 200"
+          },
+          {
+            "name": "Export Analytics",
+            "passed": true,
+            "details": "Status: 200"
+          }
+        ]
+      },
+      "Data Access API": {
+        "total": 2,
+        "passed": 2,
+        "tests": [
+          {
+            "name": "Get Access Requests",
+            "passed": true,
+            "details": "Status: 200"
+          },
+          {
+            "name": "Get Audit Trail",
+            "passed": true,
+            "details": "Status: 200"
+          }
+        ]
+      },
+      "Security & Permissions": {
+        "total": 3,
+        "passed": 1,
+        "tests": [
+          {
+            "name": "Unauthenticated Access Blocked",
+            "passed": false,
+            "details": "Status: 403"
+          },
+          {
+            "name": "Invalid Token Rejected",
+            "passed": true,
+            "details": "Status: 401"
+          },
+          {
+            "name": "CORS Headers Present",
+            "passed": false,
+            "details": "CORS headers: False"
+          }
+        ]
+      },
+      "Error Handling": {
+        "total": 3,
+        "passed": 3,
+        "tests": [
+          {
+            "name": "404 for Non-existent Resource",
+            "passed": true,
+            "details": "Status: 404"
+          },
+          {
+            "name": "Invalid JSON Handling",
+            "passed": true,
+            "details": "Status: 422"
+          },
+          {
+            "name": "Missing Required Fields",
+            "passed": true,
+            "details": "Status: 422"
+          }
+        ]
+      }
+    },
+    "summary": {
+      "total_tests": 27,
+      "passed_tests": 22,
+      "failed_tests": 5,
+      "success_rate": 81.48148148148148,
+      "end_time": "2025-06-26T11:20:18.617803"
+    },
+    "errors": []
+  },
+  "frontend": {
+    "start_time": "2025-06-26T11:20:19.751260",
+    "tests": {
+      "Landing Page": {
+        "total": 4,
+        "passed": 1,
+        "tests": [
+          {
+            "name": "Landing Page Loads",
+            "passed": true,
+            "details": "Title: AI Share Platform"
+          },
+          {
+            "name": "Navigation Present",
+            "passed": false,
+            "details": "Found 0 nav elements"
+          },
+          {
+            "name": "Login Button Present",
+            "passed": false,
+            "details": "Login button not found"
+          },
+          {
+            "name": "Register Button Present",
+            "passed": false,
+            "details": "Register button not found"
+          }
+        ]
+      },
+      "Authentication Pages": {
+        "total": 5,
+        "passed": 5,
+        "tests": [
+          {
+            "name": "Login Page Accessible",
+            "passed": true,
+            "details": "URL: http://localhost:3000/login"
+          },
+          {
+            "name": "Login Form Elements Present",
+            "passed": true,
+            "details": "Email, password, and submit elements found"
+          },
+          {
+            "name": "Register Page Accessible",
+            "passed": true,
+            "details": "URL: http://localhost:3000/register"
+          },
+          {
+            "name": "Register Form Elements Present",
+            "passed": true,
+            "details": "Full name, email, and password elements found"
+          },
+          {
+            "name": "Form Validation Works",
+            "passed": true,
+            "details": "Empty form submission blocked"
+          }
+        ]
+      },
+      "Dashboard Layout": {
+        "total": 1,
+        "passed": 1,
+        "tests": [
+          {
+            "name": "Dashboard Requires Authentication",
+            "passed": true,
+            "details": "Redirected to: http://localhost:3000/login"
+          }
+        ]
+      },
+      "Organization Management": {
+        "total": 1,
+        "passed": 1,
+        "tests": [
+          {
+            "name": "Organizations Page Requires Auth",
+            "passed": true,
+            "details": "Redirected to login page"
+          }
+        ]
+      },
+      "Dataset Management": {
+        "total": 2,
+        "passed": 2,
+        "tests": [
+          {
+            "name": "Datasets Page Requires Auth",
+            "passed": true,
+            "details": "Redirected to login page"
+          },
+          {
+            "name": "Upload Page Requires Auth",
+            "passed": true,
+            "details": "Redirected to login page"
+          }
+        ]
+      },
+      "Model Management": {
+        "total": 2,
+        "passed": 2,
+        "tests": [
+          {
+            "name": "Models Page Requires Auth",
+            "passed": true,
+            "details": "Redirected to login page"
+          },
+          {
+            "name": "Create Model Page Requires Auth",
+            "passed": true,
+            "details": "Redirected to login page"
+          }
+        ]
+      },
+      "SQL Playground": {
+        "total": 1,
+        "passed": 1,
+        "tests": [
+          {
+            "name": "SQL Playground Requires Auth",
+            "passed": true,
+            "details": "Redirected to login page"
+          }
+        ]
+      },
+      "Analytics Dashboard": {
+        "total": 1,
+        "passed": 0,
+        "tests": [
+          {
+            "name": "Analytics Page Requires Auth",
+            "passed": false,
+            "details": "Redirected to login page"
+          }
+        ]
+      },
+      "Data Access Management": {
+        "total": 1,
+        "passed": 0,
+        "tests": [
+          {
+            "name": "Data Access Page Requires Auth",
+            "passed": false,
+            "details": "Redirected to login page"
+          }
+        ]
+      },
+      "Admin Panel": {
+        "total": 1,
+        "passed": 1,
+        "tests": [
+          {
+            "name": "Admin Page Requires Auth",
+            "passed": true,
+            "details": "Redirected to login page"
+          }
+        ]
+      },
+      "Responsive Design": {
+        "total": 3,
+        "passed": 2,
+        "tests": [
+          {
+            "name": "Responsive Design - Desktop",
+            "passed": true,
+            "details": "Page width: 1920px, Screen: 1920px"
+          },
+          {
+            "name": "Responsive Design - Tablet",
+            "passed": true,
+            "details": "Page width: 1009px, Screen: 1024px"
+          },
+          {
+            "name": "Responsive Design - Mobile",
+            "passed": false,
+            "details": "Page width: 485px, Screen: 375px"
+          }
+        ]
+      },
+      "Navigation & Routing": {
+        "total": 9,
+        "passed": 0,
+        "tests": [
+          {
+            "name": "Route Accessibility - Home/Landing",
+            "passed": false,
+            "details": "URL: /, 404: True"
+          },
+          {
+            "name": "Route Accessibility - Login",
+            "passed": false,
+            "details": "URL: /login, 404: True"
+          },
+          {
+            "name": "Route Accessibility - Register",
+            "passed": false,
+            "details": "URL: /register, 404: True"
+          },
+          {
+            "name": "Route Accessibility - Dashboard",
+            "passed": false,
+            "details": "URL: /dashboard, 404: True"
+          },
+          {
+            "name": "Route Accessibility - Datasets",
+            "passed": false,
+            "details": "URL: /datasets, 404: True"
+          },
+          {
+            "name": "Route Accessibility - Models",
+            "passed": false,
+            "details": "URL: /models, 404: True"
+          },
+          {
+            "name": "Route Accessibility - SQL Playground",
+            "passed": false,
+            "details": "URL: /sql, 404: True"
+          },
+          {
+            "name": "Route Accessibility - Analytics",
+            "passed": false,
+            "details": "URL: /analytics, 404: True"
+          },
+          {
+            "name": "Route Accessibility - Admin",
+            "passed": false,
+            "details": "Error: Message: unknown error: net::ERR_CONNECTION_REFUSED\n  (Session info: chrome=138.0.7204.49)\nStacktrace:\n0   chromedriver                        0x00000001048b8eb4 cxxbridge1$str$ptr + 2722840\n1   chromedriver                        0x00000001048b0dbc cxxbridge1$str$ptr + 2689824\n2   chromedriver                        0x00000001044023ec cxxbridge1$string$len + 90648\n3   chromedriver                        0x00000001043fa430 cxxbridge1$string$len + 57948\n4   chromedriver                        0x00000001043ed484 cxxbridge1$string$len + 4784\n5   chromedriver                        0x00000001043eee88 cxxbridge1$string$len + 11444\n6   chromedriver                        0x00000001043ed8d8 cxxbridge1$string$len + 5892\n7   chromedriver                        0x00000001043ed22c cxxbridge1$string$len + 4184\n8   chromedriver                        0x00000001043ecf78 cxxbridge1$string$len + 3492\n9   chromedriver                        0x00000001043ead30 chromedriver + 191792\n10  chromedriver                        0x00000001043eb78c chromedriver + 194444\n11  chromedriver                        0x0000000104405450 cxxbridge1$string$len + 103036\n12  chromedriver                        0x000000010448b3bc cxxbridge1$string$len + 651752\n13  chromedriver                        0x000000010448a934 cxxbridge1$string$len + 649056\n14  chromedriver                        0x000000010443d834 cxxbridge1$string$len + 333408\n15  chromedriver                        0x000000010487bfd0 cxxbridge1$str$ptr + 2473268\n16  chromedriver                        0x000000010487f23c cxxbridge1$str$ptr + 2486176\n17  chromedriver                        0x000000010485da18 cxxbridge1$str$ptr + 2348924\n18  chromedriver                        0x000000010487faf8 cxxbridge1$str$ptr + 2488412\n19  chromedriver                        0x000000010484eaa8 cxxbridge1$str$ptr + 2287628\n20  chromedriver                        0x000000010489f9e8 cxxbridge1$str$ptr + 2619212\n21  chromedriver                        0x000000010489fb74 cxxbridge1$str$ptr + 2619608\n22  chromedriver                        0x00000001048b09f8 cxxbridge1$str$ptr + 2688860\n23  libsystem_pthread.dylib             0x000000018d3a2c0c _pthread_start + 136\n24  libsystem_pthread.dylib             0x000000018d39db80 thread_start + 8\n"
+          }
+        ]
+      }
+    },
+    "summary": {
+      "total_tests": 31,
+      "passed_tests": 16,
+      "failed_tests": 15,
+      "success_rate": 51.61290322580645,
+      "end_time": "2025-06-26T11:21:10.780396"
+    },
+    "errors": []
+  },
+  "integration": {
+    "total": 3,
+    "passed": 0,
+    "tests": [
+      {
+        "name": "Backend Server Health",
+        "passed": false,
+        "details": "Backend responding: False"
+      },
+      {
+        "name": "Frontend Server Health",
+        "passed": false,
+        "details": "Frontend responding: False"
+      },
+      {
+        "name": "API Documentation Accessible",
+        "passed": false,
+        "details": "Error: HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /docs (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x12150abb0>: Failed to establish a new connection: [Errno 61] Connection refused'))"
+      }
+    ]
+  }
+}
