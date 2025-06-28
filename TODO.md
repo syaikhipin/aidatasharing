@@ -1,5 +1,21 @@
 # AI Share Platform with Next.js & FastAPI - Updated TODO
 
+## ⚠️ **IMPORTANT NOTICE: MANUAL TESTING REQUIRED**
+
+**Status**: The recent major updates (MindsDB integration, dataset chat, project reorganization) have **NOT been manually tested**. While the code has been structured and integrated, comprehensive manual testing is required before production deployment.
+
+**Key Areas Requiring Manual Testing**:
+- 🧪 MindsDB Google Gemini integration and model creation
+- 💬 Dataset chat functionality (`/datasets/[id]/chat`)
+- 📊 Real-time dataset listing and upload functionality
+- 🔄 Automatic ML model generation for uploaded datasets
+- 🔒 Environment file security and configuration
+- 📁 File organization and backup systems
+
+**Recommendation**: Run comprehensive testing suite and manual verification before deploying to production.
+
+---
+
 ## Project Status: Model Management & AI-Enhanced Features Complete ✅
 
 ### ✅ **COMPLETED - Phase 1: Foundation Setup**
