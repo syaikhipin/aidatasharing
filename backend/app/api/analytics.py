@@ -96,8 +96,8 @@ class AnalyticsResponse(BaseModel):
     data_usage: DataUsageResponse
     costs: CostAnalysisResponse
 
-@router.get("/analytics", response_model=AnalyticsResponse)
-async def get_analytics(
+@router.get("/organization", response_model=AnalyticsResponse)
+async def get_organization_analytics(
     start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
     current_user: User = Depends(get_current_user),
@@ -169,7 +169,7 @@ async def get_analytics(
     ).count()
     
     # Calculate total storage used (mock calculation)
-    total_storage_used = db.query(func.sum(Dataset.size)).filter(
+    total_storage_used = db.query(func.sum(Dataset.size_bytes)).filter(
         Dataset.organization_id == current_user.organization_id
     ).scalar() or 0.0
     total_storage_used = total_storage_used / (1024**3)  # Convert to GB
@@ -350,7 +350,7 @@ def get_data_usage_stats(db: Session, organization_id: int) -> DataUsageResponse
         storage_by_department=storage_by_dept
     )
 
-@router.get("/analytics/export")
+@router.get("/export")
 async def export_analytics_report(
     format: str = Query("csv", description="Export format: csv, json, excel"),
     start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
@@ -372,7 +372,7 @@ async def export_analytics_report(
         "download_url": f"/analytics/download/{format}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     }
 
-@router.post("/analytics/activity")
+@router.post("/activity")
 async def log_activity(
     action: str,
     resource_type: str,
@@ -402,7 +402,7 @@ async def log_activity(
     
     return {"message": "Activity logged successfully"}
 
-@router.get("/analytics/real-time")
+@router.get("/real-time")
 async def get_real_time_metrics(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -438,7 +438,7 @@ async def get_real_time_metrics(
         "timestamp": datetime.now().isoformat()
     }
 
-@router.get("/analytics/performance/{model_id}")
+@router.get("/performance/{model_id}")
 async def get_model_performance_details(
     model_id: str,
     current_user: User = Depends(get_current_user),
@@ -483,4 +483,73 @@ async def get_model_performance_details(
             {"date": "2024-01-14", "rate": 0.19},
             {"date": "2024-01-15", "rate": 0.14}
         ]
-    } 
+    }
+
+@router.get("/user-activity")
+async def get_user_activity_endpoint(
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    user_id: Optional[int] = Query(None, description="Specific user ID"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get user activity analytics"""
+    if not current_user.organization_id:
+        return []
+    
+    # Set default date range if not provided
+    if not end_date:
+        end_date = datetime.now().strftime("%Y-%m-%d")
+    if not start_date:
+        start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+    
+    return get_user_activity(db, current_user.organization_id, start_dt, end_dt)
+
+@router.get("/dataset-usage")
+async def get_dataset_usage_endpoint(
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    dataset_id: Optional[int] = Query(None, description="Specific dataset ID"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get dataset usage analytics"""
+    if not current_user.organization_id:
+        return {"most_accessed_datasets": [], "storage_by_department": []}
+    
+    return get_data_usage_stats(db, current_user.organization_id)
+
+@router.get("/model-performance")
+async def get_model_performance_endpoint(
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    model_id: Optional[int] = Query(None, description="Specific model ID"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get model performance analytics"""
+    if not current_user.organization_id:
+        return []
+    
+    # Mock model performance data
+    return [
+        ModelPerformanceResponse(
+            id="model_001",
+            name="Customer Churn Prediction",
+            accuracy=0.924,
+            predictions=15847,
+            last_updated="2024-01-15T14:22:00Z",
+            status="excellent"
+        ),
+        ModelPerformanceResponse(
+            id="model_002",
+            name="Sales Forecasting",
+            accuracy=0.887,
+            predictions=8932,
+            last_updated="2024-01-14T09:15:00Z",
+            status="good"
+        )
+    ] 

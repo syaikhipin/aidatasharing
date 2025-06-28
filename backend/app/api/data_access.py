@@ -112,7 +112,7 @@ class AuditLogResponse(BaseModel):
 access_requests_storage = []
 audit_logs_storage = []
 
-@router.get("/data-access/datasets", response_model=List[DatasetAccessResponse])
+@router.get("/datasets", response_model=List[DatasetAccessResponse])
 async def get_accessible_datasets(
     search: Optional[str] = Query(None, description="Search term"),
     sharing_level: Optional[str] = Query(None, description="Filter by sharing level"),
@@ -149,17 +149,17 @@ async def get_accessible_datasets(
     result = []
     for dataset in datasets:
         # Determine access status
-        has_access = dataset.user_id == current_user.id or dataset.sharing_level in ["ORGANIZATION", "DEPARTMENT"]
+        has_access = dataset.owner_id == current_user.id or dataset.sharing_level in ["ORGANIZATION", "DEPARTMENT"]
         can_request = not has_access and dataset.sharing_level == "PRIVATE"
         
         result.append(DatasetAccessResponse(
             id=dataset.id,
             name=dataset.name,
             description=dataset.description,
-            owner=dataset.owner_name if hasattr(dataset, 'owner_name') else "Unknown",
+            owner=dataset.owner.full_name if dataset.owner and dataset.owner.full_name else (dataset.owner.email.split('@')[0] if dataset.owner else "Unknown"),
             owner_department="Analytics",  # Mock data
             sharing_level=dataset.sharing_level,
-            size=round(dataset.size / (1024**3), 2) if dataset.size else 0.0,
+            size=round(dataset.size_bytes / (1024**3), 2) if dataset.size_bytes else 0.0,
             last_updated=dataset.updated_at.isoformat() if dataset.updated_at else datetime.now().isoformat(),
             access_count=max(10, dataset.id * 12),  # Mock access count
             has_access=has_access,
@@ -169,7 +169,7 @@ async def get_accessible_datasets(
     
     return result
 
-@router.post("/data-access/requests", response_model=Dict[str, str])
+@router.post("/requests", response_model=Dict[str, str])
 async def create_access_request(
     request_data: AccessRequestCreate,
     current_user: User = Depends(get_current_user),
@@ -191,7 +191,7 @@ async def create_access_request(
         raise HTTPException(status_code=404, detail="Dataset not found")
     
     # Check if user already has access
-    if dataset.user_id == current_user.id or dataset.sharing_level in ["ORGANIZATION", "DEPARTMENT"]:
+    if dataset.owner_id == current_user.id or dataset.sharing_level in ["ORGANIZATION", "DEPARTMENT"]:
         raise HTTPException(status_code=400, detail="User already has access to this dataset")
     
     # Create access request (mock storage)
@@ -231,7 +231,7 @@ async def create_access_request(
     
     return {"message": "Access request submitted successfully", "request_id": str(new_request["id"])}
 
-@router.get("/data-access/requests", response_model=List[AccessRequestResponse])
+@router.get("/requests", response_model=List[AccessRequestResponse])
 async def get_access_requests(
     status: Optional[RequestStatus] = Query(None, description="Filter by status"),
     urgency: Optional[UrgencyLevel] = Query(None, description="Filter by urgency"),
@@ -265,7 +265,7 @@ async def get_access_requests(
     
     return result
 
-@router.put("/data-access/requests/{request_id}/approve")
+@router.put("/requests/{request_id}/approve")
 async def approve_access_request(
     request_id: int,
     approval_data: AccessRequestApproval,
@@ -322,7 +322,7 @@ async def approve_access_request(
     
     return {"message": f"Request {approval_data.decision}d successfully"}
 
-@router.get("/data-access/audit", response_model=List[AuditLogResponse])
+@router.get("/audit", response_model=List[AuditLogResponse])
 async def get_audit_trail(
     start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
@@ -372,7 +372,7 @@ async def get_audit_trail(
     
     return result
 
-@router.post("/data-access/notify")
+@router.post("/notify")
 async def send_notification(
     recipient_email: str,
     subject: str,
@@ -412,7 +412,7 @@ async def send_notification(
     
     return {"message": "Notification sent successfully", "notification": notification_data}
 
-@router.get("/data-access/requests/{request_id}")
+@router.get("/requests/{request_id}")
 async def get_access_request_details(
     request_id: int,
     current_user: User = Depends(get_current_user),
@@ -440,7 +440,7 @@ async def get_access_request_details(
     
     return AccessRequestResponse(**request)
 
-@router.delete("/data-access/requests/{request_id}")
+@router.delete("/requests/{request_id}")
 async def cancel_access_request(
     request_id: int,
     current_user: User = Depends(get_current_user),

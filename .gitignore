@@ -25,20 +25,28 @@ MANIFEST
 backend/lib/
 backend/lib64/
 
-# Virtual environments
+# Virtual environments and Environment files
 .env
+.env.local
+.env.production
+.env.development
 .venv
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+backend/.env
+backend/config.env
+config.env
 
 # Backend specific
 backend/*.log
 backend/app.db
 *.db
 *.sqlite3
+backend/backups/
+backend/app.db.backup*
 
 # Node.js and Frontend
 frontend/node_modules/
@@ -77,6 +85,7 @@ logs
 # Test results
 test_results/
 tests/test_results/
+tests/archived_tests_*/
 
 # Temporary files
 *.tmp

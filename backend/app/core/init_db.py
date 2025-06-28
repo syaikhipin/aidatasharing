@@ -5,7 +5,20 @@ from app.core.auth import get_password_hash
 from app.models.user import User, Base
 from app.models.config import Configuration
 from app.models.organization import Organization, Department, OrganizationType
-from app.models.dataset import Dataset, DatasetAccessLog, DatasetModel
+from app.models.dataset import (
+    Dataset, DatasetAccessLog, DatasetModel,
+    DatasetChatSession, ChatMessage, DatasetShareAccess
+)
+from app.models.file_handler import FileUpload, MindsDBHandler, FileProcessingLog
+import logging
+import sys
+import os
+
+# Add database path for migration manager
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "database"))
+from migration_manager import MigrationManager
+
+logger = logging.getLogger(__name__)
 
 
 def init_db():
@@ -17,6 +30,24 @@ def init_db():
     
     # Create all tables
     Base.metadata.create_all(bind=engine)
+    
+    # Run migrations using the migration manager
+    try:
+        logger.info("Running database migrations...")
+        migration_manager = MigrationManager()
+        result = migration_manager.migrate()
+        
+        if result["status"] == "success":
+            if result["executed"]:
+                logger.info(f"Executed {len(result['executed'])} migrations: {result['executed']}")
+            else:
+                logger.info("All migrations are up to date")
+        else:
+            logger.warning(f"Migration partially failed: {result['message']}")
+            
+    except Exception as e:
+        logger.warning(f"Migration system failed: {e}")
+        # Continue anyway as this is non-critical
     
     # Create session
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

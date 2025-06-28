@@ -200,4 +200,152 @@ async def execute_ai_query(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to execute AI query: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Failed to execute AI query: {str(e)}")
+
+
+@router.post("/gemini/initialize")
+async def initialize_gemini_integration(current_user: User = Depends(get_current_active_user)):
+    """Initialize Gemini Flash 2 integration with MindsDB."""
+    try:
+        result = mindsdb_service.initialize_gemini_integration()
+        return {"message": "Gemini integration initialized", "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to initialize Gemini: {str(e)}")
+
+
+@router.post("/gemini/chat")
+async def gemini_chat(
+    chat_data: Dict[str, Any],
+    current_user: User = Depends(get_current_active_user)
+):
+    """Chat with Gemini Flash 2 AI."""
+    try:
+        prompt = chat_data.get("prompt") or chat_data.get("message") or chat_data.get("question")
+        if not prompt:
+            raise HTTPException(status_code=400, detail="Prompt is required")
+        
+        result = mindsdb_service.ai_chat(prompt)
+        return {"response": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to chat with Gemini: {str(e)}")
+
+
+@router.post("/gemini/nl-to-sql")
+async def natural_language_to_sql(
+    nl_data: Dict[str, Any],
+    current_user: User = Depends(get_current_active_user)
+):
+    """Convert natural language to SQL using Gemini."""
+    try:
+        natural_query = nl_data.get("query") or nl_data.get("question") or nl_data.get("prompt")
+        context = nl_data.get("context")
+        
+        if not natural_query:
+            raise HTTPException(status_code=400, detail="Natural language query is required")
+        
+        result = mindsdb_service.natural_language_to_sql(natural_query, context)
+        return {"sql_result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to convert to SQL: {str(e)}")
+
+
+@router.post("/gemini/models")
+async def create_gemini_model(
+    model_data: Dict[str, Any],
+    current_user: User = Depends(get_current_active_user)
+):
+    """Create a new Gemini model."""
+    try:
+        model_name = model_data.get("name")
+        model_type = model_data.get("model_type", "gemini-2.0-flash")
+        prompt_template = model_data.get("prompt_template")
+        mode = model_data.get("mode")
+        
+        if not model_name:
+            raise HTTPException(status_code=400, detail="Model name is required")
+        
+        result = mindsdb_service.create_gemini_model(
+            model_name=model_name,
+            model_type=model_type,
+            prompt_template=prompt_template,
+            mode=mode
+        )
+        return {"message": "Gemini model created successfully", "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create Gemini model: {str(e)}")
+
+
+@router.post("/gemini/models/{model_name}/query")
+async def query_gemini_model(
+    model_name: str,
+    query_data: Dict[str, Any],
+    current_user: User = Depends(get_current_active_user)
+):
+    """Query a specific Gemini model."""
+    try:
+        input_data = query_data.get("input_data", {})
+        if not input_data:
+            raise HTTPException(status_code=400, detail="Input data is required")
+        
+        result = mindsdb_service.query_gemini_model(model_name, input_data)
+        return {"prediction": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to query Gemini model: {str(e)}")
+
+
+@router.get("/gemini/engine/status")
+async def get_gemini_engine_status(current_user: User = Depends(get_current_active_user)):
+    """Check Gemini engine status."""
+    try:
+        result = mindsdb_service.get_engine_status()
+        return {"engine_status": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to check engine status: {str(e)}")
+
+
+@router.post("/gemini/vision/model")
+async def create_gemini_vision_model(
+    model_data: Dict[str, Any],
+    current_user: User = Depends(get_current_active_user)
+):
+    """Create a Gemini vision model for image analysis."""
+    try:
+        model_name = model_data.get("name")
+        img_url_column = model_data.get("img_url_column", "image_url")
+        context_column = model_data.get("context_column", "context")
+        
+        if not model_name:
+            raise HTTPException(status_code=400, detail="Model name is required")
+        
+        result = mindsdb_service.create_gemini_vision_model(
+            model_name=model_name,
+            img_url_column=img_url_column,
+            context_column=context_column
+        )
+        return {"message": "Gemini vision model created successfully", "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create vision model: {str(e)}")
+
+
+@router.post("/gemini/embedding/model")
+async def create_gemini_embedding_model(
+    model_data: Dict[str, Any],
+    current_user: User = Depends(get_current_active_user)
+):
+    """Create a Gemini embedding model for semantic search."""
+    try:
+        model_name = model_data.get("name")
+        question_column = model_data.get("question_column", "question")
+        context_column = model_data.get("context_column")
+        
+        if not model_name:
+            raise HTTPException(status_code=400, detail="Model name is required")
+        
+        result = mindsdb_service.create_gemini_embedding_model(
+            model_name=model_name,
+            question_column=question_column,
+            context_column=context_column
+        )
+        return {"message": "Gemini embedding model created successfully", "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create embedding model: {str(e)}") 

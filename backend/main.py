@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth, organizations, datasets, models, mindsdb, admin, analytics, data_access
+from app.api import auth, organizations, datasets, models, mindsdb, admin, analytics, data_access, data_sharing, file_handler
 from app.core.config import settings
 
 # Enhanced API metadata and documentation
@@ -33,6 +33,12 @@ A comprehensive **AI-powered data sharing platform** that enables organizations 
 * Model performance monitoring and analytics
 * Automated prediction capabilities
 
+### 🔗 **Data Sharing & Chat**
+* Secure dataset sharing with expiring links and password protection
+* AI-powered chat interface for shared datasets
+* Real-time chat with Gemini AI about dataset content
+* Analytics and monitoring for shared data access
+
 ### 📈 **Analytics & Monitoring**
 * Real-time usage analytics and performance metrics
 * Data access patterns and user activity tracking
@@ -51,11 +57,12 @@ A comprehensive **AI-powered data sharing platform** that enables organizations 
 2. **Organization Setup**: Create or join an organization
 3. **Data Upload**: Upload datasets with automatic schema detection
 4. **Model Creation**: Build AI models using your organization's data
-5. **Analytics**: Monitor usage and performance metrics
+5. **Data Sharing**: Create shareable links with AI chat capabilities
+6. **Analytics**: Monitor usage and performance metrics
 
 ## 📚 API Usage
 
-All endpoints require authentication except for health checks and registration.
+All endpoints require authentication except for health checks, registration, and public data sharing endpoints.
 Use the JWT token obtained from `/api/auth/login` in the Authorization header:
 ```
 Authorization: Bearer your_jwt_token_here
@@ -67,6 +74,7 @@ Built with modern technologies:
 - **FastAPI** - High-performance Python web framework
 - **SQLAlchemy** - Powerful ORM for database operations
 - **MindsDB** - AI/ML engine for model creation and predictions
+- **Google Gemini** - Advanced AI chat and natural language processing
 - **JWT** - Secure authentication and authorization
 - **Pydantic** - Data validation and serialization
 
@@ -126,6 +134,14 @@ tags_metadata = [
         },
     },
     {
+        "name": "data-sharing",
+        "description": "**Data sharing and AI chat**. Create shareable dataset links with AI chat capabilities powered by Gemini.",
+        "externalDocs": {
+            "description": "Data Sharing Guide",
+            "url": "https://github.com/your-org/ai-share-platform/docs/data-sharing",
+        },
+    },
+    {
         "name": "analytics",
         "description": "**Analytics and performance monitoring**. Track usage patterns, system performance, and generate comprehensive insights.",
         "externalDocs": {
@@ -147,6 +163,14 @@ tags_metadata = [
         "externalDocs": {
             "description": "Administrator Guide",
             "url": "https://github.com/your-org/ai-share-platform/docs/admin",
+        },
+    },
+    {
+        "name": "file-handler",
+        "description": "**File upload and MindsDB integration**. Upload files, process them with MindsDB, and manage file handlers for AI processing.",
+        "externalDocs": {
+            "description": "File Handler Guide",
+            "url": "https://github.com/your-org/ai-share-platform/docs/file-handler",
         },
     },
 ]
@@ -210,8 +234,10 @@ app.include_router(datasets.router, prefix="/api/datasets", tags=["datasets"])
 app.include_router(models.router, prefix="/api/models", tags=["models"])
 app.include_router(mindsdb.router, prefix="/api/mindsdb", tags=["ai-models"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
-app.include_router(analytics.router, prefix="/api", tags=["analytics"])
-app.include_router(data_access.router, prefix="/api", tags=["data-access"])
+app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
+app.include_router(data_access.router, prefix="/api/data-access", tags=["data-access"])
+app.include_router(data_sharing.router, prefix="/api/data-sharing", tags=["data-sharing"])
+app.include_router(file_handler.router, prefix="/api/files", tags=["file-handler"])
 
 @app.get(
     "/",

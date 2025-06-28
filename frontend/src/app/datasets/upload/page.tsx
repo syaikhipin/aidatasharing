@@ -65,35 +65,45 @@ function UploadDatasetContent() {
 
   const generatePreview = async (file: File) => {
     try {
-      const text = await file.text();
       const extension = file.name.split('.').pop()?.toLowerCase();
       
       let preview = null;
-      if (extension === 'csv') {
-        const lines = text.split('\n').slice(0, 6); // Header + 5 rows
-        const headers = lines[0]?.split(',') || [];
-        const rows = lines.slice(1).map(line => line.split(','));
-        
+      if (extension === 'pdf') {
         preview = {
-          type: 'csv',
-          headers,
-          rows: rows.filter(row => row.length === headers.length),
-          totalRows: text.split('\n').length - 1,
+          type: 'pdf',
+          totalRows: 'N/A (Document)',
           fileSize: file.size,
-          columns: headers.length
+          structure: 'document'
         };
-      } else if (extension === 'json') {
-        const jsonData = JSON.parse(text);
-        const isArray = Array.isArray(jsonData);
-        const sample = isArray ? jsonData.slice(0, 5) : [jsonData];
+      } else {
+        const text = await file.text();
         
-        preview = {
-          type: 'json',
-          sample,
-          totalRows: isArray ? jsonData.length : 1,
-          fileSize: file.size,
-          structure: isArray ? 'array' : 'object'
-        };
+        if (extension === 'csv') {
+          const lines = text.split('\n').slice(0, 6); // Header + 5 rows
+          const headers = lines[0]?.split(',') || [];
+          const rows = lines.slice(1).map(line => line.split(','));
+          
+          preview = {
+            type: 'csv',
+            headers,
+            rows: rows.filter(row => row.length === headers.length),
+            totalRows: text.split('\n').length - 1,
+            fileSize: file.size,
+            columns: headers.length
+          };
+        } else if (extension === 'json') {
+          const jsonData = JSON.parse(text);
+          const isArray = Array.isArray(jsonData);
+          const sample = isArray ? jsonData.slice(0, 5) : [jsonData];
+          
+          preview = {
+            type: 'json',
+            sample,
+            totalRows: isArray ? jsonData.length : 1,
+            fileSize: file.size,
+            structure: isArray ? 'array' : 'object'
+          };
+        }
       }
       
       setPreviewData(preview);
@@ -170,10 +180,10 @@ function UploadDatasetContent() {
                   <p className="mt-2 text-sm text-gray-600">
                     <span className="font-medium">Click to upload</span> or drag and drop
                   </p>
-                  <p className="text-xs text-gray-500">CSV, JSON, or Excel files up to 50MB</p>
+                  <p className="text-xs text-gray-500">CSV, JSON, Excel, or PDF files up to 50MB</p>
                   <input
                     type="file"
-                    accept=".csv,.json,.xlsx,.xls"
+                    accept=".csv,.json,.xlsx,.xls,.pdf"
                     onChange={(e) => e.target.files?.[0] && handleFileSelect(e.target.files[0])}
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                   />
@@ -258,6 +268,23 @@ function UploadDatasetContent() {
                       ... and {previewData.totalRows - 5} more rows
                     </p>
                   )}
+                </div>
+              )}
+
+              {previewData.type === 'pdf' && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex items-center space-x-3">
+                    <svg className="h-8 w-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                    </svg>
+                    <div>
+                      <h4 className="text-sm font-medium text-blue-900">PDF Document</h4>
+                      <p className="text-sm text-blue-700">
+                        PDF files can be used for document-based AI analysis and chat features.
+                        The content will be processed for AI interactions.
+                      </p>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

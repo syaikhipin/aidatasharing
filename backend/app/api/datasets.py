@@ -12,7 +12,11 @@ from app.schemas.dataset import (
     DatasetUpload, DatasetStats, DatasetAccessLog
 )
 from app.services.data_sharing import DataSharingService
+from app.services.mindsdb import mindsdb_service
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -187,10 +191,32 @@ async def delete_dataset(
             detail="Only dataset owner can delete"
         )
     
+    # Clean up ML models before deleting dataset
+    ml_cleanup_result = None
+    try:
+        logger.info(f"Cleaning up ML models for dataset {dataset_id}")
+        ml_cleanup_result = mindsdb_service.delete_dataset_models(dataset_id)
+        
+        if ml_cleanup_result.get("success"):
+            logger.info(f"ML models cleaned up successfully for dataset {dataset_id}")
+        else:
+            logger.warning(f"ML model cleanup failed for dataset {dataset_id}: {ml_cleanup_result.get('error')}")
+            
+    except Exception as e:
+        logger.error(f"Error cleaning up ML models for dataset {dataset_id}: {e}")
+        ml_cleanup_result = {
+            "success": False,
+            "error": str(e),
+            "message": "ML model cleanup failed but dataset will still be deleted"
+        }
+    
     db.delete(dataset)
     db.commit()
     
-    return {"message": "Dataset deleted successfully"}
+    return {
+        "message": "Dataset deleted successfully",
+        "ml_cleanup": ml_cleanup_result
+    }
 
 @router.post("/upload")
 async def upload_dataset_file(
@@ -216,10 +242,10 @@ async def upload_dataset_file(
         )
     
     file_extension = file.filename.split('.')[-1].lower()
-    if file_extension not in ['csv', 'json', 'xlsx']:
+    if file_extension not in ['csv', 'json', 'xlsx', 'xls', 'txt', 'pdf']:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported file type"
+            detail="Unsupported file type. Supported formats: CSV, JSON, Excel, TXT, PDF"
         )
     
     # Read file content
@@ -232,7 +258,16 @@ async def upload_dataset_file(
     dataset_name = name or file.filename.rsplit('.', 1)[0]
     
     # Determine dataset type
-    dataset_type = DatasetType.CSV if file_extension == 'csv' else DatasetType.JSON
+    if file_extension == 'csv':
+        dataset_type = DatasetType.CSV
+    elif file_extension == 'json':
+        dataset_type = DatasetType.JSON
+    elif file_extension in ['xlsx', 'xls']:
+        dataset_type = DatasetType.EXCEL
+    elif file_extension == 'pdf':
+        dataset_type = DatasetType.PDF
+    else:
+        dataset_type = DatasetType.CSV  # Default fallback
     
     # Create dataset record
     db_dataset = Dataset(
@@ -254,9 +289,34 @@ async def upload_dataset_file(
     db.commit()
     db.refresh(db_dataset)
     
+    # Automatically create ML models for this dataset
+    ml_model_result = None
+    try:
+        logger.info(f"Creating ML models for dataset {db_dataset.id}: {dataset_name}")
+        ml_model_result = mindsdb_service.create_dataset_ml_model(
+            dataset_id=db_dataset.id,
+            dataset_name=dataset_name,
+            dataset_type=dataset_type.value,
+            user_id=current_user.id
+        )
+        
+        if ml_model_result.get("success"):
+            logger.info(f"ML models created successfully for dataset {db_dataset.id}")
+        else:
+            logger.warning(f"ML model creation failed for dataset {db_dataset.id}: {ml_model_result.get('error')}")
+            
+    except Exception as e:
+        logger.error(f"Error creating ML models for dataset {db_dataset.id}: {e}")
+        ml_model_result = {
+            "success": False,
+            "error": str(e),
+            "message": "ML model creation failed but dataset was uploaded successfully"
+        }
+    
     return {
         "message": "Dataset uploaded successfully",
-        "dataset": db_dataset
+        "dataset": db_dataset,
+        "ml_models": ml_model_result
     }
 
 @router.get("/{dataset_id}/download")
@@ -338,4 +398,187 @@ async def get_dataset_stats(
         "sharing_level": dataset.sharing_level,
         "created_at": dataset.created_at,
         "last_accessed": dataset.last_accessed
-    } 
+    }
+
+@router.post("/{dataset_id}/chat")
+async def chat_with_dataset(
+    dataset_id: int,
+    message: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Chat with the AI model specifically trained for this dataset."""
+    # Check if dataset exists and user has access
+    data_service = DataSharingService(db)
+    
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Dataset not found"
+        )
+    
+    # Check access permissions
+    if not data_service.can_access_dataset(current_user, dataset):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied to this dataset"
+        )
+    
+    # Extract message
+    user_message = message.get("message", "")
+    
+    if not user_message:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Message is required"
+        )
+    
+    try:
+        # Use dataset-specific chat
+        response = mindsdb_service.chat_with_dataset(
+            dataset_id=dataset_id,
+            message=user_message,
+            model_type="chat"
+        )
+        
+        # Log the interaction
+        data_service.log_access(
+            user=current_user,
+            dataset=dataset,
+            access_type="ai_chat"
+        )
+        
+        return {
+            "dataset_id": dataset_id,
+            "dataset_name": dataset.name,
+            "question": user_message,
+            "model_type": "chat",
+            **response
+        }
+        
+    except Exception as e:
+        logger.error(f"Dataset chat failed for dataset {dataset_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Chat with dataset failed: {str(e)}"
+        )
+
+
+
+@router.get("/{dataset_id}/models")
+async def get_dataset_models(
+    dataset_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get information about ML models associated with this dataset."""
+    # Check if dataset exists and user has access
+    data_service = DataSharingService(db)
+    
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Dataset not found"
+        )
+    
+    # Check access permissions
+    if not data_service.can_access_dataset(current_user, dataset):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied to this dataset"
+        )
+    
+    try:
+        # Get model information from MindsDB
+        models_info = []
+        
+        # Check chat model
+        chat_model_name = f"dataset_{dataset_id}_chat_model"
+        
+        # Query MindsDB for model status
+        try:
+            models_query = f"SHOW MODELS WHERE name LIKE 'dataset_{dataset_id}_%';"
+            result = mindsdb_service.execute_query(models_query)
+            
+            if result.get('data'):
+                for model_data in result['data']:
+                    model_info = {
+                        "name": model_data[0] if len(model_data) > 0 else "unknown",
+                        "engine": model_data[1] if len(model_data) > 1 else "unknown",
+                        "status": model_data[5] if len(model_data) > 5 else "unknown",
+                        "predict": model_data[7] if len(model_data) > 7 else "unknown",
+                    }
+                    models_info.append(model_info)
+            
+        except Exception as e:
+            logger.warning(f"Could not fetch model status for dataset {dataset_id}: {e}")
+        
+        return {
+            "dataset_id": dataset_id,
+            "dataset_name": dataset.name,
+            "models": models_info,
+            "available_models": {
+                "chat_model": chat_model_name
+            },
+            "endpoints": {
+                "chat": f"/api/datasets/{dataset_id}/chat"
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get model info for dataset {dataset_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get model information: {str(e)}"
+        )
+
+@router.post("/{dataset_id}/recreate-models")
+async def recreate_dataset_models(
+    dataset_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Recreate ML models for this dataset (owner only)."""
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Dataset not found"
+        )
+    
+    # Only owner or superuser can recreate models
+    if dataset.owner_id != current_user.id and not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only dataset owner can recreate models"
+        )
+    
+    try:
+        # First, clean up existing models
+        logger.info(f"Recreating ML models for dataset {dataset_id}")
+        cleanup_result = mindsdb_service.delete_dataset_models(dataset_id)
+        
+        # Create new models
+        ml_model_result = mindsdb_service.create_dataset_ml_model(
+            dataset_id=dataset_id,
+            dataset_name=dataset.name,
+            dataset_type=dataset.type.value,
+            user_id=current_user.id
+        )
+        
+        return {
+            "message": "Dataset models recreated successfully",
+            "dataset_id": dataset_id,
+            "dataset_name": dataset.name,
+            "cleanup_result": cleanup_result,
+            "creation_result": ml_model_result
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to recreate models for dataset {dataset_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to recreate models: {str(e)}"
+        ) 
