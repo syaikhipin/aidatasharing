@@ -290,8 +290,13 @@ async def create_department(
             detail="Not enough permissions to create departments"
         )
     
-    dept.organization_id = organization_id
-    db_dept = Department(**dept.dict())
+    # Create Department model with organization_id set
+    db_dept = Department(
+        name=dept.name,
+        description=dept.description,
+        is_active=dept.is_active,
+        organization_id=organization_id
+    )
     db.add(db_dept)
     db.commit()
     db.refresh(db_dept)

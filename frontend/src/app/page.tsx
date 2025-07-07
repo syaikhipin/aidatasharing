@@ -4,19 +4,25 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 export default function Home() {
   const { isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    if (!isLoading && isAuthenticated) {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (mounted && !isLoading && isAuthenticated) {
       router.push('/dashboard');
     }
-  }, [isAuthenticated, isLoading, router]);
+  }, [mounted, isAuthenticated, isLoading, router]);
 
-  if (isLoading) {
+  // Show loading during SSR and initial client render
+  if (!mounted || isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
@@ -24,9 +30,15 @@ export default function Home() {
     );
   }
 
+  // Don't render content if authenticated (will redirect)
   if (isAuthenticated) {
-    return null; // Will redirect to dashboard
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
   }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
       <div className="container mx-auto px-4 py-16">

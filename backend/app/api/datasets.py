@@ -15,6 +15,7 @@ from app.services.data_sharing import DataSharingService
 from app.services.mindsdb import mindsdb_service
 import json
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -293,31 +294,72 @@ async def upload_dataset_file(
     ml_model_result = None
     try:
         logger.info(f"Creating ML models for dataset {db_dataset.id}: {dataset_name}")
-        ml_model_result = mindsdb_service.create_dataset_ml_model(
-            dataset_id=db_dataset.id,
-            dataset_name=dataset_name,
-            dataset_type=dataset_type.value,
-            user_id=current_user.id
-        )
         
-        if ml_model_result.get("success"):
-            logger.info(f"ML models created successfully for dataset {db_dataset.id}")
-        else:
-            logger.warning(f"ML model creation failed for dataset {db_dataset.id}: {ml_model_result.get('error')}")
+        # Try to create the ML model with retry logic
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                ml_model_result = mindsdb_service.create_dataset_ml_model(
+                    dataset_id=db_dataset.id,
+                    dataset_name=dataset_name,
+                    dataset_type=dataset_type.value
+                )
+                
+                if ml_model_result.get("success"):
+                    logger.info(f"ML models created successfully for dataset {db_dataset.id} on attempt {attempt + 1}")
+                    break
+                else:
+                    logger.warning(f"ML model creation failed for dataset {db_dataset.id} on attempt {attempt + 1}: {ml_model_result.get('error')}")
+                    if attempt == max_retries - 1:  # Last attempt
+                        logger.error(f"All attempts failed for ML model creation for dataset {db_dataset.id}")
+                    else:
+                        time.sleep(2)  # Wait before retry
+                        
+            except Exception as e:
+                logger.error(f"Exception during ML model creation attempt {attempt + 1} for dataset {db_dataset.id}: {e}")
+                if attempt == max_retries - 1:  # Last attempt
+                    ml_model_result = {
+                        "success": False,
+                        "error": str(e),
+                        "message": "ML model creation failed after all retry attempts"
+                    }
+                else:
+                    time.sleep(2)  # Wait before retry
             
     except Exception as e:
-        logger.error(f"Error creating ML models for dataset {db_dataset.id}: {e}")
+        logger.error(f"Error in ML model creation process for dataset {db_dataset.id}: {e}")
         ml_model_result = {
             "success": False,
             "error": str(e),
             "message": "ML model creation failed but dataset was uploaded successfully"
         }
     
-    return {
+    # Prepare comprehensive response
+    response_data = {
         "message": "Dataset uploaded successfully",
         "dataset": db_dataset,
         "ml_models": ml_model_result
     }
+
+    # Add helpful information about AI chat availability
+    if ml_model_result and ml_model_result.get("success"):
+        response_data["ai_chat_available"] = True
+        response_data["chat_model_name"] = ml_model_result.get("chat_model")
+        response_data["ai_features"] = {
+            "chat_enabled": True,
+            "model_ready": True,
+            "chat_endpoint": f"/api/datasets/{db_dataset.id}/chat"
+        }
+    else:
+        response_data["ai_chat_available"] = False
+        response_data["ai_features"] = {
+            "chat_enabled": False,
+            "model_ready": False,
+            "error": ml_model_result.get("error") if ml_model_result else "Unknown error",
+            "retry_endpoint": f"/api/datasets/{db_dataset.id}/recreate-models"
+        }
+    
+    return response_data
 
 @router.get("/{dataset_id}/download")
 async def download_dataset(
@@ -438,8 +480,7 @@ async def chat_with_dataset(
         # Use dataset-specific chat
         response = mindsdb_service.chat_with_dataset(
             dataset_id=dataset_id,
-            message=user_message,
-            model_type="chat"
+            message=user_message
         )
         
         # Log the interaction
@@ -463,8 +504,6 @@ async def chat_with_dataset(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Chat with dataset failed: {str(e)}"
         )
-
-
 
 @router.get("/{dataset_id}/models")
 async def get_dataset_models(
@@ -564,8 +603,7 @@ async def recreate_dataset_models(
         ml_model_result = mindsdb_service.create_dataset_ml_model(
             dataset_id=dataset_id,
             dataset_name=dataset.name,
-            dataset_type=dataset.type.value,
-            user_id=current_user.id
+            dataset_type=dataset.type.value
         )
         
         return {

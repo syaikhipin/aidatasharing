@@ -11,7 +11,7 @@ class DepartmentBase(BaseModel):
 
 
 class DepartmentCreate(DepartmentBase):
-    organization_id: int
+    pass  # organization_id is set automatically from URL parameter
 
 
 class DepartmentUpdate(BaseModel):

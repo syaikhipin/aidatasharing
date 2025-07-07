@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { 
   BarChart3, 
   TrendingUp, 
@@ -92,7 +93,7 @@ interface DateRange {
   label: string;
 }
 
-export default function AnalyticsPage() {
+function AnalyticsPageContent() {
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -817,5 +818,13 @@ export default function AnalyticsPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function AnalyticsPage() {
+  return (
+    <ProtectedRoute>
+      <AnalyticsPageContent />
+    </ProtectedRoute>
   );
 } 

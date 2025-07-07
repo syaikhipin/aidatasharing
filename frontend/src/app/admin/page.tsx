@@ -7,7 +7,7 @@ import { adminAPI } from '@/lib/api';
 
 export default function AdminPage() {
   return (
-    <ProtectedRoute requireAdmin={true}>
+    <ProtectedRoute requiredRole="admin">
       <AdminContent />
     </ProtectedRoute>
   );

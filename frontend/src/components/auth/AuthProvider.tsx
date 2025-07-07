@@ -36,42 +36,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
 
-  const fetchUser = async (authToken: string) => {
-    try {
-      // Store token temporarily for the API call
+  useEffect(() => {
+    const initializeAuth = async () => {
+      // Check if we're in the browser (client-side)
+      if (typeof window !== 'undefined') {
+        const storedToken = localStorage.getItem('access_token');
+        if (storedToken) {
+          setToken(storedToken);
+          try {
+            const user = await authAPI.getMe();
+            setUser(user);
+          } catch (error) {
+            console.error('Failed to fetch user on initial load:', error);
+            localStorage.removeItem('access_token');
+            setToken(null);
+            setUser(null);
+          }
+        }
+      }
+      setIsLoading(false);
+    };
+
+    initializeAuth();
+  }, []);
+
+  const login = async (authToken: string) => {
+    if (typeof window !== 'undefined') {
       localStorage.setItem('access_token', authToken);
+    }
+    setToken(authToken);
+    try {
       const user = await authAPI.getMe();
       setUser(user);
     } catch (error) {
-      console.error('Failed to fetch user:', error);
-      // Token might be invalid, remove it
-      localStorage.removeItem('access_token');
+      console.error('Failed to fetch user after login:', error);
+      // Clear auth state if getMe fails
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('access_token');
+      }
       setToken(null);
       setUser(null);
     }
   };
 
-  const login = async (authToken: string) => {
-    localStorage.setItem('access_token', authToken);
-    setToken(authToken);
-    await fetchUser(authToken);
-  };
-
   const logout = () => {
-    localStorage.removeItem('access_token');
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('access_token');
+    }
     setToken(null);
     setUser(null);
     router.push('/');
   };
-
-  useEffect(() => {
-    const storedToken = localStorage.getItem('access_token');
-    if (storedToken) {
-      setToken(storedToken);
-      fetchUser(storedToken);
-    }
-    setIsLoading(false);
-  }, []);
 
   const value: AuthContextType = {
     user,
@@ -79,7 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isLoading,
     login,
     logout,
-    isAuthenticated: !!token && !!user,
+    isAuthenticated: !isLoading && !!token && !!user,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

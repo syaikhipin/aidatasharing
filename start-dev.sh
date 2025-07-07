@@ -117,6 +117,7 @@ sleep 3
 
 # Start Frontend  
 echo "🎨 Starting Frontend (Next.js)..."
+echo "-" "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 cd "$ROOT_DIR/frontend"
 
 # Check if package.json exists
@@ -128,21 +129,70 @@ fi
 # Check if node_modules exists
 if [ ! -d "node_modules" ]; then
     echo "📦 Installing frontend dependencies..."
+    echo "   This may take a few minutes on first run..."
     npm install
+    if [ $? -eq 0 ]; then
+        echo "   ✅ Dependencies installed successfully"
+    else
+        echo "   ❌ Failed to install dependencies"
+        exit 1
+    fi
 fi
 
+echo "🚀 Launching Next.js development server..."
 npm run dev &
 FRONTEND_PID=$!
 echo "  ✅ Frontend started on http://localhost:3000 (PID: $FRONTEND_PID)"
+echo "  📱 Frontend Features:"
+echo "     🔐 User Authentication & Registration"
+echo "     🏢 Organization Management"
+echo "     📊 Dataset Upload & Management"
+echo "     🤖 AI Model Creation & Chat"
+echo "     📈 Analytics Dashboard"
+echo "     🔗 Data Sharing Interface"
+echo "     🛠️ Admin Panel"
+echo "-" "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 echo ""
-echo "🎉 Development environment is ready!"
-echo "🧠 MindsDB: http://127.0.0.1:47334"
-echo "📖 Backend API docs: http://localhost:8000/docs"
-echo "🌐 Frontend: http://localhost:3000"
-echo "👤 Default admin: admin@example.com / admin123"
+echo "🎉━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━🎉"
+echo "🚀 AI SHARE PLATFORM - DEVELOPMENT ENVIRONMENT READY!"
+echo "🎉━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━🎉"
 echo ""
-echo "Press Ctrl+C to stop all services..."
+echo "📍 SERVICE ENDPOINTS:"
+echo "   🧠 MindsDB Server:    http://127.0.0.1:47334"
+echo "   🔧 Backend API:       http://localhost:8000"
+echo "   📖 API Documentation: http://localhost:8000/docs"
+echo "   🔍 ReDoc:             http://localhost:8000/redoc"
+echo "   🌐 Frontend App:      http://localhost:3000"
+echo ""
+echo "🔑 DEFAULT CREDENTIALS:"
+echo "   👤 Admin User: admin@example.com"
+echo "   🔒 Password:   admin123"
+echo ""
+echo "📊 SYSTEM STATUS:"
+echo "   🧠 MindsDB:  $(if curl -s http://127.0.0.1:47334/api/status >/dev/null 2>&1; then echo "✅ Running"; else echo "⚠️ Check status"; fi)"
+echo "   🔧 Backend:  $(if curl -s http://localhost:8000/health >/dev/null 2>&1; then echo "✅ Running"; else echo "⚠️ Starting..."; fi)"
+echo "   🌐 Frontend: $(if curl -s http://localhost:3000 >/dev/null 2>&1; then echo "✅ Running"; else echo "⚠️ Starting..."; fi)"
+echo ""
+echo "🛠️ AVAILABLE FEATURES:"
+echo "   🔐 Multi-organization authentication"
+echo "   📊 Advanced dataset management"
+echo "   🤖 AI model creation with Gemini"
+echo "   💬 Dataset-specific AI chat"
+echo "   📈 Real-time analytics"
+echo "   🔗 Secure data sharing"
+echo "   🛠️ Administrative tools"
+echo ""
+echo "🎯 QUICK START:"
+echo "   1. Open http://localhost:3000 in your browser"
+echo "   2. Register a new account or use admin credentials"
+echo "   3. Create an organization"
+echo "   4. Upload a dataset"
+echo "   5. Chat with your data using AI!"
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "⚠️  Press Ctrl+C to stop all services gracefully"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Wait for all processes to complete (or be interrupted)
 wait $MINDSDB_PID $BACKEND_PID $FRONTEND_PID 

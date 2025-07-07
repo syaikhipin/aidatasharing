@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import auth, organizations, datasets, models, mindsdb, admin, analytics, data_access, data_sharing, file_handler
 from app.core.config import settings
+import logging
+from datetime import datetime
 
 # Enhanced API metadata and documentation
 description = """
@@ -175,6 +177,13 @@ tags_metadata = [
     },
 ]
 
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 # Enhanced FastAPI application with comprehensive metadata
 app = FastAPI(
     title="🤖 AI Share Platform API",
@@ -217,6 +226,12 @@ app = FastAPI(
     }
 )
 
+# Log startup information
+logger.info("🚀 Starting AI Share Platform API...")
+logger.info(f"📅 Startup time: {datetime.now().isoformat()}")
+logger.info(f"🌐 CORS origins: {settings.get_cors_origins()}")
+logger.info(f"🔗 MindsDB URL: {settings.MINDSDB_URL}")
+
 # Configure CORS with detailed settings
 app.add_middleware(
     CORSMiddleware,
@@ -228,6 +243,7 @@ app.add_middleware(
 )
 
 # Include API routers with enhanced organization
+logger.info("🔧 Registering API routes...")
 app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
 app.include_router(organizations.router, prefix="/api/organizations", tags=["organizations"])
 app.include_router(datasets.router, prefix="/api/datasets", tags=["datasets"])
@@ -238,6 +254,22 @@ app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"]
 app.include_router(data_access.router, prefix="/api/data-access", tags=["data-access"])
 app.include_router(data_sharing.router, prefix="/api/data-sharing", tags=["data-sharing"])
 app.include_router(file_handler.router, prefix="/api/files", tags=["file-handler"])
+logger.info("✅ All API routes registered successfully")
+
+@app.on_event("startup")
+async def startup_event():
+    """Application startup event handler."""
+    logger.info("🎉 AI Share Platform API has started successfully!")
+    logger.info("📖 API Documentation available at: /docs")
+    logger.info("🔍 ReDoc documentation available at: /redoc")
+    logger.info("🏥 Health check available at: /health")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Application shutdown event handler."""
+    logger.info("🛑 AI Share Platform API is shutting down...")
+    logger.info(f"📅 Shutdown time: {datetime.now().isoformat()}")
+    logger.info("👋 Goodbye!")
 
 @app.get(
     "/",
@@ -333,7 +365,7 @@ async def health_check():
     """
     return {
         "status": "healthy",
-        "timestamp": "2024-01-16T15:30:00Z",
+        "timestamp": datetime.now().isoformat(),
         "version": "2.0.0",
         "services": {
             "database": {
@@ -517,4 +549,31 @@ async def cors_test():
             "3": "Verify that preflight OPTIONS requests work",
             "4": "Test that credentials are passed correctly"
         }
-    } 
+    }
+
+if __name__ == "__main__":
+    import uvicorn
+    
+    logger.info("🚀 Starting AI Share Platform Backend Server...")
+    logger.info(f"📍 Server will be available at: http://localhost:8000")
+    logger.info(f"📖 API Documentation: http://localhost:8000/docs")
+    logger.info(f"🔍 ReDoc Documentation: http://localhost:8000/redoc")
+    logger.info("=" * 80)
+    
+    try:
+        uvicorn.run(
+            "main:app",
+            host="0.0.0.0",
+            port=8000,
+            reload=True,
+            log_level="info",
+            access_log=True,
+            use_colors=True,
+            reload_includes=["*.py"],
+            reload_excludes=["*.pyc", "__pycache__", "*.log"]
+        )
+    except KeyboardInterrupt:
+        logger.info("🛑 Server stopped by user")
+    except Exception as e:
+        logger.error(f"❌ Server startup failed: {e}")
+        raise 

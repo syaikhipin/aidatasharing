@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { 
   Search, 
   Filter, 
@@ -76,7 +77,7 @@ interface AuditLog {
   userAgent: string;
 }
 
-export default function DataAccessPage() {
+function DataAccessPageContent() {
   const [activeTab, setActiveTab] = useState<'browse' | 'requests' | 'audit'>('browse');
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [accessRequests, setAccessRequests] = useState<AccessRequest[]>([]);
@@ -915,5 +916,13 @@ export default function DataAccessPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function DataAccessPage() {
+  return (
+    <ProtectedRoute>
+      <DataAccessPageContent />
+    </ProtectedRoute>
   );
 } 

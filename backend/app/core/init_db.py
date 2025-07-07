@@ -15,8 +15,8 @@ import sys
 import os
 
 # Add database path for migration manager
-sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "database"))
-from migration_manager import MigrationManager
+# sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "database"))
+# from migration_manager import MigrationManager
 
 logger = logging.getLogger(__name__)
 
@@ -32,22 +32,22 @@ def init_db():
     Base.metadata.create_all(bind=engine)
     
     # Run migrations using the migration manager
-    try:
-        logger.info("Running database migrations...")
-        migration_manager = MigrationManager()
-        result = migration_manager.migrate()
+    # try:
+    #     logger.info("Running database migrations...")
+    #     migration_manager = MigrationManager()
+    #     result = migration_manager.migrate()
         
-        if result["status"] == "success":
-            if result["executed"]:
-                logger.info(f"Executed {len(result['executed'])} migrations: {result['executed']}")
-            else:
-                logger.info("All migrations are up to date")
-        else:
-            logger.warning(f"Migration partially failed: {result['message']}")
+    #     if result["status"] == "success":
+    #         if result["executed"]:
+    #             logger.info(f"Executed {len(result['executed'])} migrations: {result['executed']}")
+    #         else:
+    #             logger.info("All migrations are up to date")
+    #     else:
+    #         logger.warning(f"Migration partially failed: {result['message']}")
             
-    except Exception as e:
-        logger.warning(f"Migration system failed: {e}")
-        # Continue anyway as this is non-critical
+    # except Exception as e:
+    #     logger.warning(f"Migration system failed: {e}")
+    #     # Continue anyway as this is non-critical
     
     # Create session
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

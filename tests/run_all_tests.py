@@ -117,6 +117,40 @@ def run_frontend_tests() -> Dict[str, Any]:
         print(f"❌ Frontend tests failed: {e}")
         return {"error": f"Frontend test execution failed: {e}"}
 
+def run_gemini_sdk_tests() -> Dict[str, Any]:
+    """Run Gemini SDK integration tests"""
+    print("\n🧠 Running Gemini SDK Integration Tests")
+    print("=" * 50)
+    
+    try:
+        # Import and run Gemini SDK tests
+        sys.path.append('tests')
+        from test_gemini_sdk_integration import GeminiSDKIntegrationTest
+        
+        test_suite = GeminiSDKIntegrationTest()
+        success = test_suite.run_all_tests()
+        
+        # Return results in consistent format
+        results = test_suite.test_results
+        return {
+            "total": results["total_tests"],
+            "passed": results["passed"],
+            "failed": results["failed"],
+            "success": success,
+            "details": results["test_details"],
+            "errors": results["errors"]
+        }
+        
+    except Exception as e:
+        print(f"❌ Gemini SDK tests failed: {e}")
+        return {
+            "total": 1,
+            "passed": 0,
+            "failed": 1,
+            "success": False,
+            "errors": [f"Gemini SDK test execution failed: {e}"]
+        }
+
 def run_integration_tests() -> Dict[str, Any]:
     """Run integration tests that test full workflows"""
     print("\n🔄 Running Integration Tests")
@@ -281,6 +315,14 @@ def main():
     except Exception as e:
         print(f"⚠️ Frontend tests skipped: {e}")
         all_results["frontend"] = {"error": f"Skipped: {e}"}
+    
+    # Gemini SDK tests
+    try:
+        gemini_results = run_gemini_sdk_tests()
+        all_results["gemini_sdk"] = gemini_results
+    except Exception as e:
+        print(f"⚠️ Gemini SDK tests skipped: {e}")
+        all_results["gemini_sdk"] = {"error": f"Skipped: {e}"}
     
     # Integration tests
     integration_results = run_integration_tests()
