@@ -1,8 +1,9 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Enum, JSON, Float
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Enum, JSON, Float, Index
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
-from app.models.user import Base
+import uuid
+from app.core.database import Base
 
 
 class ActivityType(str, enum.Enum):
@@ -180,4 +181,255 @@ class ModelPerformanceLog(Base):
 
     # Relationships
     model = relationship("DatasetModel")
-    organization = relationship("Organization") 
+    organization = relationship("Organization")
+
+
+class DatasetAccess(Base):
+    """Track dataset access and interaction events"""
+    __tablename__ = "dataset_access"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    access_id = Column(String, unique=True, default=lambda: str(uuid.uuid4()), index=True)
+    
+    # What was accessed
+    dataset_id = Column(Integer, ForeignKey("datasets.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Null for anonymous access
+    session_id = Column(String, nullable=True)  # For anonymous sessions
+    
+    # Access details
+    access_type = Column(String, nullable=False)  # 'view', 'download', 'chat', 'share', 'api_call'
+    access_method = Column(String, nullable=True)  # 'web', 'api', 'public_link', 'direct'
+    
+    # Technical details
+    ip_address = Column(String, nullable=True)
+    user_agent = Column(Text, nullable=True)
+    referer = Column(String, nullable=True)
+    
+    # Timing
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    duration_seconds = Column(Float, nullable=True)  # How long the session lasted
+    
+    # Content details
+    content_preview = Column(Text, nullable=True)  # What content was accessed
+    query_text = Column(Text, nullable=True)  # For chat interactions
+    
+    # Context
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
+    
+    # Success/Error tracking
+    success = Column(Boolean, default=True)
+    error_message = Column(Text, nullable=True)
+    
+    # Relationships
+    dataset = relationship("Dataset")
+    user = relationship("User")
+    organization = relationship("Organization")
+    
+    # Indexes for performance
+    __table_args__ = (
+        Index('idx_dataset_access_timestamp', 'dataset_id', 'timestamp'),
+        Index('idx_dataset_access_type', 'access_type', 'timestamp'),
+        Index('idx_dataset_access_user', 'user_id', 'timestamp'),
+        Index('idx_dataset_access_org', 'organization_id', 'timestamp'),
+    )
+
+
+class DatasetDownload(Base):
+    """Track dataset downloads specifically"""
+    __tablename__ = "dataset_downloads"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    download_id = Column(String, unique=True, default=lambda: str(uuid.uuid4()), index=True)
+    
+    # What was downloaded
+    dataset_id = Column(Integer, ForeignKey("datasets.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    # Download details
+    file_format = Column(String, nullable=False)  # 'csv', 'json', 'pdf', 'original'
+    file_size_bytes = Column(Integer, nullable=True)
+    download_method = Column(String, nullable=False)  # 'direct', 'api', 'share_link'
+    
+    # Technical details
+    ip_address = Column(String, nullable=True)
+    user_agent = Column(Text, nullable=True)
+    
+    # Timing
+    started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+    duration_seconds = Column(Float, nullable=True)
+    
+    # Success tracking
+    success = Column(Boolean, default=True)
+    bytes_transferred = Column(Integer, nullable=True)
+    error_message = Column(Text, nullable=True)
+    
+    # Context
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
+    share_token = Column(String, nullable=True)  # If downloaded via share link
+    
+    # Relationships
+    dataset = relationship("Dataset")
+    user = relationship("User")
+    organization = relationship("Organization")
+
+
+class ChatInteraction(Base):
+    """Track AI chat interactions with datasets"""
+    __tablename__ = "chat_interactions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    interaction_id = Column(String, unique=True, default=lambda: str(uuid.uuid4()), index=True)
+    
+    # What was chatted with
+    dataset_id = Column(Integer, ForeignKey("datasets.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    session_id = Column(String, nullable=True)
+    
+    # Chat details
+    user_message = Column(Text, nullable=False)
+    ai_response = Column(Text, nullable=True)
+    llm_provider = Column(String, nullable=True)  # 'gemini', 'openai', etc.
+    llm_model = Column(String, nullable=True)     # 'gemini-pro', 'gpt-4', etc.
+    
+    # Technical metrics
+    tokens_used = Column(Integer, nullable=True)
+    response_time_seconds = Column(Float, nullable=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    
+    # Context
+    ip_address = Column(String, nullable=True)
+    user_agent = Column(Text, nullable=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
+    
+    # Success tracking
+    success = Column(Boolean, default=True)
+    error_message = Column(Text, nullable=True)
+    
+    # Relationships
+    dataset = relationship("Dataset")
+    user = relationship("User")
+    organization = relationship("Organization")
+
+
+class APIUsage(Base):
+    """Track API endpoint usage and performance"""
+    __tablename__ = "api_usage"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    request_id = Column(String, unique=True, default=lambda: str(uuid.uuid4()), index=True)
+    
+    # Request details
+    endpoint = Column(String, nullable=False)
+    method = Column(String, nullable=False)  # GET, POST, PUT, DELETE
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    # Technical details
+    ip_address = Column(String, nullable=True)
+    user_agent = Column(Text, nullable=True)
+    
+    # Performance metrics
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    response_time_ms = Column(Float, nullable=True)
+    status_code = Column(Integer, nullable=True)
+    
+    # Resource usage
+    dataset_id = Column(Integer, ForeignKey("datasets.id"), nullable=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
+    
+    # Request/Response details
+    request_size_bytes = Column(Integer, nullable=True)
+    response_size_bytes = Column(Integer, nullable=True)
+    error_message = Column(Text, nullable=True)
+    
+    # Relationships
+    user = relationship("User")
+    dataset = relationship("Dataset")
+    organization = relationship("Organization")
+
+
+class UsageStats(Base):
+    """Aggregated usage statistics for efficient dashboard queries"""
+    __tablename__ = "usage_stats"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Aggregation period
+    date = Column(DateTime, nullable=False)
+    period_type = Column(String, nullable=False)  # 'hour', 'day', 'week', 'month'
+    
+    # What the stats are about
+    dataset_id = Column(Integer, ForeignKey("datasets.id"), nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
+    
+    # Aggregated metrics
+    total_views = Column(Integer, default=0)
+    total_downloads = Column(Integer, default=0)
+    total_chats = Column(Integer, default=0)
+    total_api_calls = Column(Integer, default=0)
+    total_shares = Column(Integer, default=0)
+    
+    # Performance metrics
+    avg_response_time_ms = Column(Float, nullable=True)
+    total_tokens_used = Column(Integer, default=0)
+    total_bytes_transferred = Column(Integer, default=0)
+    
+    # User engagement
+    unique_users = Column(Integer, default=0)
+    unique_sessions = Column(Integer, default=0)
+    avg_session_duration = Column(Float, nullable=True)
+    
+    # Success rates
+    success_rate = Column(Float, nullable=True)  # Percentage
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    dataset = relationship("Dataset")
+    user = relationship("User")
+    organization = relationship("Organization")
+    
+    # Indexes for efficient aggregation queries
+    __table_args__ = (
+        Index('idx_usage_stats_date_period', 'date', 'period_type'),
+        Index('idx_usage_stats_dataset_date', 'dataset_id', 'date'),
+        Index('idx_usage_stats_org_date', 'organization_id', 'date'),
+    )
+
+
+class SystemMetrics(Base):
+    """Track overall system performance and health metrics"""
+    __tablename__ = "system_metrics"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Timing
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    
+    # System performance
+    cpu_usage_percent = Column(Float, nullable=True)
+    memory_usage_percent = Column(Float, nullable=True)
+    disk_usage_percent = Column(Float, nullable=True)
+    
+    # Database metrics
+    active_connections = Column(Integer, nullable=True)
+    total_datasets = Column(Integer, nullable=True)
+    total_users = Column(Integer, nullable=True)
+    total_organizations = Column(Integer, nullable=True)
+    
+    # Application metrics
+    active_sessions = Column(Integer, nullable=True)
+    requests_per_minute = Column(Float, nullable=True)
+    avg_response_time_ms = Column(Float, nullable=True)
+    
+    # Storage metrics
+    total_storage_bytes = Column(Integer, nullable=True)
+    available_storage_bytes = Column(Integer, nullable=True)
+    
+    # MindsDB metrics
+    mindsdb_health = Column(String, nullable=True)  # 'healthy', 'degraded', 'error'
+    mindsdb_response_time_ms = Column(Float, nullable=True) 

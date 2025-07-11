@@ -12,6 +12,7 @@ class DatasetBase(BaseModel):
     sharing_level: DataSharingLevel = DataSharingLevel.PRIVATE
     source_url: Optional[str] = None
     connection_params: Optional[Dict[str, Any]] = None
+    connector_id: Optional[int] = None
     schema_info: Optional[Dict[str, Any]] = None
     allow_download: bool = True
     allow_api_access: bool = True
@@ -33,6 +34,7 @@ class DatasetUpdate(BaseModel):
     description: Optional[str] = None
     sharing_level: Optional[DataSharingLevel] = None
     department_id: Optional[int] = None
+    connector_id: Optional[int] = None
     allow_download: Optional[bool] = None
     allow_api_access: Optional[bool] = None
     schema_info: Optional[Dict[str, Any]] = None
@@ -53,6 +55,7 @@ class DatasetResponse(DatasetBase):
     owner_id: int
     organization_id: int
     department_id: Optional[int] = None
+    connector_id: Optional[int] = None
     size_bytes: Optional[int] = None
     row_count: Optional[int] = None
     column_count: Optional[int] = None

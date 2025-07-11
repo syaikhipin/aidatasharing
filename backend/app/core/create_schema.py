@@ -11,7 +11,8 @@ from app.core.auth import get_password_hash
 import logging
 
 # Import all models to ensure they are registered with SQLAlchemy
-from app.models.user import Base, User
+from app.models.user import User
+from app.core.database import Base
 from app.models.organization import Organization, Department, OrganizationType, DataSharingLevel
 from app.models.config import Configuration
 from app.models.dataset import (

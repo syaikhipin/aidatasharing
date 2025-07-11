@@ -1,18 +1,28 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, and_, or_
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from pydantic import BaseModel
+import json
 
 from app.core.database import get_db
+from app.core.auth import get_current_user
 from app.models.user import User
 from app.models.organization import Organization
 from app.models.dataset import Dataset
-from app.models.analytics import ActivityLog, UsageMetric, DatashareStats, UserSessionLog, ModelPerformanceLog
-from app.core.auth import get_current_user
+from app.models.analytics import (
+    ActivityLog, UsageMetric, DatashareStats, UserSessionLog, ModelPerformanceLog,
+    DatasetAccess, DatasetDownload, ChatInteraction, 
+    APIUsage, UsageStats, SystemMetrics
+)
+from app.services.analytics import analytics_service
+from app.schemas.analytics import (
+    DatasetAnalyticsResponse, OrganizationAnalyticsResponse,
+    UsageStatsResponse, SystemMetricsResponse
+)
 
-router = APIRouter()
+router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
 # Analytics Response Models
 class OrganizationStatsResponse(BaseModel):
@@ -552,4 +562,434 @@ async def get_model_performance_endpoint(
             last_updated="2024-01-14T09:15:00Z",
             status="good"
         )
-    ] 
+    ]
+
+@router.post("/log/dataset-access")
+async def log_dataset_access(
+    dataset_id: int,
+    access_type: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(get_current_user),
+    session_id: Optional[str] = None,
+    access_method: str = "web",
+    content_preview: Optional[str] = None,
+    query_text: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Log dataset access event"""
+    try:
+        # Verify dataset exists and user has access
+        dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+        if not dataset:
+            raise HTTPException(status_code=404, detail="Dataset not found")
+        
+        # Log the access in background
+        background_tasks.add_task(
+            analytics_service.log_dataset_access,
+            dataset_id=dataset_id,
+            access_type=access_type,
+            user_id=user.id if user else None,
+            session_id=session_id,
+            request=request,
+            access_method=access_method,
+            content_preview=content_preview,
+            query_text=query_text,
+            organization_id=dataset.organization_id
+        )
+        
+        return {"status": "logged", "dataset_id": dataset_id, "access_type": access_type}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error logging access: {str(e)}")
+
+@router.post("/log/dataset-download")
+async def log_dataset_download(
+    dataset_id: int,
+    file_format: str,
+    download_method: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(get_current_user),
+    file_size_bytes: Optional[int] = None,
+    success: bool = True,
+    share_token: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Log dataset download event"""
+    try:
+        # Verify dataset exists
+        dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+        if not dataset:
+            raise HTTPException(status_code=404, detail="Dataset not found")
+        
+        # Log the download in background
+        background_tasks.add_task(
+            analytics_service.log_dataset_download,
+            dataset_id=dataset_id,
+            file_format=file_format,
+            download_method=download_method,
+            user_id=user.id if user else None,
+            request=request,
+            file_size_bytes=file_size_bytes,
+            success=success,
+            share_token=share_token,
+            organization_id=dataset.organization_id
+        )
+        
+        return {"status": "logged", "dataset_id": dataset_id, "download_method": download_method}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error logging download: {str(e)}")
+
+@router.post("/log/chat-interaction")
+async def log_chat_interaction(
+    dataset_id: int,
+    user_message: str,
+    ai_response: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(get_current_user),
+    session_id: Optional[str] = None,
+    llm_provider: Optional[str] = None,
+    llm_model: Optional[str] = None,
+    tokens_used: Optional[int] = None,
+    response_time_seconds: Optional[float] = None,
+    success: bool = True,
+    db: Session = Depends(get_db)
+):
+    """Log AI chat interaction"""
+    try:
+        # Verify dataset exists
+        dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+        if not dataset:
+            raise HTTPException(status_code=404, detail="Dataset not found")
+        
+        # Log the interaction in background
+        background_tasks.add_task(
+            analytics_service.log_chat_interaction,
+            dataset_id=dataset_id,
+            user_message=user_message,
+            ai_response=ai_response,
+            user_id=user.id if user else None,
+            session_id=session_id,
+            request=request,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            tokens_used=tokens_used,
+            response_time_seconds=response_time_seconds,
+            success=success,
+            organization_id=dataset.organization_id
+        )
+        
+        return {"status": "logged", "dataset_id": dataset_id, "interaction_logged": True}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error logging chat: {str(e)}")
+
+@router.get("/dataset/{dataset_id}", response_model=DatasetAnalyticsResponse)
+async def get_dataset_analytics(
+    dataset_id: int,
+    start_date: Optional[datetime] = Query(None, description="Start date for analytics (defaults to 30 days ago)"),
+    end_date: Optional[datetime] = Query(None, description="End date for analytics (defaults to now)"),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get comprehensive analytics for a specific dataset"""
+    try:
+        # Verify dataset exists and user has access
+        dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+        if not dataset:
+            raise HTTPException(status_code=404, detail="Dataset not found")
+        
+        # Check if user has access to this dataset
+        if user.role != "admin" and dataset.organization_id != user.organization_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        analytics = await analytics_service.get_dataset_analytics(
+            dataset_id=dataset_id,
+            start_date=start_date,
+            end_date=end_date,
+            organization_id=user.organization_id if user.role != "admin" else None
+        )
+        
+        return analytics
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting analytics: {str(e)}")
+
+@router.get("/organization/{organization_id}", response_model=OrganizationAnalyticsResponse)
+async def get_organization_analytics(
+    organization_id: int,
+    start_date: Optional[datetime] = Query(None, description="Start date for analytics"),
+    end_date: Optional[datetime] = Query(None, description="End date for analytics"),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get comprehensive analytics for an organization"""
+    try:
+        # Check if user has access to this organization
+        if user.role != "admin" and user.organization_id != organization_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        # Verify organization exists
+        org = db.query(Organization).filter(Organization.id == organization_id).first()
+        if not org:
+            raise HTTPException(status_code=404, detail="Organization not found")
+        
+        analytics = await analytics_service.get_organization_analytics(
+            organization_id=organization_id,
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        return analytics
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting organization analytics: {str(e)}")
+
+@router.get("/dashboard/overview")
+async def get_dashboard_overview(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get overview analytics for dashboard"""
+    try:
+        # Get date ranges
+        now = datetime.utcnow()
+        last_24h = now - timedelta(hours=24)
+        last_7d = now - timedelta(days=7)
+        last_30d = now - timedelta(days=30)
+        
+        # Base query filters
+        base_filters = []
+        if user.role != "admin":
+            base_filters.append(DatasetAccess.organization_id == user.organization_id)
+        
+        # 24 hour metrics
+        accesses_24h = db.query(DatasetAccess).filter(
+            DatasetAccess.timestamp >= last_24h,
+            *base_filters
+        ).count()
+        
+        downloads_24h = db.query(DatasetDownload).filter(
+            DatasetDownload.started_at >= last_24h,
+            *([DatasetDownload.organization_id == user.organization_id] if user.role != "admin" else [])
+        ).count()
+        
+        chats_24h = db.query(ChatInteraction).filter(
+            ChatInteraction.timestamp >= last_24h,
+            *([ChatInteraction.organization_id == user.organization_id] if user.role != "admin" else [])
+        ).count()
+        
+        # 7 day metrics
+        accesses_7d = db.query(DatasetAccess).filter(
+            DatasetAccess.timestamp >= last_7d,
+            *base_filters
+        ).count()
+        
+        # Most active datasets (last 7 days)
+        top_datasets_query = db.query(
+            DatasetAccess.dataset_id,
+            Dataset.name,
+            func.count(DatasetAccess.id).label('access_count')
+        ).join(Dataset).filter(
+            DatasetAccess.timestamp >= last_7d,
+            *base_filters
+        ).group_by(DatasetAccess.dataset_id, Dataset.name).order_by(
+            func.count(DatasetAccess.id).desc()
+        ).limit(5)
+        
+        top_datasets = top_datasets_query.all()
+        
+        # Recent activity
+        recent_activity = db.query(DatasetAccess).filter(
+            *base_filters
+        ).order_by(DatasetAccess.timestamp.desc()).limit(10).all()
+        
+        return {
+            "last_24_hours": {
+                "total_accesses": accesses_24h,
+                "total_downloads": downloads_24h,
+                "total_chats": chats_24h
+            },
+            "last_7_days": {
+                "total_accesses": accesses_7d
+            },
+            "top_datasets": [
+                {
+                    "dataset_id": row.dataset_id,
+                    "name": row.name,
+                    "access_count": row.access_count
+                }
+                for row in top_datasets
+            ],
+            "recent_activity": [
+                {
+                    "access_id": activity.access_id,
+                    "dataset_id": activity.dataset_id,
+                    "access_type": activity.access_type,
+                    "timestamp": activity.timestamp.isoformat(),
+                    "user_id": activity.user_id
+                }
+                for activity in recent_activity
+            ]
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting dashboard overview: {str(e)}")
+
+@router.get("/real-time/activity")
+async def get_real_time_activity(
+    user: User = Depends(get_current_user),
+    limit: int = Query(20, description="Number of recent activities to return"),
+    db: Session = Depends(get_db)
+):
+    """Get real-time activity feed"""
+    try:
+        # Base query filters
+        base_filters = []
+        if user.role != "admin":
+            base_filters.append(DatasetAccess.organization_id == user.organization_id)
+        
+        # Get recent activities
+        activities = db.query(DatasetAccess).filter(
+            *base_filters
+        ).order_by(DatasetAccess.timestamp.desc()).limit(limit).all()
+        
+        return {
+            "activities": [
+                {
+                    "access_id": activity.access_id,
+                    "dataset_id": activity.dataset_id,
+                    "access_type": activity.access_type,
+                    "timestamp": activity.timestamp.isoformat(),
+                    "user_id": activity.user_id,
+                    "ip_address": activity.ip_address,
+                    "success": activity.success
+                }
+                for activity in activities
+            ],
+            "total_count": len(activities),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting real-time activity: {str(e)}")
+
+@router.get("/system/metrics")
+async def get_system_metrics(
+    user: User = Depends(get_current_user),
+    hours: int = Query(24, description="Number of hours of metrics to retrieve"),
+    db: Session = Depends(get_db)
+):
+    """Get system performance metrics (admin only)"""
+    try:
+        if user.role != "admin":
+            raise HTTPException(status_code=403, detail="Admin access required")
+        
+        start_time = datetime.utcnow() - timedelta(hours=hours)
+        
+        metrics = db.query(SystemMetrics).filter(
+            SystemMetrics.timestamp >= start_time
+        ).order_by(SystemMetrics.timestamp.desc()).all()
+        
+        return {
+            "metrics": [
+                {
+                    "timestamp": metric.timestamp.isoformat(),
+                    "cpu_usage_percent": metric.cpu_usage_percent,
+                    "memory_usage_percent": metric.memory_usage_percent,
+                    "disk_usage_percent": metric.disk_usage_percent,
+                    "total_datasets": metric.total_datasets,
+                    "total_users": metric.total_users,
+                    "total_organizations": metric.total_organizations,
+                    "mindsdb_health": metric.mindsdb_health
+                }
+                for metric in metrics
+            ],
+            "period_hours": hours,
+            "total_records": len(metrics)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting system metrics: {str(e)}")
+
+@router.post("/system/record-metrics")
+async def record_system_metrics(
+    background_tasks: BackgroundTasks,
+    user: User = Depends(get_current_user)
+):
+    """Manually trigger system metrics recording (admin only)"""
+    try:
+        if user.role != "admin":
+            raise HTTPException(status_code=403, detail="Admin access required")
+        
+        background_tasks.add_task(analytics_service.record_system_metrics)
+        
+        return {"status": "metrics_recording_scheduled"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error scheduling metrics recording: {str(e)}")
+
+@router.get("/export/dataset/{dataset_id}")
+async def export_dataset_analytics(
+    dataset_id: int,
+    format: str = Query("json", description="Export format: json, csv"),
+    start_date: Optional[datetime] = Query(None),
+    end_date: Optional[datetime] = Query(None),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Export dataset analytics data"""
+    try:
+        # Verify dataset access
+        dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+        if not dataset:
+            raise HTTPException(status_code=404, detail="Dataset not found")
+        
+        if user.role != "admin" and dataset.organization_id != user.organization_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        # Get analytics data
+        analytics = await analytics_service.get_dataset_analytics(
+            dataset_id=dataset_id,
+            start_date=start_date,
+            end_date=end_date,
+            organization_id=user.organization_id if user.role != "admin" else None
+        )
+        
+        if format.lower() == "csv":
+            # Convert to CSV format
+            import csv
+            import io
+            
+            output = io.StringIO()
+            writer = csv.writer(output)
+            
+            # Write headers
+            writer.writerow(['metric', 'value'])
+            
+            # Write summary data
+            for key, value in analytics.get('summary', {}).items():
+                writer.writerow([key, value])
+            
+            csv_data = output.getvalue()
+            output.close()
+            
+            return {"data": csv_data, "format": "csv"}
+        
+        return {"data": analytics, "format": "json"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error exporting analytics: {str(e)}") 

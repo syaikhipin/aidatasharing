@@ -1,9 +1,7 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
-
-Base = declarative_base()
+from app.core.database import Base
 
 
 class User(Base):
@@ -28,4 +26,4 @@ class User(Base):
     # Relationships
     organization = relationship("Organization", back_populates="users")
     department = relationship("Department", back_populates="users")
-    owned_datasets = relationship("Dataset", back_populates="owner") 
+    owned_datasets = relationship("Dataset", back_populates="owner", foreign_keys="Dataset.owner_id") 

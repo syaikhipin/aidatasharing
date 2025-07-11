@@ -27,6 +27,8 @@ async def get_datasets(
     limit: int = 100,
     sharing_level: Optional[DataSharingLevel] = None,
     dataset_type: Optional[DatasetType] = None,
+    include_inactive: bool = False,
+    include_deleted: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -38,10 +40,21 @@ async def get_datasets(
     data_service = DataSharingService(db)
     datasets = data_service.get_accessible_datasets(
         user=current_user,
-        sharing_level=sharing_level
+        sharing_level=sharing_level,
+        include_inactive=include_inactive,
+        include_deleted=include_deleted
     )
     
-    return datasets
+    # Apply additional filters
+    filtered_datasets = []
+    for dataset in datasets:
+        # Filter by type if specified
+        if dataset_type and dataset.type != dataset_type:
+            continue
+        filtered_datasets.append(dataset)
+    
+    # Apply pagination
+    return filtered_datasets[skip:skip + limit]
 
 @router.post("/", response_model=DatasetResponse, status_code=201)
 async def create_dataset(
@@ -94,6 +107,7 @@ async def create_dataset(
         department_id=current_user.department_id,
         sharing_level=sharing_level,
         source_url=dataset_data.get("source_url"),
+        connector_id=dataset_data.get("connector_id"),
         schema_info=schema_info if schema_info else None,
         allow_download=True,
         allow_api_access=True,
@@ -174,49 +188,125 @@ async def update_dataset(
 @router.delete("/{dataset_id}")
 async def delete_dataset(
     dataset_id: int,
+    force_delete: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Delete a dataset (only owner can delete)."""
-    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    """Soft delete a dataset (only owner can delete). Use force_delete=true for hard delete."""
+    dataset = db.query(Dataset).filter(
+        Dataset.id == dataset_id,
+        Dataset.is_deleted == False
+    ).first()
+    
     if not dataset:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Dataset not found"
+            detail="Dataset not found or already deleted"
         )
     
-    # Only owner or superuser can delete
+    # Check if user is owner or admin
     if dataset.owner_id != current_user.id and not current_user.is_superuser:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only dataset owner can delete"
+            detail="Can only delete your own datasets"
         )
     
-    # Clean up ML models before deleting dataset
-    ml_cleanup_result = None
+    # Clean up associated ML models first
     try:
-        logger.info(f"Cleaning up ML models for dataset {dataset_id}")
         ml_cleanup_result = mindsdb_service.delete_dataset_models(dataset_id)
-        
-        if ml_cleanup_result.get("success"):
-            logger.info(f"ML models cleaned up successfully for dataset {dataset_id}")
-        else:
-            logger.warning(f"ML model cleanup failed for dataset {dataset_id}: {ml_cleanup_result.get('error')}")
-            
+        logger.info(f"ML models cleanup result: {ml_cleanup_result}")
     except Exception as e:
-        logger.error(f"Error cleaning up ML models for dataset {dataset_id}: {e}")
-        ml_cleanup_result = {
-            "success": False,
-            "error": str(e),
-            "message": "ML model cleanup failed but dataset will still be deleted"
-        }
+        logger.warning(f"ML models cleanup failed: {e}")
     
-    db.delete(dataset)
+    if force_delete and current_user.is_superuser:
+        # Hard delete (only for superusers)
+        db.delete(dataset)
+        db.commit()
+        return {
+            "message": "Dataset permanently deleted",
+            "dataset_id": dataset_id,
+            "deletion_type": "hard"
+        }
+    else:
+        # Soft delete
+        dataset.soft_delete(current_user.id)
+        db.commit()
+        return {
+            "message": "Dataset deleted successfully",
+            "dataset_id": dataset_id,
+            "deletion_type": "soft",
+            "deleted_at": dataset.deleted_at
+        }
+
+
+@router.patch("/{dataset_id}/activate")
+async def activate_dataset(
+    dataset_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Activate a dataset."""
+    dataset = db.query(Dataset).filter(
+        Dataset.id == dataset_id,
+        Dataset.is_deleted == False
+    ).first()
+    
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Dataset not found or deleted"
+        )
+    
+    # Check permissions
+    data_service = DataSharingService(db)
+    if not data_service.can_access_dataset(current_user, dataset) and not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied to this dataset"
+        )
+    
+    dataset.activate()
     db.commit()
     
     return {
-        "message": "Dataset deleted successfully",
-        "ml_cleanup": ml_cleanup_result
+        "message": "Dataset activated successfully",
+        "dataset_id": dataset_id,
+        "status": dataset.status
+    }
+
+
+@router.patch("/{dataset_id}/deactivate")
+async def deactivate_dataset(
+    dataset_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Deactivate a dataset."""
+    dataset = db.query(Dataset).filter(
+        Dataset.id == dataset_id,
+        Dataset.is_deleted == False
+    ).first()
+    
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Dataset not found or deleted"
+        )
+    
+    # Check if user is owner or admin
+    if dataset.owner_id != current_user.id and not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Can only deactivate your own datasets"
+        )
+    
+    dataset.deactivate()
+    db.commit()
+    
+    return {
+        "message": "Dataset deactivated successfully",
+        "dataset_id": dataset_id,
+        "status": dataset.status
     }
 
 @router.post("/upload")
@@ -270,7 +360,63 @@ async def upload_dataset_file(
     else:
         dataset_type = DatasetType.CSV  # Default fallback
     
-    # Create dataset record
+    # Process file content and extract metadata
+    file_metadata = {}
+    content_preview = None
+    row_count = None
+    column_count = None
+    
+    # Save file temporarily for processing
+    import tempfile
+    import os
+    
+    temp_file_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_extension}") as temp_file:
+            temp_file.write(content)
+            temp_file_path = temp_file.name
+        
+        # Process different file types
+        if file_extension in ["pdf", "json"]:
+            try:
+                content_result = mindsdb_service.process_file_content(temp_file_path, file_extension)
+                if content_result.get("success"):
+                    file_metadata = content_result.get("metadata", {})
+                    content_preview = content_result["content"][:500] + "..." if len(content_result["content"]) > 500 else content_result["content"]
+                    
+                    # Extract counts for metadata
+                    if file_extension == "json":
+                        row_count = file_metadata.get("element_count")
+                        column_count = 1  # JSON treated as single complex column
+                    
+                    logger.info(f"Successfully processed {file_extension} file: {file_metadata}")
+            except Exception as e:
+                logger.warning(f"Could not process {file_extension} file content: {e}")
+        
+        # For CSV files, try to get basic info
+        elif file_extension == "csv":
+            try:
+                import pandas as pd
+                df = pd.read_csv(temp_file_path)
+                file_metadata = {
+                    "row_count": len(df),
+                    "column_count": len(df.columns),
+                    "columns": df.columns.tolist(),
+                    "dtypes": {col: str(dtype) for col, dtype in df.dtypes.items()}
+                }
+                content_preview = df.head(3).to_string()
+                row_count = len(df)
+                column_count = len(df.columns)
+                logger.info(f"Successfully analyzed CSV file: {file_metadata}")
+            except Exception as e:
+                logger.warning(f"Could not analyze CSV file: {e}")
+    
+    finally:
+        # Clean up temporary file
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.unlink(temp_file_path)
+
+    # Create dataset record with enhanced metadata
     db_dataset = Dataset(
         name=dataset_name,
         description=description,
@@ -283,7 +429,11 @@ async def upload_dataset_file(
         size_bytes=file_size,
         source_url=f"uploads/{file.filename}",  # This would be actual storage path
         allow_download=True,
-        allow_api_access=True
+        allow_api_access=True,
+        row_count=row_count,
+        column_count=column_count,
+        file_metadata=file_metadata,
+        content_preview=content_preview
     )
     
     db.add(db_dataset)
@@ -302,7 +452,8 @@ async def upload_dataset_file(
                 ml_model_result = mindsdb_service.create_dataset_ml_model(
                     dataset_id=db_dataset.id,
                     dataset_name=dataset_name,
-                    dataset_type=dataset_type.value
+                    dataset_type=dataset_type.value,
+                    dataset_content=content_preview
                 )
                 
                 if ml_model_result.get("success"):
@@ -477,10 +628,13 @@ async def chat_with_dataset(
         )
     
     try:
-        # Use dataset-specific chat
+        # Use dataset-specific chat with analytics
         response = mindsdb_service.chat_with_dataset(
-            dataset_id=dataset_id,
-            message=user_message
+            dataset_id=str(dataset_id),
+            message=user_message,
+            user_id=current_user.id,
+            session_id=message.get("session_id"),
+            organization_id=current_user.organization_id
         )
         
         # Log the interaction

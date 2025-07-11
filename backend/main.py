@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth, organizations, datasets, models, mindsdb, admin, analytics, data_access, data_sharing, file_handler
+from app.api import auth, organizations, datasets, models, mindsdb, admin, analytics, data_access, data_sharing, file_handler, data_connectors, llm_configurations
 from app.core.config import settings
 import logging
 from datetime import datetime
@@ -175,6 +175,22 @@ tags_metadata = [
             "url": "https://github.com/your-org/ai-share-platform/docs/file-handler",
         },
     },
+    {
+        "name": "data-connectors",
+        "description": "**Database connector management**. Configure and manage connections to MySQL, PostgreSQL, S3, MongoDB, and other data sources.",
+        "externalDocs": {
+            "description": "Data Connectors Guide",
+            "url": "https://github.com/your-org/ai-share-platform/docs/data-connectors",
+        },
+    },
+    {
+        "name": "llm-configurations",
+        "description": "**LLM provider configuration**. Manage multiple LLM providers including Gemini, OpenAI, Anthropic, and LiteLLM universal interface.",
+        "externalDocs": {
+            "description": "LLM Configuration Guide", 
+            "url": "https://github.com/your-org/ai-share-platform/docs/llm-configs",
+        },
+    },
 ]
 
 # Setup logging
@@ -254,6 +270,8 @@ app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"]
 app.include_router(data_access.router, prefix="/api/data-access", tags=["data-access"])
 app.include_router(data_sharing.router, prefix="/api/data-sharing", tags=["data-sharing"])
 app.include_router(file_handler.router, prefix="/api/files", tags=["file-handler"])
+app.include_router(data_connectors.router, prefix="/api/connectors", tags=["data-connectors"])
+app.include_router(llm_configurations.router, prefix="/api/llm-configs", tags=["llm-configurations"])
 logger.info("✅ All API routes registered successfully")
 
 @app.on_event("startup")

@@ -6,7 +6,7 @@ from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, JSON, F
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
-from app.models.user import Base
+from app.core.database import Base
 
 
 class UploadStatus(str, enum.Enum):

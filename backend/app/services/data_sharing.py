@@ -51,7 +51,9 @@ class DataSharingService:
         return False
     
     def get_accessible_datasets(self, user: User, 
-                              sharing_level: Optional[DataSharingLevel] = None) -> List[Dataset]:
+                              sharing_level: Optional[DataSharingLevel] = None,
+                              include_inactive: bool = False,
+                              include_deleted: bool = False) -> List[Dataset]:
         """
         Get all datasets accessible to a user within their organization.
         """
@@ -61,6 +63,14 @@ class DataSharingService:
         query = self.db.query(Dataset).filter(
             Dataset.organization_id == user.organization_id
         )
+        
+        # Filter out deleted datasets by default
+        if not include_deleted:
+            query = query.filter(Dataset.is_deleted == False)
+        
+        # Filter out inactive datasets by default
+        if not include_inactive:
+            query = query.filter(Dataset.is_active == True)
         
         # Filter by sharing level if specified
         if sharing_level:

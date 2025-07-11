@@ -3,7 +3,7 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
 from app.models.organization import DataSharingLevel
-from app.models.user import Base
+from app.core.database import Base
 
 
 class DatasetType(str, enum.Enum):
@@ -25,6 +25,7 @@ class DatasetStatus(str, enum.Enum):
     PROCESSING = "processing"
     ERROR = "error"
     ARCHIVED = "archived"
+    DELETED = "deleted"  # Added for soft delete
 
 
 class AIProcessingStatus(str, enum.Enum):
@@ -44,9 +45,16 @@ class Dataset(Base):
     type = Column(Enum(DatasetType), nullable=False)
     status = Column(Enum(DatasetStatus), default=DatasetStatus.ACTIVE)
     
+    # Soft delete and activation flags
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    is_deleted = Column(Boolean, default=False, nullable=False, index=True)
+    deleted_at = Column(DateTime, nullable=True)
+    deleted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
     # Data source information
     source_url = Column(String, nullable=True)  # File path, API endpoint, etc.
     connection_params = Column(JSON, nullable=True)  # Connection parameters
+    connector_id = Column(Integer, ForeignKey("database_connectors.id"), nullable=True)  # Link to connector
     
     # Organization and sharing - ORGANIZATION IS REQUIRED (no cross-org sharing)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
@@ -59,6 +67,8 @@ class Dataset(Base):
     row_count = Column(Integer, nullable=True)
     column_count = Column(Integer, nullable=True)
     schema_info = Column(JSON, nullable=True)  # Schema/column information
+    file_metadata = Column(JSON, nullable=True)  # Enhanced file metadata (structure, dtypes, etc.)
+    content_preview = Column(Text, nullable=True)  # Sample of file content for AI context
     
     # MindsDB integration
     mindsdb_table_name = Column(String, nullable=True)  # Name in MindsDB
@@ -74,7 +84,7 @@ class Dataset(Base):
     public_share_enabled = Column(Boolean, default=False)
     share_token = Column(String, nullable=True, unique=True)  # For public sharing
     share_expires_at = Column(DateTime, nullable=True)
-    share_password = Column(String, nullable=True)  # Optional password protection
+    share_password = Column(String, nullable=True)
     share_view_count = Column(Integer, default=0)
     
     # AI Chat Features
@@ -101,13 +111,35 @@ class Dataset(Base):
     ai_processed_at = Column(DateTime, nullable=True)
 
     # Relationships
-    owner = relationship("User", back_populates="owned_datasets")
+    owner = relationship("User", back_populates="owned_datasets", foreign_keys=[owner_id])
+    deleted_by_user = relationship("User", foreign_keys=[deleted_by])
     organization = relationship("Organization")
     department = relationship("Department")
+    connector = relationship("DatabaseConnector", back_populates="datasets")
     access_logs = relationship("DatasetAccessLog", back_populates="dataset")
     models = relationship("DatasetModel", back_populates="dataset")
     chat_sessions = relationship("DatasetChatSession", back_populates="dataset")
     share_accesses = relationship("DatasetShareAccess", back_populates="dataset")
+
+    def soft_delete(self, user_id: int):
+        """Soft delete the dataset"""
+        self.is_deleted = True
+        self.deleted_at = datetime.utcnow()
+        self.deleted_by = user_id
+        self.status = DatasetStatus.DELETED
+        self.is_active = False
+
+    def activate(self):
+        """Activate the dataset"""
+        if not self.is_deleted:
+            self.is_active = True
+            self.status = DatasetStatus.ACTIVE
+
+    def deactivate(self):
+        """Deactivate the dataset"""
+        if not self.is_deleted:
+            self.is_active = False
+            self.status = DatasetStatus.INACTIVE
 
 
 class DatasetAccessLog(Base):
@@ -137,6 +169,12 @@ class DatasetModel(Base):
     model_type = Column(String, nullable=False)  # 'predictor', 'classifier', 'chat', 'embedding'
     mindsdb_model_name = Column(String, nullable=False)
     
+    # Soft delete and activation flags
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    is_deleted = Column(Boolean, default=False, nullable=False, index=True)
+    deleted_at = Column(DateTime, nullable=True)
+    deleted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
     # Model configuration
     target_column = Column(String, nullable=True)
     feature_columns = Column(JSON, nullable=True)
@@ -153,7 +191,7 @@ class DatasetModel(Base):
     last_prediction_at = Column(DateTime, nullable=True)
     
     # Status
-    status = Column(String, default="training")  # 'training', 'complete', 'error', 'archived'
+    status = Column(String, default="training")  # 'training', 'complete', 'error', 'archived', 'deleted'
     error_message = Column(Text, nullable=True)
     
     # Timestamps
@@ -162,6 +200,28 @@ class DatasetModel(Base):
 
     # Relationships
     dataset = relationship("Dataset", back_populates="models")
+    deleted_by_user = relationship("User", foreign_keys=[deleted_by])
+
+    def soft_delete(self, user_id: int):
+        """Soft delete the model"""
+        self.is_deleted = True
+        self.deleted_at = datetime.utcnow()
+        self.deleted_by = user_id
+        self.status = "deleted"
+        self.is_active = False
+
+    def activate(self):
+        """Activate the model"""
+        if not self.is_deleted:
+            self.is_active = True
+            if self.status == "archived":
+                self.status = "complete"
+
+    def deactivate(self):
+        """Deactivate the model"""
+        if not self.is_deleted:
+            self.is_active = False
+            self.status = "archived"
 
 
 class DatasetChatSession(Base):
@@ -251,6 +311,134 @@ class DatasetShareAccess(Base):
 
     # Relationships
     dataset = relationship("Dataset", back_populates="share_accesses")
+
+
+class DatabaseConnector(Base):
+    """Database connector configuration for MySQL, PostgreSQL, S3 etc."""
+    __tablename__ = "database_connectors"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    connector_type = Column(String, nullable=False)  # 'mysql', 'postgresql', 's3', 'api'
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    
+    # Connection configuration
+    connection_config = Column(JSON, nullable=False)  # Connection parameters
+    credentials = Column(JSON, nullable=True)  # Encrypted credentials
+    
+    # Soft delete and activation flags
+    is_active = Column(Boolean, default=True, nullable=False)
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
+    deleted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    # MindsDB integration
+    mindsdb_database_name = Column(String, nullable=True)
+    
+    # Metadata
+    description = Column(Text, nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    last_tested_at = Column(DateTime, nullable=True)
+    test_status = Column(String, default="untested")  # 'untested', 'success', 'failed'
+    test_error = Column(Text, nullable=True)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    organization = relationship("Organization")
+    created_by_user = relationship("User", foreign_keys=[created_by])
+    deleted_by_user = relationship("User", foreign_keys=[deleted_by])
+    datasets = relationship("Dataset", back_populates="connector")
+
+    def soft_delete(self, user_id: int):
+        """Soft delete the connector"""
+        self.is_deleted = True
+        self.deleted_at = datetime.utcnow()
+        self.deleted_by = user_id
+        self.is_active = False
+
+
+class LLMConfiguration(Base):
+    """LLM configuration for LiteLLM and other providers"""
+    __tablename__ = "llm_configurations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    provider = Column(String, nullable=False)  # 'gemini', 'openai', 'anthropic', 'litellm'
+    model_name = Column(String, nullable=False)  # 'gemini-2.0-flash', 'gpt-4', etc.
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    
+    # Configuration
+    api_key = Column(String, nullable=True)  # Encrypted API key
+    api_base = Column(String, nullable=True)  # Custom API base URL
+    model_params = Column(JSON, nullable=True)  # Model-specific configuration
+    litellm_config = Column(JSON, nullable=True)  # LiteLLM specific config
+    
+    # Soft delete and activation flags
+    is_active = Column(Boolean, default=True, nullable=False)
+    is_default = Column(Boolean, default=False, nullable=False)  # Default model for org
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
+    deleted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    # Usage tracking
+    total_tokens_used = Column(Integer, default=0)
+    total_requests = Column(Integer, default=0)
+    last_used_at = Column(DateTime, nullable=True)
+    
+    # Metadata
+    description = Column(Text, nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    organization = relationship("Organization")
+    created_by_user = relationship("User", foreign_keys=[created_by])
+    deleted_by_user = relationship("User", foreign_keys=[deleted_by])
+
+    def soft_delete(self, user_id: int):
+        """Soft delete the LLM configuration"""
+        self.is_deleted = True
+        self.deleted_at = datetime.utcnow()
+        self.deleted_by = user_id
+        self.is_active = False
+        self.is_default = False
+
+
+class ShareAccessSession(Base):
+    """Track anonymous sessions for shared datasets"""
+    __tablename__ = "share_access_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_token = Column(String, nullable=False, unique=True)
+    dataset_id = Column(Integer, ForeignKey("datasets.id"), nullable=False)
+    share_token = Column(String, nullable=False)
+    
+    # Access details
+    ip_address = Column(String, nullable=True)
+    user_agent = Column(String, nullable=True)
+    referrer = Column(String, nullable=True)
+    
+    # Session state
+    is_active = Column(Boolean, default=True)
+    expires_at = Column(DateTime, nullable=True)
+    last_activity_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Usage tracking
+    pages_viewed = Column(Integer, default=0)
+    files_downloaded = Column(Integer, default=0)
+    chat_messages_sent = Column(Integer, default=0)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    dataset = relationship("Dataset")
 
 
 # Add to User model relationship

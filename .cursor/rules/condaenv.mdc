@@ -1,0 +1,5 @@
+---
+alwaysApply: true
+---
+
+Please always remember to use the env in conda (aishare-platform), make the test file into folder test, change the test file with timestamp, if there is any changes in logic file in backend or frontend, check the change for data structure too, and update the initial database so it wont be any conflict

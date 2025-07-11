@@ -3,12 +3,18 @@ from fastapi.security import HTTPBearer
 from sqlalchemy.orm import Session
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
+from datetime import datetime, timedelta
+import uuid
+import logging
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
 from app.models.user import User
+from app.models.dataset import Dataset, ShareAccessSession
 from app.services.data_sharing import DataSharingService
+from app.services.mindsdb import MindsDBService
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 security = HTTPBearer()
@@ -33,6 +39,11 @@ class SendChatMessageRequest(BaseModel):
 
 class AccessSharedDatasetRequest(BaseModel):
     password: Optional[str] = None
+
+
+class ShareChatRequest(BaseModel):
+    message: str
+    session_token: Optional[str] = None
 
 
 # Data sharing endpoints
@@ -243,15 +254,14 @@ async def disable_sharing(
 @router.get("/public/shared/{share_token}/info")
 async def get_shared_dataset_info(
     share_token: str,
+    request: Request,
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
-    """Get basic info about a shared dataset (public endpoint)."""
-    from app.models.dataset import Dataset
-    from datetime import datetime
-    
+    """Get basic information about a shared dataset (no password required)."""
     dataset = db.query(Dataset).filter(
         Dataset.share_token == share_token,
-        Dataset.public_share_enabled == True
+        Dataset.public_share_enabled == True,
+        Dataset.is_deleted == False
     ).first()
     
     if not dataset:
@@ -271,8 +281,190 @@ async def get_shared_dataset_info(
         "name": dataset.name,
         "description": dataset.description,
         "type": dataset.type,
-        "chat_enabled": dataset.ai_chat_enabled,
+        "size_bytes": dataset.size_bytes,
+        "row_count": dataset.row_count,
+        "column_count": dataset.column_count,
         "password_protected": bool(dataset.share_password),
+        "chat_enabled": dataset.ai_chat_enabled,
+        "allow_download": dataset.allow_download,
+        "created_at": dataset.created_at,
         "expires_at": dataset.share_expires_at,
-        "created_at": dataset.created_at
+        "view_count": dataset.share_view_count
+    }
+
+
+@router.get("/public/shared/{share_token}")
+async def access_shared_dataset_public(
+    share_token: str,
+    password: Optional[str] = None,
+    request: Request = None,
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """Access a shared dataset via share token (public endpoint)."""
+    service = DataSharingService(db)
+    
+    # Get client info
+    ip_address = request.client.host if request else None
+    user_agent = request.headers.get("user-agent") if request else None
+    
+    # Create anonymous session
+    session_token = str(uuid.uuid4())
+    expires_at = datetime.utcnow() + timedelta(hours=24)  # 24 hour session
+    
+    # Get dataset info first
+    dataset_info = service.get_shared_dataset(
+        share_token=share_token,
+        password=password,
+        ip_address=ip_address,
+        user_agent=user_agent
+    )
+    
+    # Create session record
+    session = ShareAccessSession(
+        session_token=session_token,
+        dataset_id=dataset_info["id"],
+        share_token=share_token,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        expires_at=expires_at
+    )
+    
+    db.add(session)
+    db.commit()
+    
+    # Add session info to response
+    dataset_info["session_token"] = session_token
+    dataset_info["session_expires_at"] = expires_at
+    
+    return dataset_info
+
+
+@router.post("/public/shared/{share_token}/chat")
+async def chat_with_shared_dataset(
+    share_token: str,
+    chat_request: ShareChatRequest,
+    request: Request,
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """Chat with a shared dataset (public endpoint)."""
+    # Verify dataset and access
+    dataset = db.query(Dataset).filter(
+        Dataset.share_token == share_token,
+        Dataset.public_share_enabled == True,
+        Dataset.ai_chat_enabled == True,
+        Dataset.is_deleted == False
+    ).first()
+    
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Shared dataset not found or chat not enabled"
+        )
+    
+    # Check expiration
+    if dataset.share_expires_at and dataset.share_expires_at < datetime.utcnow():
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Share link has expired"
+        )
+    
+    # Verify session if provided
+    session = None
+    if chat_request.session_token:
+        session = db.query(ShareAccessSession).filter(
+            ShareAccessSession.session_token == chat_request.session_token,
+            ShareAccessSession.dataset_id == dataset.id,
+            ShareAccessSession.is_active == True
+        ).first()
+        
+        if session:
+            # Check session expiration
+            if session.expires_at and session.expires_at < datetime.utcnow():
+                session.is_active = False
+                db.commit()
+                session = None
+    
+    # Use MindsDB service for chat
+    mindsdb_service = MindsDBService()
+    try:
+        chat_response = mindsdb_service.chat_with_dataset(
+            dataset_id=str(dataset.id),
+            message=chat_request.message,
+            user_id=None,  # Anonymous user
+            session_id=chat_request.session_token,
+            organization_id=dataset.organization_id
+        )
+        
+        # Update session activity
+        if session:
+            session.chat_messages_sent += 1
+            session.last_activity_at = datetime.utcnow()
+            db.commit()
+        
+        return chat_response
+        
+    except Exception as e:
+        logger.error(f"Chat failed for shared dataset {dataset.id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Chat service error: {str(e)}"
+        )
+
+
+@router.get("/public/shared/{share_token}/download")
+async def download_shared_dataset(
+    share_token: str,
+    password: Optional[str] = None,
+    session_token: Optional[str] = None,
+    request: Request = None,
+    db: Session = Depends(get_db)
+):
+    """Download a shared dataset (public endpoint)."""
+    # Verify dataset and access
+    dataset = db.query(Dataset).filter(
+        Dataset.share_token == share_token,
+        Dataset.public_share_enabled == True,
+        Dataset.allow_download == True,
+        Dataset.is_deleted == False
+    ).first()
+    
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Shared dataset not found or download not allowed"
+        )
+    
+    # Check expiration
+    if dataset.share_expires_at and dataset.share_expires_at < datetime.utcnow():
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Share link has expired"
+        )
+    
+    # Check password if required
+    if dataset.share_password and dataset.share_password != password:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid password"
+        )
+    
+    # Update session if provided
+    if session_token:
+        session = db.query(ShareAccessSession).filter(
+            ShareAccessSession.session_token == session_token,
+            ShareAccessSession.dataset_id == dataset.id,
+            ShareAccessSession.is_active == True
+        ).first()
+        
+        if session:
+            session.files_downloaded += 1
+            session.last_activity_at = datetime.utcnow()
+            db.commit()
+    
+    # Return download info (would be actual file in production)
+    return {
+        "download_url": f"/files/{dataset.source_url}",
+        "filename": f"{dataset.name}.{dataset.type}",
+        "size_bytes": dataset.size_bytes,
+        "mime_type": f"application/{dataset.type}"
     } 
