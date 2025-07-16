@@ -7,12 +7,12 @@ from app.core.database import Base
 from app.models.config import Configuration
 from app.models.organization import Organization, Department, OrganizationType
 from app.models.dataset import (
-    Dataset, DatasetAccessLog, DatasetModel,
+    Dataset, DatasetAccessLog, DatasetModel, DatasetDownload,
     DatasetChatSession, ChatMessage, DatasetShareAccess,
     DatabaseConnector, LLMConfiguration, ShareAccessSession
 )
 from app.models.analytics import (
-    DatasetAccess, DatasetDownload, ChatInteraction, 
+    DatasetAccess, ChatInteraction, 
     APIUsage, UsageStats, SystemMetrics
 )
 from app.models.file_handler import FileUpload, MindsDBHandler, FileProcessingLog

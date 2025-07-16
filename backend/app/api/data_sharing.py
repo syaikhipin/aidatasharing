@@ -79,7 +79,7 @@ async def get_shared_dataset(
     ip_address = request.client.host
     user_agent = request.headers.get("user-agent")
     
-    return service.get_shared_dataset(
+    return await service.get_shared_dataset(
         share_token=share_token,
         password=password,
         ip_address=ip_address,
@@ -101,7 +101,7 @@ async def access_shared_dataset_with_password(
     ip_address = request.client.host
     user_agent = request.headers.get("user-agent")
     
-    return service.get_shared_dataset(
+    return await service.get_shared_dataset(
         share_token=share_token,
         password=request_data.password,
         ip_address=ip_address,
@@ -312,7 +312,7 @@ async def access_shared_dataset_public(
     expires_at = datetime.utcnow() + timedelta(hours=24)  # 24 hour session
     
     # Get dataset info first
-    dataset_info = service.get_shared_dataset(
+    dataset_info = await service.get_shared_dataset(
         share_token=share_token,
         password=password,
         ip_address=ip_address,

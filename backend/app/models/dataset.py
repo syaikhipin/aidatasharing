@@ -104,6 +104,17 @@ class Dataset(Base):
     consistency_score = Column(String, nullable=True)
     accuracy_score = Column(String, nullable=True)
     
+    # Enhanced metadata for dataset management
+    file_path = Column(String, nullable=True)  # Actual file storage path (separate from source_url)
+    preview_data = Column(JSON, nullable=True)  # Cached preview data for quick access
+    schema_metadata = Column(JSON, nullable=True)  # Detailed schema analysis results
+    quality_metrics = Column(JSON, nullable=True)  # Enhanced data quality metrics
+    column_statistics = Column(JSON, nullable=True)  # Per-column statistical analysis
+    
+    # Download tracking
+    download_count = Column(Integer, default=0)  # Total number of downloads
+    last_downloaded_at = Column(DateTime, nullable=True)  # Last download timestamp
+    
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -117,6 +128,7 @@ class Dataset(Base):
     department = relationship("Department")
     connector = relationship("DatabaseConnector", back_populates="datasets")
     access_logs = relationship("DatasetAccessLog", back_populates="dataset")
+    downloads = relationship("DatasetDownload", back_populates="dataset")
     models = relationship("DatasetModel", back_populates="dataset")
     chat_sessions = relationship("DatasetChatSession", back_populates="dataset")
     share_accesses = relationship("DatasetShareAccess", back_populates="dataset")
@@ -157,6 +169,51 @@ class DatasetAccessLog(Base):
 
     # Relationships
     dataset = relationship("Dataset", back_populates="access_logs")
+    user = relationship("User")
+
+
+class DatasetDownload(Base):
+    """Track dataset download operations with detailed metadata"""
+    __tablename__ = "dataset_downloads"
+
+    id = Column(Integer, primary_key=True, index=True)
+    dataset_id = Column(Integer, ForeignKey("datasets.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Can be null for public access
+    download_token = Column(String, nullable=False, unique=True, index=True)  # Secure download token
+    
+    # Download configuration
+    file_format = Column(String, nullable=False)  # 'csv', 'json', 'excel', 'original'
+    compression = Column(String, nullable=True)  # 'zip', 'gzip', None
+    
+    # File information
+    original_filename = Column(String, nullable=True)
+    file_size_bytes = Column(Integer, nullable=True)
+    
+    # Download status and progress
+    download_status = Column(String, default="pending")  # 'pending', 'in_progress', 'completed', 'failed', 'expired'
+    progress_percentage = Column(Integer, default=0)  # 0-100
+    error_message = Column(Text, nullable=True)
+    
+    # Timing information
+    started_at = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
+    expires_at = Column(DateTime, nullable=True)  # Token expiration
+    
+    # Access tracking
+    ip_address = Column(String, nullable=True)
+    user_agent = Column(String, nullable=True)
+    share_token = Column(String, nullable=True)  # If accessed via share link
+    
+    # Performance metrics
+    download_duration_seconds = Column(Integer, nullable=True)
+    transfer_rate_mbps = Column(String, nullable=True)  # Megabits per second
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    dataset = relationship("Dataset", back_populates="downloads")
     user = relationship("User")
 
 

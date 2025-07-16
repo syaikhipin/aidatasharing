@@ -235,44 +235,8 @@ class DatasetAccess(Base):
     )
 
 
-class DatasetDownload(Base):
-    """Track dataset downloads specifically"""
-    __tablename__ = "dataset_downloads"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    download_id = Column(String, unique=True, default=lambda: str(uuid.uuid4()), index=True)
-    
-    # What was downloaded
-    dataset_id = Column(Integer, ForeignKey("datasets.id"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    
-    # Download details
-    file_format = Column(String, nullable=False)  # 'csv', 'json', 'pdf', 'original'
-    file_size_bytes = Column(Integer, nullable=True)
-    download_method = Column(String, nullable=False)  # 'direct', 'api', 'share_link'
-    
-    # Technical details
-    ip_address = Column(String, nullable=True)
-    user_agent = Column(Text, nullable=True)
-    
-    # Timing
-    started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    completed_at = Column(DateTime, nullable=True)
-    duration_seconds = Column(Float, nullable=True)
-    
-    # Success tracking
-    success = Column(Boolean, default=True)
-    bytes_transferred = Column(Integer, nullable=True)
-    error_message = Column(Text, nullable=True)
-    
-    # Context
-    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
-    share_token = Column(String, nullable=True)  # If downloaded via share link
-    
-    # Relationships
-    dataset = relationship("Dataset")
-    user = relationship("User")
-    organization = relationship("Organization")
+# DatasetDownload class is defined in app.models.dataset to avoid table conflicts
+# Import it here if needed for analytics relationships
 
 
 class ChatInteraction(Base):

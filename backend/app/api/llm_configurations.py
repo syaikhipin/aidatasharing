@@ -21,6 +21,8 @@ router = APIRouter()
 
 
 class LLMConfigurationCreate(BaseModel):
+    model_config = {"protected_namespaces": ()}
+    
     name: str
     provider: str  # 'gemini', 'openai', 'anthropic', 'litellm'
     model_name: str  # 'gemini-2.0-flash', 'gpt-4', etc.
@@ -33,6 +35,8 @@ class LLMConfigurationCreate(BaseModel):
 
 
 class LLMConfigurationUpdate(BaseModel):
+    model_config = {"protected_namespaces": ()}
+    
     name: Optional[str] = None
     description: Optional[str] = None
     api_key: Optional[str] = None

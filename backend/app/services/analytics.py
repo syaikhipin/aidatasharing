@@ -10,9 +10,10 @@ import json
 
 from app.core.database import get_db
 from app.models.analytics import (
-    DatasetAccess, DatasetDownload, ChatInteraction, 
+    DatasetAccess, ChatInteraction, 
     APIUsage, UsageStats, SystemMetrics
 )
+from app.models.dataset import DatasetDownload
 from app.models.dataset import Dataset
 from app.models.user import User
 from app.models.organization import Organization

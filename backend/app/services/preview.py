@@ -1,0 +1,536 @@
+"""
+Preview Service for Enhanced Dataset Management
+Handles dataset content preview generation without loading full files
+"""
+
+import pandas as pd
+import json
+import numpy as np
+from pathlib import Path
+from typing import Dict, Any, List, Optional, Union
+from datetime import datetime
+import logging
+from sqlalchemy.orm import Session
+
+from app.models.dataset import Dataset
+
+logger = logging.getLogger(__name__)
+
+
+def convert_numpy_types(obj):
+    """Convert numpy types to Python native types for JSON serialization"""
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {key: convert_numpy_types(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_types(item) for item in obj]
+    elif pd.isna(obj):
+        return None
+    return obj
+
+
+class PreviewService:
+    """Service for generating dataset content previews"""
+    
+    def __init__(self, db: Session):
+        self.db = db
+    
+    async def generate_preview_data(
+        self, 
+        dataset: Dataset, 
+        rows: int = 20,
+        include_stats: bool = True,
+        page: int = 1
+    ) -> Dict[str, Any]:
+        """
+        Generate preview data for a dataset without loading the full file
+        
+        Args:
+            dataset: Dataset model instance
+            rows: Number of rows to include in preview
+            include_stats: Whether to include basic statistics
+            
+        Returns:
+            Dict with preview data and metadata
+        """
+        try:
+            if not dataset.file_path:
+                return self._get_cached_preview(dataset, rows)
+            
+            file_path = Path(dataset.file_path)
+            if not file_path.exists():
+                return self._get_cached_preview(dataset, rows)
+            
+            # Generate preview based on file type
+            if dataset.type.value.lower() == 'csv':
+                return await self._generate_csv_preview(file_path, dataset, rows, include_stats)
+            elif dataset.type.value.lower() == 'json':
+                return await self._generate_json_preview(file_path, dataset, rows, include_stats)
+            elif dataset.type.value.lower() in ['excel', 'xlsx', 'xls']:
+                return await self._generate_excel_preview(file_path, dataset, rows, include_stats)
+            elif dataset.type.value.lower() == 'pdf':
+                return await self._generate_pdf_preview(file_path, dataset, rows, include_stats)
+            else:
+                return self._get_cached_preview(dataset, rows)
+                
+        except Exception as e:
+            logger.error(f"❌ Preview generation failed for dataset {dataset.id}: {e}")
+            return self._get_cached_preview(dataset, rows)
+    
+    async def _generate_csv_preview(
+        self, 
+        file_path: Path, 
+        dataset: Dataset, 
+        rows: int,
+        include_stats: bool,
+        page: int = 1
+    ) -> Dict[str, Any]:
+        """Generate preview for CSV files with pagination support"""
+        try:
+            # Calculate skip rows for pagination
+            skip_rows = (page - 1) * rows if page > 1 else 0
+            
+            # For stats and total count, we need to read the file once
+            if include_stats or page > 1:
+                # Get total row count for pagination info
+                total_rows = dataset.row_count
+                if not total_rows:
+                    # Count rows efficiently without loading the whole file
+                    with open(file_path, 'r') as f:
+                        total_rows = sum(1 for _ in f) - 1  # Subtract header row
+            
+            # Read only the required page of rows for preview
+            if page > 1:
+                # Skip to the requested page
+                df = pd.read_csv(file_path, skiprows=range(1, skip_rows + 1), nrows=rows)
+            else:
+                # First page, no need to skip
+                df = pd.read_csv(file_path, nrows=rows)
+            
+            preview_data = {
+                "type": "tabular",
+                "format": "csv",
+                "headers": df.columns.tolist(),
+                "rows": df.to_dict('records'),
+                "total_rows_in_preview": len(df),
+                "estimated_total_rows": dataset.row_count or total_rows or "unknown",
+                "total_columns": len(df.columns),
+                "is_sample": True,
+                "sample_info": {
+                    "method": "pagination" if page > 1 else "head",
+                    "rows_requested": rows,
+                    "rows_returned": len(df),
+                    "page": page,
+                    "total_pages": int(total_rows / rows) + 1 if isinstance(total_rows, int) and total_rows > 0 else 1
+                },
+                "column_types": {col: str(df[col].dtype) for col in df.columns},
+                "generated_at": datetime.utcnow().isoformat()
+            }
+            
+            if include_stats:
+                preview_data["basic_stats"] = self._calculate_preview_stats(df)
+            
+            # Add data quality indicators
+            preview_data["quality_indicators"] = {
+                "has_null_values": df.isnull().any().any(),
+                "null_columns": df.columns[df.isnull().any()].tolist(),
+                "completeness_by_column": {
+                    col: round(1 - (df[col].isnull().sum() / len(df)), 3)
+                    for col in df.columns
+                }
+            }
+            
+            return convert_numpy_types(preview_data)
+            
+        except Exception as e:
+            logger.error(f"❌ CSV preview generation failed: {e}")
+            return convert_numpy_types(self._get_error_preview(dataset, str(e)))
+    
+    async def _generate_json_preview(
+        self, 
+        file_path: Path, 
+        dataset: Dataset, 
+        rows: int,
+        include_stats: bool,
+        page: int = 1
+    ) -> Dict[str, Any]:
+        """Generate preview for JSON files"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            preview_data = {
+                "type": "json",
+                "format": "json",
+                "structure_type": type(data).__name__,
+                "generated_at": datetime.utcnow().isoformat()
+            }
+            
+            if isinstance(data, list):
+                # Array of objects with pagination support
+                start_idx = (page - 1) * rows if page > 1 else 0
+                end_idx = start_idx + rows
+                preview_items = data[start_idx:end_idx] if len(data) > start_idx else []
+                total_pages = (len(data) + rows - 1) // rows  # Ceiling division
+                preview_data.update({
+                    "items": preview_items,
+                    "total_items_in_preview": len(preview_items),
+                    "estimated_total_items": len(data),
+                    "is_sample": len(data) > rows,
+                    "sample_info": {
+                        "method": "slice",
+                        "items_requested": rows,
+                        "items_returned": len(preview_items)
+                    }
+                })
+                
+                # If items are objects, analyze structure
+                if preview_items and isinstance(preview_items[0], dict):
+                    all_keys = set()
+                    for item in preview_items:
+                        if isinstance(item, dict):
+                            all_keys.update(item.keys())
+                    
+                    preview_data["common_fields"] = list(all_keys)
+                    preview_data["field_types"] = {}
+                    
+                    # Analyze field types from sample
+                    for key in all_keys:
+                        types = set()
+                        for item in preview_items[:10]:  # Sample first 10 items
+                            if isinstance(item, dict) and key in item:
+                                types.add(type(item[key]).__name__)
+                        preview_data["field_types"][key] = list(types)
+            
+            elif isinstance(data, dict):
+                # Single object
+                preview_data.update({
+                    "content": data,
+                    "keys": list(data.keys()) if isinstance(data, dict) else [],
+                    "is_sample": False
+                })
+            
+            else:
+                # Primitive value
+                preview_data.update({
+                    "content": data,
+                    "value_type": type(data).__name__,
+                    "is_sample": False
+                })
+            
+            return convert_numpy_types(preview_data)
+            
+        except Exception as e:
+            logger.error(f"❌ JSON preview generation failed: {e}")
+            return convert_numpy_types(self._get_error_preview(dataset, str(e)))
+    
+    async def _generate_excel_preview(
+        self, 
+        file_path: Path, 
+        dataset: Dataset, 
+        rows: int,
+        include_stats: bool,
+        page: int = 1
+    ) -> Dict[str, Any]:
+        """Generate preview for Excel files"""
+        try:
+            excel_file = pd.ExcelFile(file_path)
+            sheet_names = excel_file.sheet_names
+            
+            preview_data = {
+                "type": "excel",
+                "format": "excel",
+                "sheet_count": len(sheet_names),
+                "sheet_names": sheet_names,
+                "sheets": {},
+                "generated_at": datetime.utcnow().isoformat()
+            }
+            
+            # Preview first sheet or up to 3 sheets
+            sheets_to_preview = sheet_names[:min(3, len(sheet_names))]
+            
+            for sheet_name in sheets_to_preview:
+                # Calculate skip rows for pagination
+                skip_rows = (page - 1) * rows if page > 1 else 0
+                
+                # Get total row count for pagination info
+                total_rows = dataset.row_count
+                if not total_rows:
+                    try:
+                        # Count rows in the sheet without loading all data
+                        xl = pd.ExcelFile(file_path)
+                        total_rows = xl.book.sheet_by_name(sheet_name).nrows - 1  # Subtract header row
+                    except:
+                        # Fallback if counting fails
+                        total_rows = None
+                
+                # Read only the required page of rows for preview
+                if page > 1:
+                    # Skip to the requested page
+                    df = pd.read_excel(file_path, sheet_name=sheet_name, skiprows=range(1, skip_rows + 1), nrows=rows)
+                else:
+                    # First page, no need to skip
+                    df = pd.read_excel(file_path, sheet_name=sheet_name, nrows=rows)
+                
+                sheet_preview = {
+                    "name": sheet_name,
+                    "headers": df.columns.tolist(),
+                    "rows": df.to_dict('records'),
+                    "total_rows_in_preview": len(df),
+                    "total_columns": len(df.columns),
+                    "column_types": {col: str(df[col].dtype) for col in df.columns},
+                    "is_sample": True,
+                    "sample_info": {
+                        "method": "pagination" if page > 1 else "head",
+                        "rows_requested": rows,
+                        "rows_returned": len(df),
+                        "page": page,
+                        "total_pages": int(total_rows / rows) + 1 if isinstance(total_rows, int) and total_rows > 0 else 1
+                    }
+                }
+                
+                if include_stats:
+                    sheet_preview["basic_stats"] = self._calculate_preview_stats(df)
+                
+                preview_data["sheets"][sheet_name] = sheet_preview
+            
+            # Set primary sheet (usually first sheet)
+            if sheet_names:
+                preview_data["primary_sheet"] = sheet_names[0]
+                if sheet_names[0] in preview_data["sheets"]:
+                    preview_data["primary_data"] = preview_data["sheets"][sheet_names[0]]
+            
+            return convert_numpy_types(preview_data)
+            
+        except Exception as e:
+            logger.error(f"❌ Excel preview generation failed: {e}")
+            return convert_numpy_types(self._get_error_preview(dataset, str(e)))
+    
+    async def _generate_pdf_preview(
+        self, 
+        file_path: Path, 
+        dataset: Dataset, 
+        rows: int,
+        include_stats: bool,
+        page: int = 1
+    ) -> Dict[str, Any]:
+        """Generate preview for PDF files"""
+        try:
+            preview_data = {
+                "type": "pdf",
+                "format": "pdf",
+                "file_size_bytes": file_path.stat().st_size,
+                "generated_at": datetime.utcnow().isoformat()
+            }
+            
+            try:
+                import fitz  # PyMuPDF
+                doc = fitz.open(file_path)
+                
+                preview_data.update({
+                    "page_count": len(doc),
+                    "pages": []
+                })
+                
+                # Extract text from pages with pagination support
+                total_pages = len(doc)
+                start_page = (page - 1) * rows if page > 1 else 0
+                end_page = min(start_page + rows, total_pages)
+                pages_to_preview = end_page - start_page
+                
+                # Add pagination info
+                preview_data["pagination"] = {
+                    "current_page": page,
+                    "total_pages": (total_pages + rows - 1) // rows if rows > 0 else 1,
+                    "pages_per_view": rows,
+                    "total_document_pages": total_pages
+                }
+                
+                for page_num in range(start_page, end_page):
+                    page = doc.load_page(page_num)
+                    text = page.get_text()
+                    
+                    page_preview = {
+                        "page_number": page_num + 1,
+                        "text_content": text[:500] + "..." if len(text) > 500 else text,
+                        "has_text": bool(text.strip()),
+                        "char_count": len(text)
+                    }
+                    
+                    preview_data["pages"].append(page_preview)
+                
+                doc.close()
+                
+                # Summary
+                total_text = sum(len(page.get("text_content", "")) for page in preview_data["pages"])
+                preview_data["summary"] = {
+                    "total_pages_previewed": pages_to_preview,
+                    "has_extractable_text": any(page.get("has_text", False) for page in preview_data["pages"]),
+                    "total_preview_chars": total_text
+                }
+                
+            except ImportError:
+                preview_data.update({
+                    "error": "PDF text extraction not available",
+                    "note": "PyMuPDF library not installed",
+                    "basic_info_only": True
+                })
+            
+            return convert_numpy_types(preview_data)
+            
+        except Exception as e:
+            logger.error(f"❌ PDF preview generation failed: {e}")
+            return convert_numpy_types(self._get_error_preview(dataset, str(e)))
+    
+    def _calculate_preview_stats(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Calculate basic statistics for preview data"""
+        try:
+            stats = {
+                "row_count": len(df),
+                "column_count": len(df.columns),
+                "numeric_columns": [],
+                "text_columns": [],
+                "null_counts": {}
+            }
+            
+            for col in df.columns:
+                null_count = df[col].isnull().sum()
+                stats["null_counts"][col] = int(null_count)
+                
+                if df[col].dtype in ['int64', 'float64', 'int32', 'float32']:
+                    stats["numeric_columns"].append({
+                        "name": col,
+                        "min": float(df[col].min()) if not df[col].empty else None,
+                        "max": float(df[col].max()) if not df[col].empty else None,
+                        "mean": round(float(df[col].mean()), 3) if not df[col].empty else None
+                    })
+                elif df[col].dtype == 'object':
+                    stats["text_columns"].append({
+                        "name": col,
+                        "unique_count": int(df[col].nunique()),
+                        "most_common": df[col].mode().iloc[0] if not df[col].mode().empty else None
+                    })
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"❌ Preview stats calculation failed: {e}")
+            return {"error": str(e)}
+    
+    def _get_cached_preview(self, dataset: Dataset, rows: int) -> Dict[str, Any]:
+        """Get preview from cached dataset metadata"""
+        if dataset.preview_data:
+            cached_preview = dataset.preview_data.copy()
+            cached_preview.update({
+                "source": "cached",
+                "last_generated": cached_preview.get("preview_generated_at", "unknown"),
+                "note": "Using cached preview data"
+            })
+            return cached_preview
+        
+        # Fallback to basic info
+        return {
+            "type": "basic",
+            "format": dataset.type.value if dataset.type else "unknown",
+            "message": "Preview not available",
+            "basic_info": {
+                "name": dataset.name,
+                "size_bytes": dataset.size_bytes,
+                "row_count": dataset.row_count,
+                "column_count": dataset.column_count,
+                "created_at": dataset.created_at.isoformat() if dataset.created_at else None
+            },
+            "generated_at": datetime.utcnow().isoformat(),
+            "source": "basic_metadata"
+        }
+    
+    def _get_error_preview(self, dataset: Dataset, error_message: str) -> Dict[str, Any]:
+        """Get error preview when generation fails"""
+        return {
+            "type": "error",
+            "format": dataset.type.value if dataset.type else "unknown",
+            "error": error_message,
+            "message": "Preview generation failed",
+            "basic_info": {
+                "name": dataset.name,
+                "size_bytes": dataset.size_bytes,
+                "row_count": dataset.row_count,
+                "column_count": dataset.column_count
+            },
+            "generated_at": datetime.utcnow().isoformat(),
+            "source": "error_fallback"
+        }
+    
+    async def update_dataset_preview(self, dataset_id: int, rows: int = 20, page: int = 1) -> Dict[str, Any]:
+        """
+        Update cached preview data for a dataset
+        
+        Args:
+            dataset_id: Dataset ID to update
+            rows: Number of rows to include in preview
+            page: Page number for pagination
+            
+        Returns:
+            Dict with update results
+        """
+        try:
+            dataset = self.db.query(Dataset).filter(Dataset.id == dataset_id).first()
+            if not dataset:
+                raise Exception(f"Dataset {dataset_id} not found")
+            
+            logger.info(f"🔄 Updating preview for dataset {dataset_id}")
+            
+            # Generate new preview
+            preview_data = await self.generate_preview_data(dataset, rows, include_stats=True, page=page)
+            
+            # Update dataset record
+            dataset.preview_data = preview_data
+            dataset.updated_at = datetime.utcnow()
+            
+            self.db.commit()
+            
+            logger.info(f"✅ Preview updated for dataset {dataset_id}")
+            
+            return {
+                "dataset_id": dataset_id,
+                "status": "success",
+                "preview_data": preview_data,
+                "updated_at": datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to update preview for dataset {dataset_id}: {e}")
+            return {
+                "dataset_id": dataset_id,
+                "status": "error",
+                "error": str(e),
+                "updated_at": datetime.utcnow().isoformat()
+            }
+    
+    def get_preview_formats(self, dataset: Dataset) -> List[str]:
+        """
+        Get available preview formats for a dataset
+        
+        Args:
+            dataset: Dataset model instance
+            
+        Returns:
+            List of available preview formats
+        """
+        base_formats = ["json"]  # All datasets can be previewed as JSON
+        
+        if dataset.type.value.lower() in ['csv', 'excel']:
+            base_formats.extend(["table", "raw"])
+        elif dataset.type.value.lower() == 'json':
+            base_formats.extend(["formatted", "raw"])
+        elif dataset.type.value.lower() == 'pdf':
+            base_formats.extend(["text", "pages"])
+        
+        return base_formats

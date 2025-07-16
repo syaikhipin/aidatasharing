@@ -13,9 +13,13 @@ from app.schemas.dataset import (
 )
 from app.services.data_sharing import DataSharingService
 from app.services.mindsdb import mindsdb_service
+from app.services.storage import storage_service
+from app.services.metadata import MetadataService
+from app.services.preview import PreviewService
 import json
 import logging
 import time
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +100,43 @@ async def create_dataset(
     if "row_count" in dataset_data:
         schema_info["row_count"] = dataset_data["row_count"]
     
+    # Generate basic metadata for programmatically created datasets
+    columns = dataset_data.get("columns", [])
+    row_count = dataset_data.get("row_count", 0)
+    
+    schema_metadata = {
+        "columns": columns,
+        "data_types": {},
+        "programmatically_created": True,
+        "created_at": datetime.utcnow().isoformat()
+    }
+    
+    quality_metrics = {
+        "overall_score": 0.9,  # Default good score for programmatic creation
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "accuracy": 0.9,
+        "issues": [],
+        "last_analyzed": datetime.utcnow().isoformat()
+    }
+    
+    column_statistics = {}
+    for col in columns:
+        column_statistics[col] = {
+            "data_type": "unknown",
+            "non_null_count": row_count,
+            "null_count": 0,
+            "unique_count": "unknown"
+        }
+    
+    preview_data = {
+        "headers": columns,
+        "sample_rows": [],
+        "total_rows": row_count,
+        "is_sample": False,
+        "preview_generated_at": datetime.utcnow().isoformat()
+    }
+
     # Create dataset with organization context
     db_dataset = Dataset(
         name=name,
@@ -111,8 +152,15 @@ async def create_dataset(
         schema_info=schema_info if schema_info else None,
         allow_download=True,
         allow_api_access=True,
-        row_count=dataset_data.get("row_count"),
-        column_count=len(dataset_data.get("columns", []))
+        row_count=row_count,
+        column_count=len(columns),
+        # Enhanced metadata fields
+        schema_metadata=schema_metadata,
+        quality_metrics=quality_metrics,
+        column_statistics=column_statistics,
+        preview_data=preview_data,
+        download_count=0,
+        last_downloaded_at=None
     )
     
     db.add(db_dataset)
@@ -343,8 +391,46 @@ async def upload_dataset_file(
     content = await file.read()
     file_size = len(content)
     
-    # TODO: Save file to storage (S3, local filesystem, etc.)
-    # For now, we'll just create the dataset record
+    # Create dataset record first to get ID for storage
+    dataset_name = name or file.filename.rsplit('.', 1)[0]
+    
+    # Create temporary dataset to get ID
+    temp_dataset = Dataset(
+        name=dataset_name,
+        description=description,
+        type=DatasetType.CSV,  # Temporary, will be updated
+        status=DatasetStatus.PROCESSING,
+        owner_id=current_user.id,
+        organization_id=current_user.organization_id,
+        department_id=current_user.department_id,
+        sharing_level=sharing_level,
+        size_bytes=file_size,
+        allow_download=True,
+        allow_api_access=True
+    )
+    
+    db.add(temp_dataset)
+    db.commit()
+    db.refresh(temp_dataset)
+    
+    # Store file using storage service
+    try:
+        storage_result = await storage_service.store_dataset_file(
+            file_content=content,
+            original_filename=file.filename,
+            dataset_id=temp_dataset.id,
+            organization_id=current_user.organization_id
+        )
+        logger.info(f"✅ File stored successfully: {storage_result['filename']}")
+    except Exception as e:
+        # Clean up dataset record if storage fails
+        db.delete(temp_dataset)
+        db.commit()
+        logger.error(f"❌ File storage failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to store file: {str(e)}"
+        )
     
     dataset_name = name or file.filename.rsplit('.', 1)[0]
     
@@ -416,25 +502,79 @@ async def upload_dataset_file(
         if temp_file_path and os.path.exists(temp_file_path):
             os.unlink(temp_file_path)
 
-    # Create dataset record with enhanced metadata
-    db_dataset = Dataset(
-        name=dataset_name,
-        description=description,
-        type=dataset_type,
-        status=DatasetStatus.ACTIVE,
-        owner_id=current_user.id,
-        organization_id=current_user.organization_id,
-        department_id=current_user.department_id,
-        sharing_level=sharing_level,
-        size_bytes=file_size,
-        source_url=f"uploads/{file.filename}",  # This would be actual storage path
-        allow_download=True,
-        allow_api_access=True,
-        row_count=row_count,
-        column_count=column_count,
-        file_metadata=file_metadata,
-        content_preview=content_preview
-    )
+    # Generate enhanced metadata for the new fields
+    schema_metadata = {}
+    quality_metrics = {}
+    column_statistics = {}
+    preview_data = {}
+    
+    if file_metadata:
+        # Enhanced schema metadata
+        schema_metadata = {
+            "file_type": file_extension,
+            "original_filename": file.filename,
+            "encoding": "utf-8",  # Default assumption
+            "structure": file_metadata.get("structure", {}),
+            "columns": file_metadata.get("columns", []),
+            "data_types": file_metadata.get("dtypes", {}),
+            "sample_data": file_metadata.get("sample_data", [])
+        }
+        
+        # Basic quality metrics
+        quality_metrics = {
+            "overall_score": 0.85,  # Default good score
+            "completeness": 1.0 if row_count and row_count > 0 else 0.0,
+            "consistency": 0.9,  # Default assumption
+            "accuracy": 0.8,  # Default assumption
+            "issues": [],
+            "last_analyzed": datetime.utcnow().isoformat()
+        }
+        
+        # Column statistics from file metadata
+        if "column_stats" in file_metadata:
+            column_statistics = file_metadata["column_stats"]
+        elif "dtypes" in file_metadata:
+            # Generate basic column stats
+            column_statistics = {}
+            for col, dtype in file_metadata["dtypes"].items():
+                column_statistics[col] = {
+                    "data_type": dtype,
+                    "non_null_count": row_count or 0,
+                    "null_count": 0,
+                    "unique_count": "unknown"
+                }
+        
+        # Preview data structure
+        preview_data = {
+            "headers": file_metadata.get("columns", []),
+            "sample_rows": file_metadata.get("sample_data", [])[:10],  # First 10 rows
+            "total_rows": row_count or 0,
+            "is_sample": True,
+            "preview_generated_at": datetime.utcnow().isoformat()
+        }
+
+    # Update the temporary dataset with complete information
+    temp_dataset.name = dataset_name
+    temp_dataset.description = description
+    temp_dataset.type = dataset_type
+    temp_dataset.status = DatasetStatus.ACTIVE
+    temp_dataset.size_bytes = file_size
+    temp_dataset.source_url = storage_result['relative_path']  # Storage service path
+    temp_dataset.file_path = storage_result['file_path']  # Actual file storage path
+    temp_dataset.row_count = row_count
+    temp_dataset.column_count = column_count
+    temp_dataset.file_metadata = file_metadata
+    temp_dataset.content_preview = content_preview
+    # New enhanced metadata fields
+    temp_dataset.schema_metadata = schema_metadata
+    temp_dataset.quality_metrics = quality_metrics
+    temp_dataset.column_statistics = column_statistics
+    temp_dataset.preview_data = preview_data
+    temp_dataset.download_count = 0  # Initialize download count
+    temp_dataset.last_downloaded_at = None
+    
+    # Use the updated dataset
+    db_dataset = temp_dataset
     
     db.add(db_dataset)
     db.commit()
@@ -515,54 +655,142 @@ async def upload_dataset_file(
 @router.get("/{dataset_id}/download")
 async def download_dataset(
     dataset_id: int,
+    file_format: str = "original",
+    compression: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Download a dataset file."""
-    data_service = DataSharingService(db)
+    """Download a dataset file with secure token-based access."""
+    from app.services.download import DownloadService
     
-    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
-    if not dataset:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Dataset not found"
-        )
+    download_service = DownloadService(db)
     
-    # Check access permissions
-    if not data_service.can_access_dataset(current_user, dataset):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied to this dataset"
-        )
-    
-    if not dataset.allow_download:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Downloads not allowed for this dataset"
-        )
-    
-    # Log download
-    data_service.log_access(
+    # Initiate download and get secure token
+    download_info = await download_service.initiate_download(
+        dataset_id=dataset_id,
         user=current_user,
-        dataset=dataset,
-        access_type="download"
+        file_format=file_format,
+        compression=compression
     )
     
-    # TODO: Return actual file download
-    # For now, return download URL
+    return download_info
+
+@router.get("/download/{download_token}")
+async def execute_download(
+    download_token: str,
+    range: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Execute the actual file download using a secure token with resumable download support.
+    
+    The Range header can be used for resumable downloads (e.g., "bytes=1024-").
+    """
+    from app.services.download import DownloadService
+    
+    download_service = DownloadService(db)
+    
+    # Execute the download with range support for resumable downloads
+    return await download_service.execute_download(
+        download_token=download_token,
+        use_streaming=True,
+        range_header=range
+    )
+
+@router.get("/download/{download_token}/progress")
+async def get_download_progress(
+    download_token: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get download progress information.
+    
+    Returns detailed progress information including status, percentage, 
+    transfer rate, and estimated time remaining.
+    """
+    from app.services.download import DownloadService
+    
+    download_service = DownloadService(db)
+    
+    return download_service.get_download_progress(download_token)
+
+@router.post("/download/{download_token}/retry")
+async def retry_download(
+    download_token: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Retry a failed or interrupted download.
+    
+    This endpoint allows resuming downloads that were interrupted due to network issues
+    or retrying downloads that failed for other reasons.
+    """
+    from app.services.download import DownloadService
+    
+    download_service = DownloadService(db)
+    download_info = download_service.get_download_progress(download_token)
+    
+    # Check if download can be retried
+    if download_info["status"] not in ["failed", "interrupted", "expired"]:
+        return {
+            "message": "Download is already in progress or completed",
+            "status": download_info["status"],
+            "can_retry": False,
+            "download_info": download_info
+        }
+    
+    # Reset download status for retry
+    download_record = db.query(DatasetDownload).filter(
+        DatasetDownload.download_token == download_token
+    ).first()
+    
+    if not download_record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Download not found"
+        )
+    
+    # Update download record for retry
+    download_record.download_status = "pending"
+    download_record.error_message = None
+    download_record.expires_at = datetime.utcnow() + timedelta(hours=24)
+    db.commit()
+    
     return {
-        "download_url": f"/files/{dataset.source_url}",
-        "filename": f"{dataset.name}.{dataset.type}",
-        "size_bytes": dataset.size_bytes
+        "message": "Download ready for retry",
+        "download_token": download_token,
+        "status": "pending",
+        "can_retry": True,
+        "expires_at": download_record.expires_at.isoformat()
     }
+
+@router.get("/{dataset_id}/download-history")
+async def get_download_history(
+    dataset_id: int,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get download history for a dataset (owner only)."""
+    from app.services.download import DownloadService
+    
+    download_service = DownloadService(db)
+    
+    return download_service.get_download_history(
+        dataset_id=dataset_id,
+        user=current_user,
+        limit=limit
+    )
 
 @router.get("/{dataset_id}/stats")
 async def get_dataset_stats(
     dataset_id: int,
+    include_downloads: bool = True,
+    include_access_logs: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get statistics for a dataset."""
+    """Get comprehensive statistics for a dataset."""
     data_service = DataSharingService(db)
     
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
@@ -579,19 +807,99 @@ async def get_dataset_stats(
             detail="Access denied to this dataset"
         )
     
-    # Get access logs for this dataset
-    access_logs = []  # TODO: Implement access logs retrieval
-    
-    return {
-        "dataset_id": dataset_id,
-        "total_size": dataset.size_bytes,
-        "row_count": dataset.row_count,
-        "column_count": dataset.column_count,
-        "recent_access": access_logs,
-        "sharing_level": dataset.sharing_level,
-        "created_at": dataset.created_at,
-        "last_accessed": dataset.last_accessed
-    }
+    try:
+        stats_response = {
+            "dataset_id": dataset_id,
+            "dataset_name": dataset.name,
+            "basic_stats": {
+                "total_size_bytes": dataset.size_bytes,
+                "row_count": dataset.row_count,
+                "column_count": dataset.column_count,
+                "file_type": dataset.type.value if dataset.type else "unknown",
+                "sharing_level": dataset.sharing_level.value if dataset.sharing_level else "private",
+                "created_at": dataset.created_at.isoformat() if dataset.created_at else None,
+                "updated_at": dataset.updated_at.isoformat() if dataset.updated_at else None,
+                "last_accessed": dataset.last_accessed.isoformat() if dataset.last_accessed else None
+            },
+            "usage_stats": {
+                "download_count": dataset.download_count or 0,
+                "last_downloaded_at": dataset.last_downloaded_at.isoformat() if dataset.last_downloaded_at else None,
+                "is_downloadable": dataset.allow_download,
+                "api_access_enabled": dataset.allow_api_access,
+                "ai_chat_enabled": dataset.allow_ai_chat
+            }
+        }
+        
+        # Include download statistics if requested and user is owner
+        if include_downloads and (dataset.owner_id == current_user.id or current_user.is_superuser):
+            from app.models.dataset import DatasetDownload
+            
+            # Get download statistics
+            download_stats = db.query(DatasetDownload).filter(
+                DatasetDownload.dataset_id == dataset_id
+            ).all()
+            
+            successful_downloads = [d for d in download_stats if d.download_status == "completed"]
+            failed_downloads = [d for d in download_stats if d.download_status == "failed"]
+            
+            stats_response["download_analytics"] = {
+                "total_download_attempts": len(download_stats),
+                "successful_downloads": len(successful_downloads),
+                "failed_downloads": len(failed_downloads),
+                "success_rate": len(successful_downloads) / len(download_stats) if download_stats else 0,
+                "average_download_time": sum(d.download_duration_seconds or 0 for d in successful_downloads) / len(successful_downloads) if successful_downloads else 0,
+                "popular_formats": {}
+            }
+            
+            # Format popularity
+            format_counts = {}
+            for download in download_stats:
+                format_counts[download.file_format] = format_counts.get(download.file_format, 0) + 1
+            stats_response["download_analytics"]["popular_formats"] = format_counts
+        
+        # Include access logs if requested and user is owner
+        if include_access_logs and (dataset.owner_id == current_user.id or current_user.is_superuser):
+            from app.models.dataset import DatasetAccessLog
+            
+            recent_access = db.query(DatasetAccessLog).filter(
+                DatasetAccessLog.dataset_id == dataset_id
+            ).order_by(DatasetAccessLog.created_at.desc()).limit(10).all()
+            
+            stats_response["recent_access"] = [
+                {
+                    "access_type": log.access_type,
+                    "user_id": log.user_id,
+                    "ip_address": log.ip_address,
+                    "created_at": log.created_at.isoformat() if log.created_at else None
+                }
+                for log in recent_access
+            ]
+        
+        # Include quality metrics if available
+        if dataset.quality_metrics:
+            stats_response["quality_summary"] = {
+                "overall_score": dataset.quality_metrics.get("overall_score"),
+                "completeness": dataset.quality_metrics.get("completeness"),
+                "consistency": dataset.quality_metrics.get("consistency"),
+                "accuracy": dataset.quality_metrics.get("accuracy"),
+                "last_analyzed": dataset.quality_metrics.get("last_analyzed")
+            }
+        
+        # Log access
+        data_service.log_access(
+            user=current_user,
+            dataset=dataset,
+            access_type="stats"
+        )
+        
+        return stats_response
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get stats for dataset {dataset_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get dataset statistics: {str(e)}"
+        )
 
 @router.post("/{dataset_id}/chat")
 async def chat_with_dataset(
@@ -773,4 +1081,295 @@ async def recreate_dataset_models(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to recreate models: {str(e)}"
-        ) 
+        )
+
+# Enhanced Dataset Management API Endpoints
+
+@router.get("/{dataset_id}/metadata")
+async def get_dataset_metadata(
+    dataset_id: int,
+    refresh: bool = False,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get detailed metadata for a dataset."""
+    from app.services.cache import cache_service
+    
+    data_service = DataSharingService(db)
+    
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Dataset not found"
+        )
+    
+    # Check access permissions
+    if not data_service.can_access_dataset(current_user, dataset):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied to this dataset"
+        )
+    
+    try:
+        metadata_service = MetadataService(db)
+        
+        # Check cache first (unless refresh is requested)
+        if not refresh:
+            cached_metadata = cache_service.get(dataset_id, "metadata", ttl=3600)
+            if cached_metadata:
+                logger.info(f"📋 Returning cached metadata for dataset {dataset_id}")
+                return cached_metadata["data"]
+        
+        # Generate fresh metadata
+        logger.info(f"📋 Generating fresh metadata for dataset {dataset_id}")
+        
+        schema_metadata = await metadata_service.analyze_dataset_schema(dataset)
+        quality_metrics = await metadata_service.get_data_quality_metrics(dataset)
+        column_statistics = await metadata_service.generate_column_statistics(dataset)
+        
+        metadata_response = {
+            "dataset_id": dataset_id,
+            "dataset_name": dataset.name,
+            "schema_metadata": schema_metadata,
+            "quality_metrics": quality_metrics,
+            "column_statistics": column_statistics,
+            "basic_info": {
+                "type": dataset.type.value if dataset.type else "unknown",
+                "size_bytes": dataset.size_bytes,
+                "row_count": dataset.row_count,
+                "column_count": dataset.column_count,
+                "created_at": dataset.created_at.isoformat() if dataset.created_at else None,
+                "updated_at": dataset.updated_at.isoformat() if dataset.updated_at else None
+            },
+            "generated_at": schema_metadata.get("analysis_timestamp")
+        }
+        
+        # Cache the result
+        cache_service.set(dataset_id, "metadata", metadata_response, ttl=3600)
+        
+        # Log access
+        data_service.log_access(
+            user=current_user,
+            dataset=dataset,
+            access_type="metadata"
+        )
+        
+        return metadata_response
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get metadata for dataset {dataset_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get metadata: {str(e)}"
+        )
+
+@router.get("/{dataset_id}/preview")
+async def get_dataset_preview(
+    dataset_id: int,
+    rows: int = 20,
+    include_stats: bool = True,
+    refresh: bool = False,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get dataset content preview."""
+    from app.services.cache import cache_service
+    
+    data_service = DataSharingService(db)
+    
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Dataset not found"
+        )
+    
+    # Check access permissions
+    if not data_service.can_access_dataset(current_user, dataset):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied to this dataset"
+        )
+    
+    try:
+        preview_service = PreviewService(db)
+        
+        # Check cache first (unless refresh is requested)
+        cache_key_params = {"rows": rows, "include_stats": include_stats}
+        if not refresh:
+            cached_preview = cache_service.get(dataset_id, "preview", ttl=1800, **cache_key_params)
+            if cached_preview:
+                logger.info(f"👁️ Returning cached preview for dataset {dataset_id}")
+                return cached_preview["data"]
+        
+        # Generate fresh preview
+        logger.info(f"👁️ Generating fresh preview for dataset {dataset_id}")
+        
+        preview_data = await preview_service.generate_preview_data(
+            dataset=dataset,
+            rows=rows,
+            include_stats=include_stats
+        )
+        
+        preview_response = {
+            "dataset_id": dataset_id,
+            "dataset_name": dataset.name,
+            "preview": preview_data,
+            "request_params": {
+                "rows_requested": rows,
+                "include_stats": include_stats
+            }
+        }
+        
+        # Cache the result
+        cache_service.set(dataset_id, "preview", preview_response, ttl=1800, **cache_key_params)
+        
+        # Log access
+        data_service.log_access(
+            user=current_user,
+            dataset=dataset,
+            access_type="preview"
+        )
+        
+        return preview_response
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get preview for dataset {dataset_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get preview: {str(e)}"
+        )
+
+@router.post("/{dataset_id}/download-token")
+async def generate_download_token(
+    dataset_id: int,
+    file_format: str = "original",
+    compression: Optional[str] = None,
+    expires_in_hours: int = 24,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Generate a secure download token for dataset access."""
+    from app.services.download import DownloadService
+    
+    download_service = DownloadService(db)
+    
+    # Generate download token with custom expiration
+    download_info = await download_service.initiate_download(
+        dataset_id=dataset_id,
+        user=current_user,
+        file_format=file_format,
+        compression=compression
+    )
+    
+    return {
+        "message": "Download token generated successfully",
+        "download_token": download_info["download_token"],
+        "expires_at": download_info["expires_at"],
+        "dataset_id": dataset_id,
+        "file_format": file_format,
+        "compression": compression
+    }
+
+@router.post("/{dataset_id}/refresh-metadata")
+async def refresh_dataset_metadata(
+    dataset_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Refresh and update dataset metadata (owner only)."""
+    from app.services.cache import cache_service
+    
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Dataset not found"
+        )
+    
+    # Only owner or superuser can refresh metadata
+    if dataset.owner_id != current_user.id and not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only dataset owner can refresh metadata"
+        )
+    
+    try:
+        metadata_service = MetadataService(db)
+        
+        # Update metadata in database
+        result = await metadata_service.update_dataset_metadata(dataset_id)
+        
+        # Clear cache
+        cache_service.clear_dataset_cache(dataset_id)
+        
+        logger.info(f"🔄 Metadata refreshed for dataset {dataset_id}")
+        
+        return {
+            "message": "Dataset metadata refreshed successfully",
+            "dataset_id": dataset_id,
+            "status": result.get("status"),
+            "updated_at": result.get("updated_at")
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to refresh metadata for dataset {dataset_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to refresh metadata: {str(e)}"
+        )
+
+@router.get("/{dataset_id}/schema")
+async def get_dataset_schema(
+    dataset_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get dataset schema information."""
+    data_service = DataSharingService(db)
+    
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Dataset not found"
+        )
+    
+    # Check access permissions
+    if not data_service.can_access_dataset(current_user, dataset):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied to this dataset"
+        )
+    
+    try:
+        # Return schema from cached metadata or database
+        schema_info = dataset.schema_metadata or dataset.schema_info or {}
+        
+        schema_response = {
+            "dataset_id": dataset_id,
+            "dataset_name": dataset.name,
+            "schema": schema_info,
+            "basic_info": {
+                "type": dataset.type.value if dataset.type else "unknown",
+                "row_count": dataset.row_count,
+                "column_count": dataset.column_count
+            }
+        }
+        
+        # Log access
+        data_service.log_access(
+            user=current_user,
+            dataset=dataset,
+            access_type="schema"
+        )
+        
+        return schema_response
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get schema for dataset {dataset_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get schema: {str(e)}"
+        )

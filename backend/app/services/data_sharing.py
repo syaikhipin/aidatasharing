@@ -8,6 +8,8 @@ from datetime import datetime, timedelta
 import logging
 import secrets
 import hashlib
+import pandas as pd
+import numpy as np
 from fastapi import HTTPException, status
 from app.core.config import settings
 from app.services.mindsdb import MindsDBService
@@ -49,6 +51,277 @@ class DataSharingService:
                    user.department_id == dataset.department_id)
         
         return False
+    
+    def can_download_dataset(self, user: User, dataset: Dataset) -> bool:
+        """
+        Check if a user can download a dataset.
+        Download permissions are separate from view permissions.
+        Handles both uploaded files and connector-based datasets.
+        """
+        # First check basic access permissions
+        if not self.can_access_dataset(user, dataset):
+            return False
+        
+        # Check if downloads are globally disabled for this dataset
+        if not dataset.allow_download:
+            return False
+        
+        # Owner can always download their own datasets
+        if dataset.owner_id == user.id:
+            return True
+        
+        # Check organization-level download policies
+        org_download_policy = self._get_organization_download_policy(user.organization_id)
+        
+        # If organization has strict download policy, only owners and admins can download
+        if org_download_policy.get("restrict_downloads", False):
+            return user.role in ["owner", "admin"] or user.is_superuser
+        
+        # Check user role-based download permissions
+        user_download_permissions = self._get_user_download_permissions(user)
+        
+        # If user has download restrictions, check them
+        if user_download_permissions.get("download_restricted", False):
+            allowed_sharing_levels = user_download_permissions.get("allowed_sharing_levels", [])
+            return dataset.sharing_level.value in allowed_sharing_levels
+        
+        # Check dataset-specific download restrictions
+        if hasattr(dataset, 'download_restrictions') and dataset.download_restrictions:
+            restrictions = dataset.download_restrictions
+            
+            # Check role-based restrictions
+            if "allowed_roles" in restrictions:
+                if user.role not in restrictions["allowed_roles"]:
+                    return False
+            
+            # Check department-based restrictions
+            if "allowed_departments" in restrictions:
+                if not user.department_id or user.department_id not in restrictions["allowed_departments"]:
+                    return False
+        
+        # Special handling for connector-based datasets
+        is_connector_dataset = dataset.connector_id is not None
+        if is_connector_dataset:
+            # Check if connector-based downloads are restricted by organization policy
+            if org_download_policy.get("restrict_connector_downloads", False):
+                # Only admins and owners can download connector-based datasets if restricted
+                if not (user.role in ["owner", "admin"] or user.is_superuser):
+                    return False
+            
+            # Check if connector is active
+            if dataset.connector and not dataset.connector.is_active:
+                return False
+            
+            # Check connector-specific permissions
+            connector_permissions = self._get_connector_download_permissions(user, dataset.connector_id)
+            if not connector_permissions.get("can_download", True):
+                return False
+        else:
+            # Check if uploaded file downloads are restricted by organization policy
+            if org_download_policy.get("restrict_file_downloads", False):
+                # Check user role against allowed roles for file downloads
+                allowed_roles = org_download_policy.get("file_download_roles", ["owner", "admin", "manager", "member"])
+                if user.role not in allowed_roles:
+                    return False
+        
+        # Default: if user can access, they can download (unless restricted above)
+        return True
+        
+    def _get_connector_download_permissions(self, user: User, connector_id: int) -> Dict[str, Any]:
+        """Get connector-specific download permissions"""
+        try:
+            from app.models.dataset import DatabaseConnector
+            
+            connector = self.db.query(DatabaseConnector).filter(
+                DatabaseConnector.id == connector_id
+            ).first()
+            
+            if not connector:
+                return {"can_download": False}
+            
+            # Check if connector belongs to user's organization
+            if connector.organization_id != user.organization_id:
+                return {"can_download": False}
+            
+            # Default permissions
+            permissions = {
+                "can_download": True,
+                "allowed_formats": ["csv", "json"],
+                "max_rows": 100000
+            }
+            
+            # Role-based connector permissions
+            if user.role == "viewer":
+                permissions.update({
+                    "max_rows": 1000,
+                    "allowed_formats": ["csv"]
+                })
+            elif user.role == "member":
+                permissions.update({
+                    "max_rows": 10000
+                })
+            elif user.role in ["admin", "owner"]:
+                permissions.update({
+                    "max_rows": None  # No limit
+                })
+            
+            # Check connector type-specific restrictions
+            connector_type = connector.connector_type
+            if connector_type == "api":
+                # API connectors might have special restrictions
+                permissions.update({
+                    "allowed_formats": ["json", "csv"],
+                    "require_api_key": True
+                })
+            elif connector_type in ["mysql", "postgresql", "snowflake"]:
+                # Database connectors
+                permissions.update({
+                    "allowed_formats": ["csv", "json", "excel"],
+                    "allow_query_download": user.role in ["admin", "owner", "manager"]
+                })
+            
+            return permissions
+            
+        except Exception as e:
+            logger.error(f"Failed to get connector download permissions: {e}")
+            return {"can_download": False}
+    
+    def _get_organization_download_policy(self, organization_id: int) -> Dict[str, Any]:
+        """Get organization-level download policy"""
+        try:
+            organization = self.db.query(Organization).filter(
+                Organization.id == organization_id
+            ).first()
+            
+            if organization and hasattr(organization, 'download_policy'):
+                return organization.download_policy or {}
+            
+            # Default policy with separate settings for uploaded files and connectors
+            return {
+                # General download settings
+                "restrict_downloads": False,
+                "require_approval": False,
+                "allowed_file_types": ["csv", "json", "excel", "pdf", "parquet"],
+                "max_file_size_mb": 1000,
+                "rate_limit_per_hour": 50,
+                "allow_compression": True,
+                "allowed_compression_types": ["none", "zip", "gzip"],
+                
+                # Uploaded file specific settings
+                "restrict_file_downloads": False,
+                "file_download_roles": ["owner", "admin", "manager", "member", "viewer"],
+                "file_max_size_mb": 1000,
+                
+                # Connector specific settings
+                "restrict_connector_downloads": False,
+                "connector_download_roles": ["owner", "admin", "manager"],
+                "connector_max_rows": 100000,
+                "connector_allowed_types": ["mysql", "postgresql", "s3", "api", "mongodb", "snowflake", "bigquery", "redshift"]
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get organization download policy: {e}")
+            return {"restrict_downloads": False}
+    
+    def _get_user_download_permissions(self, user: User) -> Dict[str, Any]:
+        """Get user-specific download permissions"""
+        try:
+            # Check if user has specific download restrictions
+            user_permissions = {
+                "download_restricted": False,
+                "allowed_sharing_levels": ["private", "department", "organization"],
+                "max_downloads_per_day": 100,
+                "allowed_file_types": ["csv", "json", "excel", "pdf"]
+            }
+            
+            # Role-based permissions
+            if user.role == "viewer":
+                user_permissions.update({
+                    "download_restricted": True,
+                    "allowed_sharing_levels": ["organization"],
+                    "max_downloads_per_day": 10
+                })
+            elif user.role == "member":
+                user_permissions.update({
+                    "max_downloads_per_day": 50
+                })
+            elif user.role in ["admin", "owner"]:
+                user_permissions.update({
+                    "max_downloads_per_day": 1000
+                })
+            
+            return user_permissions
+            
+        except Exception as e:
+            logger.error(f"Failed to get user download permissions: {e}")
+            return {"download_restricted": False}
+    
+    def check_download_rate_limit(self, user: User) -> Dict[str, Any]:
+        """Check if user has exceeded download rate limits"""
+        try:
+            from app.models.dataset import DatasetDownload
+            from datetime import datetime, timedelta
+            
+            # Get user's download permissions
+            permissions = self._get_user_download_permissions(user)
+            max_downloads = permissions.get("max_downloads_per_day", 100)
+            
+            # Count downloads in the last 24 hours
+            since_time = datetime.utcnow() - timedelta(hours=24)
+            recent_downloads = self.db.query(DatasetDownload).filter(
+                DatasetDownload.user_id == user.id,
+                DatasetDownload.started_at >= since_time,
+                DatasetDownload.download_status == "completed"
+            ).count()
+            
+            # Check organization-level rate limits
+            org_policy = self._get_organization_download_policy(user.organization_id)
+            org_rate_limit = org_policy.get("rate_limit_per_hour", 50)
+            
+            # Count downloads in the last hour
+            since_hour = datetime.utcnow() - timedelta(hours=1)
+            recent_hour_downloads = self.db.query(DatasetDownload).filter(
+                DatasetDownload.user_id == user.id,
+                DatasetDownload.started_at >= since_hour,
+                DatasetDownload.download_status == "completed"
+            ).count()
+            
+            return {
+                "allowed": recent_downloads < max_downloads and recent_hour_downloads < org_rate_limit,
+                "daily_limit": max_downloads,
+                "daily_used": recent_downloads,
+                "hourly_limit": org_rate_limit,
+                "hourly_used": recent_hour_downloads,
+                "reset_time": (datetime.utcnow() + timedelta(hours=24 - datetime.utcnow().hour)).isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to check download rate limit: {e}")
+            return {"allowed": True, "error": str(e)}
+    
+    def log_download_attempt(
+        self, 
+        user: User, 
+        dataset: Dataset, 
+        success: bool,
+        error_message: Optional[str] = None,
+        ip_address: Optional[str] = None
+    ) -> bool:
+        """Log download attempt for audit and rate limiting"""
+        try:
+            # Log as access log
+            access_type = "download_success" if success else "download_failed"
+            self.log_access(user, dataset, access_type, ip_address)
+            
+            # Additional download-specific logging could be added here
+            if not success and error_message:
+                logger.warning(f"Download failed for user {user.id}, dataset {dataset.id}: {error_message}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to log download attempt: {e}")
+            return False
     
     def get_accessible_datasets(self, user: User, 
                               sharing_level: Optional[DataSharingLevel] = None,
@@ -336,7 +609,7 @@ class DataSharingService:
             "dataset_name": dataset.name
         }
 
-    def get_shared_dataset(
+    async def get_shared_dataset(
         self,
         share_token: str,
         password: Optional[str] = None,
@@ -377,21 +650,69 @@ class DataSharingService:
         dataset.last_accessed = datetime.utcnow()
         self.db.commit()
         
+        # Get preview data if available
+        preview_data = None
+        try:
+            # Use direct SQL query to get preview data
+            import pandas as pd
+            import os
+            
+            if dataset.file_path and os.path.exists(dataset.file_path):
+                if dataset.type.value.lower() == 'csv':
+                    df = pd.read_csv(dataset.file_path, nrows=10)
+                    headers = df.columns.tolist()
+                    rows = df.values.tolist()
+                    
+                    # Convert to native Python types
+                    rows = []
+                    for row in df.values:
+                        converted_row = []
+                        for val in row:
+                            if pd.isna(val):
+                                converted_row.append(None)
+                            elif isinstance(val, (np.integer, int)):
+                                converted_row.append(int(val))
+                            elif isinstance(val, (np.floating, float)):
+                                converted_row.append(float(val))
+                            elif isinstance(val, np.bool_):
+                                converted_row.append(bool(val))
+                            else:
+                                converted_row.append(str(val))
+                        rows.append(converted_row)
+                    
+                    preview_data = {
+                        "headers": headers,
+                        "rows": rows,
+                        "total_rows": len(rows),
+                        "type": "csv"
+                    }
+                    
+            logger.info(f"Generated preview data for shared dataset {dataset.id}: {len(preview_data['rows'] if preview_data else [])} rows")
+        except Exception as e:
+            logger.warning(f"Failed to generate preview for shared dataset {dataset.id}: {e}")
+            
         return {
-            "id": dataset.id,
-            "name": dataset.name,
+            "dataset_id": dataset.id,
+            "dataset_name": dataset.name,
             "description": dataset.description,
-            "type": dataset.type,
+            "file_type": dataset.type.value if hasattr(dataset.type, 'value') else str(dataset.type),
             "size_bytes": dataset.size_bytes,
             "row_count": dataset.row_count,
             "column_count": dataset.column_count,
             "schema_info": dataset.schema_info,
             "ai_summary": dataset.ai_summary,
             "ai_insights": dataset.ai_insights,
-            "chat_enabled": dataset.ai_chat_enabled,
+            "enable_chat": dataset.ai_chat_enabled,
             "allow_download": dataset.allow_download,
             "created_at": dataset.created_at,
-            "share_token": share_token
+            "expires_at": dataset.share_expires_at,
+            "share_token": share_token,
+            "access_allowed": True,
+            "requires_password": bool(dataset.share_password),
+            "owner_name": dataset.owner.full_name if dataset.owner else None,
+            "organization_name": dataset.organization.name if dataset.organization else None,
+            "shared_at": dataset.created_at,
+            "preview_data": preview_data
         }
 
     def create_chat_session(
