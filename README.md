@@ -1,237 +1,228 @@
 # AI Share Platform
 
-A powerful AI-driven data sharing platform built with **FastAPI** and **Next.js**, powered by **MindsDB** for machine learning capabilities.
+A comprehensive AI-powered data sharing platform that enables organizations to securely share, analyze, and build machine learning models on their data.
 
-## 🚀 Tech Stack
+## 🚀 Quick Start
+
+### Fresh Installation
+```bash
+# Clone the repository
+git clone <repository-url>
+cd simpleaisharing
+
+# Run fresh installation setup
+python setup_fresh_install.py
+
+# Start development environment
+./start-dev.sh
+```
+
+### Access the Platform
+- **Frontend**: http://localhost:3000
+- **Backend API**: http://localhost:8000
+- **API Documentation**: http://localhost:8000/docs
+
+### Default Admin Credentials
+- **Email**: admin@aishare.com
+- **Password**: admin123
+
+## ✨ Key Features
+
+### 📊 Dataset Management
+- **Multiple Formats**: CSV, JSON, Excel, PDF, DOCX, DOC, TXT, RTF, ODT
+- **Document Processing**: Automatic text extraction and analysis
+- **Schema Detection**: Automatic data structure analysis
+- **Preview Generation**: Smart data previews and summaries
+
+### 🔗 Data Connectors
+- **Databases**: MySQL, PostgreSQL, MongoDB, Snowflake, BigQuery, Redshift, ClickHouse
+- **Cloud Storage**: AWS S3 integration
+- **API Sources**: REST API data connectors
+- **File Systems**: Local and network file system access
+
+### 🤖 AI Integration
+- **MindsDB**: Advanced ML model creation and management
+- **Google Gemini**: Natural language processing and chat
+- **Document Chat**: AI-powered document Q&A
+- **Data Insights**: Automated analysis and recommendations
+
+### 🔐 Security & Sharing
+- **Organization Scoping**: Multi-tenant data isolation
+- **Secure Sharing**: Password-protected, expiring share links
+- **Role-Based Access**: Granular permission management
+- **Audit Logging**: Comprehensive activity tracking
+
+### 📈 Analytics & Monitoring
+- **Usage Analytics**: Real-time usage monitoring
+- **Performance Metrics**: System performance tracking
+- **Data Quality**: Automated data quality assessment
+- **User Activity**: Detailed user activity logs
+
+## 🏗️ Architecture
 
 ### Backend (FastAPI)
-- **FastAPI** - Modern, fast web framework for building APIs
-- **SQLAlchemy** - SQL toolkit and ORM
-- **JWT Authentication** - Secure token-based authentication
-- **MindsDB** - AI/ML engine for creating and managing models
-- **Pydantic** - Data validation using Python type annotations
-- **Uvicorn** - ASGI server implementation
+- **FastAPI**: Modern, fast web framework
+- **SQLAlchemy**: Advanced ORM with SQLite/PostgreSQL support
+- **Pydantic**: Data validation and serialization
+- **JWT Authentication**: Secure token-based authentication
+- **Background Tasks**: Async processing for large operations
 
 ### Frontend (Next.js)
-- **Next.js 14** - React framework with App Router
-- **TypeScript** - Type-safe JavaScript
-- **Tailwind CSS** - Utility-first CSS framework
-- **Axios** - HTTP client for API calls
-- **Lucide React** - Beautiful icons
+- **Next.js 15**: React framework with App Router
+- **TypeScript**: Type-safe development
+- **Tailwind CSS**: Utility-first styling
+- **Responsive Design**: Mobile-friendly interface
+- **Real-time Updates**: Live data synchronization
+
+### Database
+- **Development**: SQLite for fast local development
+- **Production**: PostgreSQL for scalable production
+- **Unified Schema**: Single database for all data
+- **Migration System**: Automated schema updates
 
 ## 📁 Project Structure
 
 ```
 simpleaisharing/
-├── backend/                    # FastAPI backend
-│   ├── app/
-│   │   ├── api/               # API routes
-│   │   │   ├── auth.py        # Authentication endpoints
-│   │   │   ├── admin.py       # Admin panel endpoints
-│   │   │   └── mindsdb.py     # MindsDB integration endpoints
-│   │   ├── core/              # Core functionality
-│   │   │   ├── auth.py        # Authentication utilities
-│   │   │   ├── config.py      # Application settings
-│   │   │   ├── database.py    # Database connection
-│   │   │   └── init_db.py     # Database initialization
-│   │   ├── models/            # SQLAlchemy models
-│   │   │   ├── user.py        # User model
-│   │   │   └── config.py      # Configuration model
-│   │   ├── schemas/           # Pydantic schemas
-│   │   │   ├── user.py        # User schemas
-│   │   │   └── config.py      # Configuration schemas
-│   │   └── services/          # Business logic
-│   │       └── mindsdb.py     # MindsDB service
-│   ├── main.py                # FastAPI application entry point
-│   ├── start.py               # Startup script
-│   ├── .env                   # Environment variables
-│   └── requirements.txt       # Python dependencies
-├── frontend/                   # Next.js frontend
-│   ├── src/
-│   │   ├── app/               # App Router pages
-│   │   ├── components/        # React components
-│   │   │   ├── ui/            # UI components
-│   │   │   ├── auth/          # Authentication components
-│   │   │   ├── admin/         # Admin panel components
-│   │   │   └── mindsdb/       # MindsDB components
-│   │   └── lib/               # Utilities
-│   │       ├── api.ts         # API client
-│   │       └── utils.ts       # Helper functions
-│   ├── package.json           # Node.js dependencies
-│   └── tailwind.config.js     # Tailwind configuration
-└── TODO.md                    # Project roadmap
+├── backend/                 # FastAPI backend application
+│   ├── app/                # Application code
+│   │   ├── api/           # API endpoints
+│   │   ├── core/          # Core functionality
+│   │   ├── models/        # Database models
+│   │   ├── schemas/       # Pydantic schemas
+│   │   └── services/      # Business logic
+│   └── requirements.txt   # Python dependencies
+├── frontend/               # Next.js frontend application
+│   ├── src/               # Source code
+│   │   ├── app/          # Next.js pages
+│   │   ├── components/   # React components
+│   │   └── lib/          # Utilities
+│   └── package.json      # Node.js dependencies
+├── storage/               # Data storage
+│   ├── aishare_platform.db # Unified database
+│   ├── uploads/          # File uploads
+│   ├── documents/        # Document processing
+│   └── logs/            # Application logs
+├── tests/                # Test files
+├── docs/                 # Documentation
+├── migrations/           # Database migrations
+├── .env                 # Environment configuration
+└── README.md           # This file
 ```
 
-## 🛠️ Installation & Setup
+## 🛠️ Development
 
 ### Prerequisites
-- Python 3.9+
-- Node.js 18+
-- Anaconda/Miniconda
+- **Python 3.9+** (recommended: conda environment)
+- **Node.js 18+**
+- **Git**
 
-### Backend Setup
+### Setup Development Environment
+```bash
+# Create conda environment (recommended)
+conda create -n aishare-platform python=3.9
+conda activate aishare-platform
 
-1. **Create conda environment:**
-   ```bash
-   conda create --name aishare-platform python=3.9 -y
-   conda activate aishare-platform
-   ```
+# Run fresh installation
+python setup_fresh_install.py
 
-2. **Install dependencies:**
-   ```bash
-   cd backend
-   pip install -r requirements.txt
-   ```
+# Start development servers
+./start-dev.sh
+```
 
-3. **Configure environment:**
-   ```bash
-   # Edit .env file with your settings
-   cp .env.example .env
-   ```
+### Development Commands
+```bash
+# Start development environment
+./start-dev.sh
 
-4. **Initialize database and start server:**
-   ```bash
-   python start.py
-   ```
+# Stop development environment
+./stop-dev.sh
 
-   The backend will be available at: `http://localhost:8000`
-   API documentation: `http://localhost:8000/docs`
+# Run tests
+cd tests && python run_all_tests.py
 
-### Frontend Setup
+# Backend only
+cd backend && python start.py
 
-1. **Install dependencies:**
-   ```bash
-   cd frontend
-   npm install
-   ```
+# Frontend only
+cd frontend && npm run dev
+```
 
-2. **Start development server:**
-   ```bash
-   npm run dev
-   ```
+### Environment Configuration
+Copy `.env.example` to `.env` and update with your configuration:
 
-   The frontend will be available at: `http://localhost:3000`
+```bash
+# Database
+DATABASE_URL=sqlite:///./storage/aishare_platform.db
 
-## 🔧 Configuration
+# Google AI API Key
+GOOGLE_API_KEY=your-google-api-key-here
 
-### Environment Variables
-
-#### Backend (.env)
-```env
-SECRET_KEY=your-secret-key-here
-DATABASE_URL=sqlite:///./app.db
-BACKEND_CORS_ORIGINS=http://localhost:3000
+# MindsDB Configuration
 MINDSDB_URL=http://127.0.0.1:47334
-FIRST_SUPERUSER=admin@example.com
-FIRST_SUPERUSER_PASSWORD=admin123
-```
 
-#### Frontend (.env.local)
-```env
-NEXT_PUBLIC_API_URL=http://localhost:8000
-```
-
-## 🎯 Features
-
-### Authentication
-- [x] User registration and login
-- [x] JWT token-based authentication
-- [x] Role-based access control (Admin/User)
-- [x] Secure password hashing
-
-### Admin Panel
-- [x] Configuration management
-- [x] Google API key management
-- [x] User management
-- [x] System settings
-
-### MindsDB Integration
-- [x] Model creation and management
-- [x] Database connections
-- [x] SQL query execution
-- [x] Prediction endpoints
-- [x] Model deployment
-
-### UI/UX
-- [x] Modern responsive design
-- [x] Tailwind CSS styling
-- [x] Component-based architecture
-- [x] TypeScript for type safety
-
-## 🚀 Deployment
-
-### Backend Deployment Options
-- **Railway** - Recommended for FastAPI
-- **Render** - Easy deployment with database
-- **DigitalOcean App Platform** - Scalable option
-
-### Frontend Deployment Options
-- **Vercel** - Recommended for Next.js (optimal)
-- **Cloudflare Pages** - Works with all frameworks
-- **Netlify** - Alternative option
-
-### Database Options
-- **SQLite** - Development/small scale
-- **PostgreSQL** - Production (Railway/Render)
-- **Supabase** - Managed PostgreSQL option
-
-## 📝 API Endpoints
-
-### Authentication
-- `POST /api/v1/auth/register` - User registration
-- `POST /api/v1/auth/login` - User login
-- `GET /api/v1/auth/me` - Get current user
-
-### Admin
-- `GET /api/v1/admin/config` - Get configurations
-- `POST /api/v1/admin/config` - Create configuration
-- `PUT /api/v1/admin/config/{key}` - Update configuration
-- `POST /api/v1/admin/google-api-key` - Set Google API key
-
-### MindsDB
-- `GET /api/v1/mindsdb/status` - Check MindsDB status
-- `GET /api/v1/mindsdb/models` - List models
-- `POST /api/v1/mindsdb/models` - Create model
-- `POST /api/v1/mindsdb/models/{name}/predict` - Make prediction
-- `GET /api/v1/mindsdb/databases` - List databases
-- `POST /api/v1/mindsdb/sql` - Execute SQL
-
-## 🔐 Default Credentials
-
-**Admin User:**
-- Email: `admin@example.com`
-- Password: `admin123`
-
-> ⚠️ **Important:** Change these credentials in production!
-
-## 🧪 Development
-
-### Running Tests
-```bash
-# Backend tests
-cd backend
-pytest
-
-# Frontend tests
-cd frontend
-npm test
-```
-
-### Code Formatting
-```bash
-# Backend
-black . && isort .
-
-# Frontend
-npm run lint
+# Security
+SECRET_KEY=your-secret-key-here
 ```
 
 ## 📚 Documentation
 
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [Next.js Documentation](https://nextjs.org/docs)
-- [MindsDB Documentation](https://docs.mindsdb.com/)
-- [Tailwind CSS Documentation](https://tailwindcss.com/docs)
+- **[Project Structure](docs/PROJECT_STRUCTURE.md)** - Detailed project organization
+- **[Enhanced Dataset Management](docs/ENHANCED_DATASET_MANAGEMENT.md)** - Feature documentation
+- **[Implementation Summary](docs/IMPLEMENTATION_SUMMARY.md)** - Technical implementation details
+- **[Migration Summary](docs/MIGRATION_SUMMARY.md)** - Database migration information
+
+## 🧪 Testing
+
+### Run All Tests
+```bash
+cd tests
+python run_all_tests.py
+```
+
+### Test Categories
+- **Backend Tests**: API endpoint testing
+- **Frontend Tests**: Component and integration testing
+- **Document Processing**: Document upload and processing tests
+- **Integration Tests**: End-to-end workflow testing
+
+## 🚀 Deployment
+
+### Development Deployment
+```bash
+# Start with development configuration
+./start-dev.sh
+```
+
+### Production Deployment
+1. Update `.env` with production configuration
+2. Set `NODE_ENV=production`
+3. Configure PostgreSQL database
+4. Set up cloud storage (S3)
+5. Configure reverse proxy (nginx)
+6. Set up SSL certificates
+
+### Docker Deployment (Coming Soon)
+```bash
+# Build and run with Docker
+docker-compose up -d
+```
+
+## 🔧 Configuration
+
+### Environment Variables
+- **DATABASE_URL**: Database connection string
+- **GOOGLE_API_KEY**: Google AI API key for Gemini integration
+- **MINDSDB_URL**: MindsDB server URL
+- **SECRET_KEY**: JWT signing secret
+- **AWS_ACCESS_KEY_ID**: AWS credentials for S3
+- **MAX_FILE_SIZE_MB**: Maximum file upload size
+
+### Feature Flags
+- **ENABLE_DATA_SHARING**: Enable/disable data sharing features
+- **ENABLE_AI_CHAT**: Enable/disable AI chat functionality
+- **ENABLE_S3_CONNECTOR**: Enable/disable S3 integration
+- **ENABLE_DATABASE_CONNECTORS**: Enable/disable database connectors
 
 ## 🤝 Contributing
 
@@ -241,18 +232,55 @@ npm run lint
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
+### Development Guidelines
+- Follow PEP 8 for Python code
+- Use TypeScript for frontend development
+- Write tests for new features
+- Update documentation for changes
+- Follow conventional commit messages
+
 ## 📄 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 🆘 Support
 
-If you encounter any issues or have questions:
+### Getting Help
+- **Documentation**: Check the `docs/` directory
+- **Issues**: Create an issue on GitHub
+- **Discussions**: Use GitHub Discussions for questions
 
-1. Check the existing issues on GitHub
-2. Create a new issue with detailed description
-3. Join our community discussions
+### Common Issues
+- **Database Connection**: Ensure SQLite file permissions are correct
+- **Port Conflicts**: Check if ports 3000/8000 are available
+- **Dependencies**: Run `pip install -r backend/requirements.txt`
+- **Environment**: Verify `.env` file configuration
+
+## 🎯 Roadmap
+
+### Current Version (v1.0)
+- ✅ Core dataset management
+- ✅ Document processing
+- ✅ Data connectors
+- ✅ AI chat integration
+- ✅ Secure sharing
+
+### Upcoming Features (v1.1)
+- 🔄 Advanced document analysis (OCR, table extraction)
+- 🔄 More database connectors (Oracle, SQL Server)
+- 🔄 Enhanced AI models and analysis
+- 🔄 Real-time collaboration features
+- 🔄 Advanced analytics dashboard
+
+### Future Plans (v2.0)
+- 🔮 Machine learning pipeline automation
+- 🔮 Advanced data visualization
+- 🔮 API marketplace
+- 🔮 Enterprise SSO integration
+- 🔮 Multi-cloud deployment
 
 ---
 
-**Happy coding! 🎉** 
+**AI Share Platform** - Empowering organizations with intelligent data sharing and AI-driven insights.
+
+*Built with ❤️ using FastAPI, Next.js, and modern AI technologies.*

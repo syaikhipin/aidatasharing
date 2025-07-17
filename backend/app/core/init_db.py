@@ -16,8 +16,11 @@ from app.models.analytics import (
     APIUsage, UsageStats, SystemMetrics
 )
 from app.models.file_handler import FileUpload, MindsDBHandler, FileProcessingLog
+from migrations.migration_manager import MigrationManager
 import logging
 import sys
+import os
+from pathlib import Path
 import os
 
 # Add database path for migration manager
@@ -29,6 +32,13 @@ logger = logging.getLogger(__name__)
 
 def init_db():
     """Initialize database with tables and default data."""
+    # Create storage directory if it doesn't exist
+    storage_dir = Path("./storage")
+    storage_dir.mkdir(exist_ok=True)
+    
+    uploads_dir = storage_dir / "uploads"
+    uploads_dir.mkdir(exist_ok=True)
+    
     engine = create_engine(
         settings.DATABASE_URL,
         connect_args={"check_same_thread": False} if "sqlite" in settings.DATABASE_URL else {}
@@ -37,23 +47,9 @@ def init_db():
     # Create all tables
     Base.metadata.create_all(bind=engine)
     
-    # Run migrations using the migration manager
-    # try:
-    #     logger.info("Running database migrations...")
-    #     migration_manager = MigrationManager()
-    #     result = migration_manager.migrate()
-        
-    #     if result["status"] == "success":
-    #         if result["executed"]:
-    #             logger.info(f"Executed {len(result['executed'])} migrations: {result['executed']}")
-    #         else:
-    #             logger.info("All migrations are up to date")
-    #     else:
-    #         logger.warning(f"Migration partially failed: {result['message']}")
-            
-    # except Exception as e:
-    #     logger.warning(f"Migration system failed: {e}")
-    #     # Continue anyway as this is non-critical
+    # Run database migrations
+    migration_manager = MigrationManager()
+    migration_manager.migrate()
     
     # Create session
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -157,4 +153,4 @@ def init_db():
 
 
 if __name__ == "__main__":
-    init_db() 
+    init_db()

@@ -1,9 +1,9 @@
 """
-Database Connectors API endpoints
-Provides endpoints for managing MySQL, PostgreSQL, S3, and other data connectors
+Enhanced Database Connectors API endpoints
+Provides endpoints for managing MySQL, PostgreSQL, S3, document processing, and other data connectors
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
 import logging
@@ -14,7 +14,9 @@ from app.core.database import get_db
 from app.core.auth import get_current_user
 from app.models.user import User
 from app.models.dataset import DatabaseConnector
+from app.models.organization import DataSharingLevel
 from app.services.mindsdb import MindsDBService
+from app.services.connector_service import ConnectorService
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)

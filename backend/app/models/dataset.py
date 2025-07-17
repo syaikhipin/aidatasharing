@@ -16,6 +16,11 @@ class DatasetType(str, enum.Enum):
     EXCEL = "excel"
     PARQUET = "parquet"
     PDF = "pdf"
+    DOCX = "docx"
+    DOC = "doc"
+    TXT = "txt"
+    RTF = "rtf"
+    ODT = "odt"
 
 
 class DatasetStatus(str, enum.Enum):

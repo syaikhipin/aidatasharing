@@ -236,7 +236,7 @@ class DatasetAccess(Base):
 
 
 # DatasetDownload class is defined in app.models.dataset to avoid table conflicts
-# Import it here if needed for analytics relationships
+from app.models.dataset import DatasetDownload
 
 
 class ChatInteraction(Base):

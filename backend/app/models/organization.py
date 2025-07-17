@@ -45,9 +45,9 @@ class Organization(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Relationships
-    users = relationship("User", back_populates="organization")
-    departments = relationship("Department", back_populates="organization")
+    # Relationships - using string references to avoid circular imports
+    users = relationship("User", back_populates="organization", lazy="dynamic")
+    departments = relationship("Department", back_populates="organization", lazy="dynamic")
 
 
 class Department(Base):

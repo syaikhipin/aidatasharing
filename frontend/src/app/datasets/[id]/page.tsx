@@ -274,6 +274,48 @@ function DatasetDetailContent() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Main Content */}
           <div className="lg:col-span-2 space-y-8">
+            {/* Document Preview (for document datasets) */}
+            {dataset.document_type && (
+              <div className="bg-white shadow rounded-lg p-6">
+                <h3 className="text-lg font-medium text-gray-900 mb-4">Document Preview</h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                  <div>
+                    <span className="text-sm font-medium text-gray-500">Document Type</span>
+                    <p className="mt-1 text-sm text-gray-900 uppercase">{dataset.document_type}</p>
+                  </div>
+                  {dataset.page_count && (
+                    <div>
+                      <span className="text-sm font-medium text-gray-500">Pages</span>
+                      <p className="mt-1 text-sm text-gray-900">{dataset.page_count}</p>
+                    </div>
+                  )}
+                  {dataset.word_count && (
+                    <div>
+                      <span className="text-sm font-medium text-gray-500">Words</span>
+                      <p className="mt-1 text-sm text-gray-900">{dataset.word_count.toLocaleString()}</p>
+                    </div>
+                  )}
+                  {dataset.text_extraction_method && (
+                    <div>
+                      <span className="text-sm font-medium text-gray-500">Extraction</span>
+                      <p className="mt-1 text-sm text-gray-900">{dataset.text_extraction_method}</p>
+                    </div>
+                  )}
+                </div>
+                {dataset.extracted_text && (
+                  <div>
+                    <span className="text-sm font-medium text-gray-500 mb-2 block">Text Preview</span>
+                    <div className="bg-gray-50 rounded-md p-4 max-h-64 overflow-y-auto">
+                      <pre className="whitespace-pre-wrap text-sm text-gray-700">
+                        {dataset.extracted_text.substring(0, 1000)}
+                        {dataset.extracted_text.length > 1000 && '...'}
+                      </pre>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Dataset Info */}
             <div className="bg-white shadow rounded-lg p-6">
               <h3 className="text-lg font-medium text-gray-900 mb-4">Dataset Information</h3>

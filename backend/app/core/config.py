@@ -9,8 +9,8 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "AI Share Platform"
     VERSION: str = "1.0.0"
     
-    # Database
-    DATABASE_URL: str = "sqlite:///./app.db"
+    # Database - Unified database location
+    DATABASE_URL: str = "sqlite:///./storage/aishare_platform.db"
     
     # CORS origins - will be parsed from comma-separated string
     BACKEND_CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8080,http://localhost:3001"
@@ -55,8 +55,19 @@ class Settings(BaseSettings):
     
     # File Upload Configuration
     MAX_FILE_SIZE_MB: int = 100
-    ALLOWED_FILE_TYPES: str = "csv,json,xlsx,xls,txt"
-    UPLOAD_PATH: str = "./uploads"
+    ALLOWED_FILE_TYPES: str = "csv,json,xlsx,xls,txt,pdf,docx,doc,rtf,odt"
+    UPLOAD_PATH: str = "./storage/uploads"
+    
+    # Document Processing Configuration
+    MAX_DOCUMENT_SIZE_MB: int = 50
+    SUPPORTED_DOCUMENT_TYPES: str = "pdf,docx,doc,txt,rtf,odt"
+    DOCUMENT_STORAGE_PATH: str = "./storage/documents"
+    
+    # Data Connector Configuration
+    CONNECTOR_TIMEOUT: int = 30
+    MAX_CONNECTORS_PER_ORG: int = 10
+    ENABLE_S3_CONNECTOR: bool = True
+    ENABLE_DATABASE_CONNECTORS: bool = True
     
     def get_allowed_file_types(self) -> List[str]:
         """Parse allowed file types from comma-separated string."""
