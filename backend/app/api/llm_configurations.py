@@ -48,7 +48,7 @@ class LLMConfigurationUpdate(BaseModel):
 
 
 class LLMConfigurationResponse(BaseModel):
-    model_config = {"protected_namespaces": ()}
+    model_config = {"protected_namespaces": (), "from_attributes": True}
     
     id: int
     name: str
@@ -63,9 +63,6 @@ class LLMConfigurationResponse(BaseModel):
     last_used_at: Optional[datetime]
     created_at: datetime
     organization_id: int
-
-    class Config:
-        from_attributes = True
 
 
 class LLMTestRequest(BaseModel):
