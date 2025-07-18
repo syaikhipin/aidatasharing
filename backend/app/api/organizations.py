@@ -116,7 +116,7 @@ async def list_organizations(
     return organizations
 
 
-@router.get("/my", response_model=OrganizationWithDepartments)
+@router.get("/my")
 async def get_my_organization(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -128,14 +128,48 @@ async def get_my_organization(
             detail="User is not part of any organization"
         )
     
-    organization = db.query(Organization).options(
-        joinedload(Organization.departments)
-    ).filter(Organization.id == current_user.organization_id).first()
+    # Get organization
+    organization = db.query(Organization).filter(
+        Organization.id == current_user.organization_id
+    ).first()
     
     if not organization:
-        raise HTTPException(status_code=404, detail="Organization not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Organization not found"
+        )
     
-    return organization
+    # Manually load departments
+    departments = db.query(Department).filter(
+        Department.organization_id == organization.id
+    ).all()
+    
+    # Create a dictionary response
+    return {
+        "id": organization.id,
+        "name": organization.name,
+        "slug": organization.slug,
+        "description": organization.description,
+        "type": organization.type.value,
+        "is_active": organization.is_active,
+        "allow_external_sharing": organization.allow_external_sharing,
+        "default_sharing_level": organization.default_sharing_level.value,
+        "website": organization.website,
+        "contact_email": organization.contact_email,
+        "created_at": organization.created_at,
+        "updated_at": organization.updated_at,
+        "departments": [
+            {
+                "id": dept.id,
+                "name": dept.name,
+                "description": dept.description,
+                "is_active": dept.is_active,
+                "organization_id": dept.organization_id,
+                "created_at": dept.created_at,
+                "updated_at": dept.updated_at
+            } for dept in departments
+        ]
+    }
 
 
 @router.get("/{organization_id}", response_model=OrganizationWithDepartments)

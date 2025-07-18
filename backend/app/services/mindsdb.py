@@ -17,6 +17,21 @@ class MindsDBService:
         self.base_url = settings.MINDSDB_URL
         self.api_key = settings.GOOGLE_API_KEY
         
+        # Debug log the API key (masked for security)
+        if self.api_key:
+            masked_key = self.api_key[:4] + "..." + self.api_key[-4:] if len(self.api_key) > 8 else "***"
+            logger.info(f"✅ Google API key loaded: {masked_key}")
+        else:
+            logger.warning("⚠️ No Google API key found in settings")
+            # Try to load directly from environment
+            import os
+            self.api_key = os.environ.get("GOOGLE_API_KEY")
+            if self.api_key:
+                masked_key = self.api_key[:4] + "..." + self.api_key[-4:] if len(self.api_key) > 8 else "***"
+                logger.info(f"✅ Google API key loaded from environment: {masked_key}")
+            else:
+                logger.error("❌ No Google API key found in environment either")
+        
         # Model configurations from environment
         self.engine_name = settings.GEMINI_ENGINE_NAME
         self.default_model = settings.DEFAULT_GEMINI_MODEL
@@ -39,6 +54,14 @@ class MindsDBService:
         try:
             logger.info(f"🔗 Connecting to MindsDB SDK at {self.base_url}")
             self.connection = mindsdb_sdk.connect(self.base_url)
+            
+            # Ensure we're using the mindsdb project
+            try:
+                self.connection.query("USE mindsdb")
+                logger.info(f"✅ Using mindsdb project")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not set mindsdb project: {e}")
+            
             self._connected = True
             logger.info(f"✅ Connected to MindsDB SDK at {self.base_url}")
             return True
@@ -151,13 +174,12 @@ class MindsDBService:
             if not column_name:
                 column_name = "question"
 
-            # Create model using raw SQL
+            # Create model using raw SQL with proper project context
             create_model_sql = f"""
-            CREATE MODEL IF NOT EXISTS mindsdb.{model_name}
+            CREATE MODEL {model_name}
             PREDICT answer
             USING
                 engine = '{self.engine_name}',
-                column = '{column_name}',
                 model = '{self.default_model}';
             """
             
@@ -194,49 +216,150 @@ class MindsDBService:
             }
 
     def ai_chat(self, message: str, model_name: Optional[str] = None) -> Dict[str, Any]:
-        """Handle AI chat using direct Gemini API as primary method."""
+        """Handle AI chat using MindsDB with Gemini integration."""
         if not model_name:
             model_name = self.chat_model_name
 
         try:
-            # Use direct Gemini as primary method since it's reliable and what user wants
-            logger.info(f"💬 Using direct Gemini API for chat (model: {model_name})")
-            result = self._direct_gemini_chat(message)
-            
-            # Update the model name to reflect the requested model
-            result["model"] = f"{model_name} (Direct Gemini API)"
-            result["source"] = "direct_gemini_primary"
-            
-            return result
+            # Only use MindsDB for chat - no fallback to direct API
+            if self._ensure_connection() and self.connection:
+                try:
+                    logger.info(f"💬 Using MindsDB for chat with model: {model_name}")
+                    
+                    # First ensure the model exists and is ready
+                    model_result = self.create_gemini_model(model_name)
+                    if model_result.get("status") == "error":
+                        logger.error(f"❌ Failed to create/verify model {model_name}: {model_result.get('message')}")
+                        return {
+                            "answer": f"I'm sorry, but I couldn't initialize the AI model: {model_result.get('message')}",
+                            "error": f"Model creation failed: {model_result.get('message')}",
+                            "model": f"{model_name} (MindsDB Error)",
+                            "timestamp": datetime.utcnow().isoformat(),
+                            "source": "mindsdb_model_error"
+                        }
+                    
+                    # Wait a moment for the model to be ready
+                    import time
+                    time.sleep(2)
+                    
+                    # Check if model is ready by querying model status
+                    try:
+                        status_query = f"DESCRIBE mindsdb.{model_name}"
+                        status_result = self.connection.query(status_query)
+                        logger.info(f"🔍 Model status query executed")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Could not check model status: {e}")
+                    
+                    # Query the model using MindsDB - Gemini models use 'response' column
+                    query = f"""
+                    SELECT response 
+                    FROM {model_name} 
+                    WHERE question = '{message.replace("'", "''")}'
+                    """
+                    
+                    logger.info(f"🔍 Executing MindsDB query: {query}")
+                    result = self.connection.query(query)
+                    logger.info(f"🔍 Query result type: {type(result)}")
+                    
+                    if result:
+                        try:
+                            # Try different methods to fetch data
+                            if hasattr(result, 'fetch_all'):
+                                rows = result.fetch_all()
+                                logger.info(f"🔍 fetch_all() returned {len(rows) if rows else 0} rows")
+                            elif hasattr(result, 'fetch'):
+                                rows = result.fetch()
+                                logger.info(f"🔍 fetch() returned: {type(rows)}")
+                                if hasattr(rows, 'to_dict'):
+                                    rows = [rows.to_dict()]
+                                elif not isinstance(rows, list):
+                                    rows = [rows] if rows is not None else []
+                            else:
+                                logger.warning(f"⚠️ Result object has no fetch method: {dir(result)}")
+                                rows = []
+                            
+                            if rows and len(rows) > 0:
+                                logger.info(f"🔍 First row content: {rows[0]}")
+                                # MindsDB Gemini models use 'response' column, not 'answer'
+                                row_data = rows[0]
+                                answer = ""
+                                
+                                if isinstance(row_data, dict):
+                                    answer = row_data.get('response', '')
+                                else:
+                                    answer = str(row_data)
+                                
+                                # Handle case where answer might be a complex object
+                                if not isinstance(answer, str):
+                                    answer = str(answer)
+                                
+                                # Clean up the response format if it's a pandas Series representation
+                                if answer.startswith("{0: '") and answer.endswith("'}"):
+                                    # Extract the actual response from pandas Series format
+                                    answer = answer[5:-2]  # Remove "{0: '" and "'}"
+                                elif answer.startswith("{0: \"") and answer.endswith("\"}"):
+                                    # Handle double quotes
+                                    answer = answer[5:-2]  # Remove "{0: \"" and "\"}"
+                                
+                                # Clean up newlines
+                                answer = answer.replace('\\n', '\n').strip()
+                                
+                                if answer and answer.strip():
+                                    return {
+                                        "answer": answer,
+                                        "model": f"{model_name} (MindsDB)",
+                                        "timestamp": datetime.utcnow().isoformat(),
+                                        "tokens_used": len(message.split()) + len(answer.split()),
+                                        "source": "mindsdb"
+                                    }
+                                else:
+                                    logger.warning(f"⚠️ MindsDB query returned empty response for model {model_name}")
+                            else:
+                                logger.warning(f"⚠️ MindsDB query returned no rows for model {model_name}")
+                                
+                        except Exception as fetch_error:
+                            logger.error(f"❌ Error fetching MindsDB result: {fetch_error}")
+                    
+                    # If we get here, the query didn't return a valid answer
+                    logger.warning(f"⚠️ MindsDB query returned no valid result for model {model_name}")
+                    return {
+                        "answer": "I'm sorry, but I couldn't generate a response for your question. The MindsDB model may need more time to initialize or there might be an issue with the query.",
+                        "error": "No valid answer returned from MindsDB",
+                        "model": f"{model_name} (MindsDB)",
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "source": "mindsdb_empty"
+                    }
+                
+                except Exception as e:
+                    logger.error(f"❌ MindsDB chat failed: {e}")
+                    return {
+                        "answer": f"I'm sorry, but I encountered an error while processing your question through MindsDB: {str(e)}",
+                        "error": f"MindsDB chat failed: {str(e)}",
+                        "model": f"{model_name} (MindsDB Error)",
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "source": "mindsdb_error"
+                    }
+            else:
+                logger.error("❌ MindsDB connection not available")
+                return {
+                    "answer": "I'm sorry, but I couldn't connect to MindsDB. Please ensure the MindsDB service is running and properly configured.",
+                    "error": "MindsDB connection not available",
+                    "model": "Connection Error",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "source": "connection_error"
+                }
 
         except Exception as e:
             logger.error(f"❌ AI chat failed: {e}")
             return {
+                "answer": f"I'm sorry, but I encountered an error: {str(e)}",
                 "error": f"Chat failed: {str(e)}",
                 "message": message,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
+                "source": "general_error"
             }
 
-    def _direct_gemini_chat(self, message: str) -> Dict[str, Any]:
-        """Direct Gemini API chat as fallback."""
-        try:
-            model = genai.GenerativeModel(self.default_model)
-            response = model.generate_content(message)
-            
-            return {
-                "answer": response.text,
-                "model": f"{self.default_model} (Direct API)",
-                "timestamp": datetime.utcnow().isoformat(),
-                "tokens_used": len(message.split()) + len(response.text.split()),
-                "source": "direct_gemini"
-            }
-        except Exception as e:
-            logger.error(f"❌ Direct Gemini API failed: {e}")
-            return {
-                "error": f"Direct API failed: {str(e)}",
-                "message": message,
-                "timestamp": datetime.utcnow().isoformat()
-            }
+
 
     def create_dataset_ml_model(
         self, 
@@ -247,6 +370,17 @@ class MindsDBService:
     ) -> Dict[str, Any]:
         """Create ML model for dataset analysis with enhanced file type support."""
         try:
+            # Check if MindsDB connection is available
+            if not self._ensure_connection() or self.connection is None:
+                logger.error(f"❌ MindsDB connection not available for dataset {dataset_id}")
+                return {
+                    "success": False,
+                    "error": "MindsDB connection not available. Please ensure MindsDB is running and properly configured.",
+                    "dataset_id": dataset_id,
+                    "dataset_name": dataset_name,
+                    "file_type": dataset_type
+                }
+            
             # Generate model name for the dataset
             chat_model = f"dataset_{dataset_id}_chat"
             
@@ -301,6 +435,15 @@ class MindsDBService:
     ) -> Dict[str, Any]:
         """Create enhanced models for PDF and JSON files."""
         try:
+            # Check if MindsDB is available
+            if not self._ensure_connection() or self.connection is None:
+                logger.warning(f"⚠️ MindsDB connection not available for enhanced model, using fallback")
+                return {
+                    "message": "MindsDB not available, using direct Gemini API",
+                    "status": "fallback",
+                    "model_name": model_name
+                }
+            
             # Enhanced system prompt based on file type
             if dataset_type.upper() == "PDF":
                 system_prompt = """
@@ -339,8 +482,16 @@ class MindsDBService:
                 assistant_column = 'answer';
             """
             
-            self.connection.query(create_model_sql)
-            logger.info(f"✅ Created enhanced {dataset_type} model: {model_name}")
+            try:
+                self.connection.query(create_model_sql)
+                logger.info(f"✅ Created enhanced {dataset_type} model: {model_name}")
+            except Exception as e:
+                logger.error(f"❌ Failed to create enhanced model: {e}")
+                return {
+                    "message": f"Failed to create enhanced model: {e}",
+                    "status": "fallback",
+                    "model_name": model_name
+                }
             
             return {
                 "message": f"Enhanced {dataset_type} model {model_name} created successfully",
@@ -525,21 +676,25 @@ class MindsDBService:
             return {"success": False, "error": f"CSV processing failed: {str(e)}"}
 
     def chat_with_dataset(self, dataset_id: str, message: str, user_id: Optional[int] = None, session_id: Optional[str] = None, organization_id: Optional[int] = None) -> Dict[str, Any]:
-        """Chat with dataset using direct Gemini with enhanced dataset context."""
+        """Chat with dataset using MindsDB with enhanced dataset context."""
         try:
-            from app.core.database import get_db
-            from app.models.dataset import Dataset
-            from sqlalchemy.orm import Session
             import time
             start_time = time.time()
             
-            # Get dataset information from database
-            db = next(get_db())
-            dataset = db.query(Dataset).filter(Dataset.id == int(dataset_id)).first()
-            
+            # Try to get dataset information from database, but handle errors gracefully
+            dataset = None
             dataset_context = ""
-            if dataset:
-                dataset_context = f"""
+            
+            try:
+                from app.core.database import get_db
+                from app.models.dataset import Dataset
+                from sqlalchemy.orm import Session
+                
+                db = next(get_db())
+                dataset = db.query(Dataset).filter(Dataset.id == int(dataset_id)).first()
+                
+                if dataset:
+                    dataset_context = f"""
                 Dataset Information:
                 - Name: {dataset.name}
                 - Type: {dataset.type}
@@ -549,24 +704,100 @@ class MindsDBService:
                 - Size: {dataset.size_bytes or 'Unknown'} bytes
                 - Created: {dataset.created_at}
                 """
-                
-                # Add file content context for small files
-                if dataset.source_url and dataset.type.upper() in ["CSV", "JSON", "PDF"]:
+                    
+                    # Try to load actual file content from MindsDB files
                     try:
-                        content_result = self.process_file_content(dataset.source_url, dataset.type)
-                        if content_result.get("success"):
-                            # Include a sample of the content for context
-                            content = content_result["content"]
-                            if len(content) > 2000:  # Limit content size
-                                content = content[:2000] + "... [content truncated]"
-                            dataset_context += f"\n\nDataset Content Sample:\n{content}"
+                        if self._ensure_connection() and self.connection:
+                            # Try to query the file from MindsDB files database
+                            file_query = f"SELECT * FROM files.dataset_{dataset_id} LIMIT 5"
+                            logger.info(f"🔍 Trying to load dataset content from MindsDB: {file_query}")
                             
-                            # Add metadata
-                            if content_result.get("metadata"):
-                                metadata = content_result["metadata"]
-                                dataset_context += f"\n\nFile Metadata: {metadata}"
-                    except Exception as e:
-                        logger.warning(f"Could not load dataset content: {e}")
+                            result = self.connection.query(file_query)
+                            if result and hasattr(result, 'fetch_all'):
+                                rows = result.fetch_all()
+                                if rows and len(rows) > 0:
+                                    # Convert rows to readable format
+                                    sample_data = []
+                                    for row in rows[:3]:  # Show first 3 rows
+                                        if isinstance(row, dict):
+                                            sample_data.append(str(row))
+                                        else:
+                                            sample_data.append(str(row))
+                                    
+                                    dataset_context += f"\n\nDataset Sample Data (from MindsDB):\n"
+                                    for i, row in enumerate(sample_data, 1):
+                                        dataset_context += f"Row {i}: {row}\n"
+                                    
+                                    logger.info(f"✅ Successfully loaded dataset sample from MindsDB")
+                    except Exception as file_error:
+                        logger.info(f"ℹ️ Could not load dataset from MindsDB files (this is normal): {file_error}")
+                        
+                    # Add file content context for small files using original method
+                    if dataset.source_url and dataset.type.upper() in ["CSV", "JSON", "PDF"]:
+                        try:
+                            content_result = self.process_file_content(dataset.source_url, dataset.type)
+                            if content_result.get("success"):
+                                # Include a sample of the content for context
+                                content = content_result["content"]
+                                if len(content) > 2000:  # Limit content size
+                                    content = content[:2000] + "... [content truncated]"
+                                dataset_context += f"\n\nDataset Content Sample:\n{content}"
+                                
+                                # Add metadata
+                                if content_result.get("metadata"):
+                                    metadata = content_result["metadata"]
+                                    dataset_context += f"\n\nFile Metadata: {metadata}"
+                        except Exception as e:
+                            logger.info(f"ℹ️ Could not load dataset content from source: {e}")
+                            
+            except Exception as db_error:
+                logger.warning(f"⚠️ Could not load dataset from database: {db_error}")
+                
+            # If no dataset context was loaded, try to get sample data from MindsDB files directly
+            if not dataset_context.strip():
+                try:
+                    if self._ensure_connection() and self.connection:
+                        # Try common dataset file names
+                        possible_names = [f"dataset_{dataset_id}", f"file_{dataset_id}", f"data_{dataset_id}"]
+                        
+                        for file_name in possible_names:
+                            try:
+                                file_query = f"SELECT * FROM files.{file_name} LIMIT 3"
+                                logger.info(f"🔍 Trying MindsDB file: {file_name}")
+                                
+                                result = self.connection.query(file_query)
+                                if result and hasattr(result, 'fetch_all'):
+                                    rows = result.fetch_all()
+                                    if rows and len(rows) > 0:
+                                        dataset_context = f"""
+                Dataset Information (from MindsDB files.{file_name}):
+                - Dataset ID: {dataset_id}
+                - Organization ID: {organization_id}
+                - Rows found: {len(rows)}
+                
+                Sample Data:
+                """
+                                        for i, row in enumerate(rows, 1):
+                                            dataset_context += f"Row {i}: {str(row)}\n"
+                                        
+                                        logger.info(f"✅ Successfully loaded dataset from MindsDB file: {file_name}")
+                                        break
+                            except Exception as file_error:
+                                logger.debug(f"File {file_name} not found: {file_error}")
+                                continue
+                                
+                except Exception as e:
+                    logger.info(f"ℹ️ Could not load dataset from MindsDB files: {e}")
+            
+            # Final fallback - create basic context
+            if not dataset_context.strip():
+                dataset_context = f"""
+                Dataset Information:
+                - Dataset ID: {dataset_id}
+                - Organization ID: {organization_id}
+                - Note: Dataset details could not be loaded, but I'm ready to help with analysis
+                - Suggestion: Please provide dataset information or upload the file to MindsDB for better analysis
+                """
             
             # Enhanced prompt with actual dataset context
             enhanced_message = f"""
@@ -587,48 +818,110 @@ class MindsDBService:
             Please provide a detailed, data-driven response based on this specific dataset.
             """
             
-            logger.info(f"💬 Enhanced dataset chat for dataset {dataset_id} with content context")
-            result = self._direct_gemini_chat(enhanced_message)
+            logger.info(f"💬 Enhanced dataset chat for dataset {dataset_id} with content context using MindsDB")
             
-            # Calculate response time
-            response_time = time.time() - start_time
+            # Use the working gemini_chat_assistant model instead of creating dataset-specific models
+            dataset_model_name = "gemini_chat_assistant"
+            logger.info(f"💬 Using existing working model: {dataset_model_name}")
             
-            # Add dataset context to the response
-            result["dataset_id"] = dataset_id
-            result["dataset_name"] = dataset.name if dataset else "Unknown"
-            result["model"] = f"Dataset Content Analyzer (Gemini)"
-            result["source"] = "dataset_content_gemini"
-            result["has_content_context"] = bool(dataset_context)
-            result["response_time_seconds"] = response_time
-            result["user_id"] = user_id
-            result["session_id"] = session_id
-            result["organization_id"] = organization_id or (dataset.organization_id if dataset else None)
+            # Default response in case of errors
+            default_response = {
+                "answer": "I'm sorry, but I couldn't process your question due to a technical issue with MindsDB.",
+                "dataset_id": dataset_id,
+                "dataset_name": dataset.name if dataset else "Unknown",
+                "model": "Dataset Content Analyzer (MindsDB)",
+                "source": "mindsdb_dataset_chat",
+                "has_content_context": bool(dataset_context),
+                "response_time_seconds": 0,
+                "timestamp": datetime.utcnow().isoformat(),
+                "user_id": user_id,
+                "session_id": session_id,
+                "organization_id": organization_id or (dataset.organization_id if dataset else None)
+            }
             
-            # Log chat interaction asynchronously
+            # Use MindsDB for dataset chat
             try:
-                import asyncio
-                from app.services.analytics import analytics_service
-                asyncio.create_task(analytics_service.log_chat_interaction(
-                    dataset_id=int(dataset_id),
-                    user_message=message,
-                    ai_response=result.get("answer", ""),
-                    user_id=user_id,
-                    session_id=session_id,
-                    llm_provider="gemini",
-                    llm_model=self.chat_model_name,
-                    response_time_seconds=response_time,
-                    organization_id=organization_id or (dataset.organization_id if dataset else None),
-                    success=bool(result.get("answer"))
-                ))
+                # Query the model directly using the working ai_chat method
+                result = self.ai_chat(enhanced_message, model_name=dataset_model_name)
+                
+                # Calculate response time
+                response_time = time.time() - start_time
+                
+                # Check if result is None or not a dictionary
+                if result is None or not isinstance(result, dict):
+                    logger.error("❌ Enhanced dataset chat failed: result is None or not a dictionary")
+                    default_response["error"] = "Chat failed: Invalid response from MindsDB"
+                    return default_response
+                
+                # Create a safe copy of the result to avoid modifying None
+                safe_result = dict(result) if result else {}
+                
+                # Add dataset context to the response
+                safe_result["dataset_id"] = dataset_id
+                safe_result["dataset_name"] = dataset.name if dataset else "Unknown"
+                safe_result["model"] = f"Dataset Content Analyzer (MindsDB)"
+                safe_result["source"] = "mindsdb_dataset_chat"
+                safe_result["has_content_context"] = bool(dataset_context)
+                safe_result["response_time_seconds"] = response_time
+                safe_result["user_id"] = user_id
+                safe_result["session_id"] = session_id
+                safe_result["organization_id"] = organization_id or (dataset.organization_id if dataset else None)
+                
+                # Use the safe result from now on
+                result = safe_result
+                
+                # Ensure there's always an answer field
+                if "error" in result and not "answer" in result:
+                    result["answer"] = f"I'm sorry, but I encountered an error: {result['error']}"
+                
+                # Log chat interaction synchronously to avoid async issues
+                try:
+                    from app.services.analytics import analytics_service
+                    
+                    # Ensure all parameters are properly set
+                    log_params = {
+                        "dataset_id": int(dataset_id) if dataset_id else 0,
+                        "user_message": str(message) if message else "",
+                        "ai_response": str(result.get("answer", "")) if result.get("answer") else "",
+                        "user_id": int(user_id) if user_id else None,
+                        "session_id": str(session_id) if session_id else None,
+                        "llm_provider": "gemini",
+                        "llm_model": str(self.chat_model_name) if self.chat_model_name else "unknown",
+                        "response_time_seconds": float(response_time) if response_time else 0.0,
+                        "organization_id": int(organization_id or (dataset.organization_id if dataset else 0)),
+                        "success": bool(result.get("answer")) if result else False
+                    }
+                    
+                    # Try to log synchronously first, if that fails, skip logging
+                    try:
+                        # Check if we're in an async context
+                        import asyncio
+                        loop = asyncio.get_running_loop()
+                        if loop and loop.is_running():
+                            # We're in an async context, schedule the task
+                            asyncio.create_task(analytics_service.log_chat_interaction(**log_params))
+                        else:
+                            # Not in async context, log synchronously if possible
+                            logger.info(f"📊 Chat interaction logged: dataset_id={dataset_id}, success={log_params['success']}")
+                    except RuntimeError:
+                        # No event loop running, log basic info instead
+                        logger.info(f"📊 Chat interaction: dataset_id={dataset_id}, response_time={response_time:.2f}s, success={bool(result.get('answer'))}")
+                        
+                except Exception as e:
+                    logger.debug(f"Could not log chat interaction: {e}")
+                
+                return result
+                
             except Exception as e:
-                logger.warning(f"Failed to log chat interaction: {e}")
-            
-            return result
-
+                logger.error(f"❌ Enhanced dataset chat failed: {e}")
+                default_response["error"] = f"Chat failed: {str(e)}"
+                return default_response
+                
         except Exception as e:
             logger.error(f"❌ Enhanced dataset chat failed: {e}")
             return {
                 "error": f"Dataset chat failed: {str(e)}",
+                "answer": "I'm sorry, but I couldn't process your question due to a technical issue.",
                 "dataset_id": dataset_id,
                 "message": message,
                 "timestamp": datetime.utcnow().isoformat()
@@ -771,4 +1064,4 @@ class MindsDBService:
 
 
 # Create service instance
-mindsdb_service = MindsDBService() 
+mindsdb_service = MindsDBService()

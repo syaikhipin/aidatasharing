@@ -95,3 +95,5 @@ cd backend && python app/core/migration_*.py
 - **bcrypt** - Password hashing
 - **pandas** - Data processing
 - **sqlalchemy** - Database ORM
+
+Always put test script into separate folder inside test and all md files into docs folder

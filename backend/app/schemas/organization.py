@@ -26,8 +26,7 @@ class Department(DepartmentBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class OrganizationBase(BaseModel):
@@ -74,12 +73,13 @@ class Organization(OrganizationBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class OrganizationWithDepartments(Organization):
     departments: List[Department] = []
+    
+    model_config = {"from_attributes": True}
 
 
 # User-Organization relationship schemas
@@ -100,8 +100,7 @@ class OrganizationMember(BaseModel):
     is_active: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class OrganizationInvite(BaseModel):
