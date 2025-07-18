@@ -145,6 +145,28 @@ function ConnectionsPageContent() {
     }
   };
 
+  const handleCreateDatasetFromConnector = async (connectorId: number) => {
+    const connector = connectors.find(c => c.id === connectorId);
+    if (!connector) return;
+
+    const datasetName = prompt(`Create dataset from ${connector.name}:`, `${connector.name} Dataset`);
+    if (!datasetName) return;
+
+    try {
+      const result = await dataConnectorsAPI.createDatasetFromConnector(connectorId, {
+        dataset_name: datasetName,
+        description: `Dataset created from ${connector.name} API connector`,
+        sharing_level: 'private'
+      });
+      
+      alert(`Dataset "${datasetName}" created successfully! You can now chat with this data.`);
+      fetchConnectors(); // Refresh to show new dataset
+    } catch (error: any) {
+      console.error('Dataset creation failed:', error);
+      alert(`Failed to create dataset: ${error.response?.data?.detail || error.message}`);
+    }
+  };
+
   const renderConnectionForm = () => {
     const selectedType = CONNECTOR_TYPES.find(t => t.value === form.connector_type);
     
@@ -411,6 +433,101 @@ function ConnectionsPageContent() {
           </div>
         );
 
+      case 'api':
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Base URL
+              </label>
+              <input
+                type="url"
+                value={form.connection_config.base_url || ''}
+                onChange={(e) => setForm(prev => ({
+                  ...prev,
+                  connection_config: { ...prev.connection_config, base_url: e.target.value }
+                }))}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="https://jsonplaceholder.typicode.com"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Endpoint
+              </label>
+              <input
+                type="text"
+                value={form.connection_config.endpoint || ''}
+                onChange={(e) => setForm(prev => ({
+                  ...prev,
+                  connection_config: { ...prev.connection_config, endpoint: e.target.value }
+                }))}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="/posts"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                HTTP Method
+              </label>
+              <select
+                value={form.connection_config.method || 'GET'}
+                onChange={(e) => setForm(prev => ({
+                  ...prev,
+                  connection_config: { ...prev.connection_config, method: e.target.value }
+                }))}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="DELETE">DELETE</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Timeout (seconds)
+              </label>
+              <input
+                type="number"
+                value={form.connection_config.timeout || 30}
+                onChange={(e) => setForm(prev => ({
+                  ...prev,
+                  connection_config: { ...prev.connection_config, timeout: parseInt(e.target.value) }
+                }))}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="30"
+                min="1"
+                max="300"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Headers (JSON format) - Optional
+              </label>
+              <textarea
+                value={JSON.stringify(form.connection_config.headers || {}, null, 2)}
+                onChange={(e) => {
+                  try {
+                    const headers = JSON.parse(e.target.value);
+                    setForm(prev => ({
+                      ...prev,
+                      connection_config: { ...prev.connection_config, headers }
+                    }));
+                  } catch {
+                    // Invalid JSON, ignore
+                  }
+                }}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+                rows={3}
+                placeholder='{"Content-Type": "application/json"}'
+              />
+            </div>
+          </div>
+        );
+
       default:
         return (
           <div>
@@ -581,6 +698,15 @@ function ConnectionsPageContent() {
                       )}
                       Sync
                     </button>
+                    {connector.connector_type === 'api' && connector.test_status === 'success' && (
+                      <button
+                        onClick={() => handleCreateDatasetFromConnector(connector.id)}
+                        className="flex items-center px-3 py-1 text-xs font-medium text-purple-600 bg-purple-50 rounded-full hover:bg-purple-100"
+                      >
+                        <Plus className="h-3 w-3 mr-1" />
+                        Dataset
+                      </button>
+                    )}
                   </div>
                   <button
                     onClick={() => handleDeleteConnector(connector.id)}

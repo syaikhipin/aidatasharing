@@ -347,6 +347,77 @@ async def sync_with_mindsdb(
     }
 
 
+class CreateDatasetFromConnector(BaseModel):
+    dataset_name: str
+    description: Optional[str] = None
+    table_or_endpoint: Optional[str] = None  # For API connectors, this can be a different endpoint
+    sharing_level: str = "private"
+
+
+@router.post("/{connector_id}/create-dataset")
+async def create_dataset_from_connector(
+    connector_id: int,
+    dataset_data: CreateDatasetFromConnector,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create a dataset from a connector."""
+    connector = db.query(DatabaseConnector).filter(
+        DatabaseConnector.id == connector_id,
+        DatabaseConnector.organization_id == current_user.organization_id,
+        DatabaseConnector.is_deleted == False
+    ).first()
+    
+    if not connector:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Connector not found"
+        )
+    
+    if connector.test_status != "success":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Connector must be successfully tested before creating datasets"
+        )
+    
+    # For API connectors, create dataset with API data
+    if connector.connector_type == "api":
+        result = await _create_api_dataset(connector, dataset_data, current_user.id)
+    else:
+        # For database connectors, use the connector service
+        connector_service = ConnectorService(db)
+        
+        # Map sharing level string to enum
+        from app.models.organization import DataSharingLevel
+        sharing_level_map = {
+            "private": DataSharingLevel.PRIVATE,
+            "organization": DataSharingLevel.ORGANIZATION,
+            "public": DataSharingLevel.PUBLIC
+        }
+        sharing_level = sharing_level_map.get(dataset_data.sharing_level.lower(), DataSharingLevel.PRIVATE)
+        
+        result = await connector_service.create_connector_dataset(
+            connector=connector,
+            table_or_query=dataset_data.table_or_endpoint or "default_table",
+            dataset_name=dataset_data.dataset_name,
+            user_id=current_user.id,
+            description=dataset_data.description,
+            sharing_level=sharing_level
+        )
+    
+    if result.get("success"):
+        return {
+            "message": "Dataset created successfully",
+            "dataset_id": result.get("dataset_id"),
+            "dataset_name": result.get("dataset_name")
+        }
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result.get("error", "Failed to create dataset")
+        )
+
+
 async def test_connector_connection_sync(connector: DatabaseConnector) -> Dict[str, Any]:
     """Test connector connection synchronously."""
     try:
@@ -358,6 +429,8 @@ async def test_connector_connection_sync(connector: DatabaseConnector) -> Dict[s
             return await _test_s3_connection(connector)
         elif connector.connector_type == "mongodb":
             return await _test_mongodb_connection(connector)
+        elif connector.connector_type == "api":
+            return await _test_api_connection(connector)
         else:
             return {"success": False, "error": f"Testing not implemented for {connector.connector_type}"}
             
@@ -459,4 +532,181 @@ async def _test_mongodb_connection(connector: DatabaseConnector) -> Dict[str, An
         return {"success": True, "message": "MongoDB connection successful"}
         
     except Exception as e:
-        return {"success": False, "error": f"MongoDB connection failed: {str(e)}"} 
+        return {"success": False, "error": f"MongoDB connection failed: {str(e)}"}
+
+
+async def _test_api_connection(connector: DatabaseConnector) -> Dict[str, Any]:
+    """Test API connection."""
+    try:
+        import requests
+        
+        config = connector.connection_config.copy()
+        base_url = config.get("base_url", "")
+        endpoint = config.get("endpoint", "")
+        method = config.get("method", "GET").upper()
+        timeout = config.get("timeout", 30)
+        headers = config.get("headers", {})
+        
+        if not base_url or not endpoint:
+            return {"success": False, "error": "Base URL and endpoint are required"}
+        
+        full_url = f"{base_url.rstrip('/')}{endpoint}"
+        
+        # Make the API request
+        response = requests.request(
+            method=method,
+            url=full_url,
+            headers=headers,
+            timeout=timeout
+        )
+        
+        if response.status_code == 200:
+            try:
+                data = response.json()
+                data_count = len(data) if isinstance(data, list) else 1
+                return {
+                    "success": True, 
+                    "message": f"API connection successful. Retrieved {data_count} items.",
+                    "status_code": response.status_code,
+                    "data_preview": str(data)[:200] + "..." if len(str(data)) > 200 else str(data)
+                }
+            except:
+                return {
+                    "success": True,
+                    "message": f"API connection successful. Response received (non-JSON).",
+                    "status_code": response.status_code,
+                    "content_type": response.headers.get("content-type", "unknown")
+                }
+        else:
+            return {
+                "success": False, 
+                "error": f"API request failed with status {response.status_code}: {response.text[:200]}"
+            }
+        
+    except requests.exceptions.Timeout:
+        return {"success": False, "error": "API request timed out"}
+    except requests.exceptions.ConnectionError:
+        return {"success": False, "error": "Failed to connect to API endpoint"}
+    except Exception as e:
+        return {"success": False, "error": f"API connection failed: {str(e)}"}
+
+
+async def _create_api_dataset(
+    connector: DatabaseConnector, 
+    dataset_data: CreateDatasetFromConnector, 
+    user_id: int
+) -> Dict[str, Any]:
+    """Create a dataset from API connector data."""
+    try:
+        import requests
+        from app.models.dataset import Dataset, DatasetType, DatasetStatus
+        from app.core.database import get_db
+        
+        # Get database session
+        db = next(get_db())
+        
+        config = connector.connection_config.copy()
+        base_url = config.get("base_url", "")
+        
+        # Use custom endpoint if provided, otherwise use connector's default
+        endpoint = dataset_data.table_or_endpoint or config.get("endpoint", "")
+        method = config.get("method", "GET").upper()
+        timeout = config.get("timeout", 30)
+        headers = config.get("headers", {})
+        
+        full_url = f"{base_url.rstrip('/')}{endpoint}"
+        
+        # Fetch data from API
+        response = requests.request(
+            method=method,
+            url=full_url,
+            headers=headers,
+            timeout=timeout
+        )
+        
+        if response.status_code != 200:
+            return {
+                "success": False,
+                "error": f"API request failed with status {response.status_code}"
+            }
+        
+        # Parse JSON data
+        try:
+            api_data = response.json()
+        except:
+            return {
+                "success": False,
+                "error": "API response is not valid JSON"
+            }
+        
+        # Determine data characteristics
+        data_count = len(api_data) if isinstance(api_data, list) else 1
+        sample_data = api_data[:5] if isinstance(api_data, list) else [api_data]
+        
+        # Create schema information
+        schema_info = {}
+        if sample_data and len(sample_data) > 0:
+            first_item = sample_data[0]
+            if isinstance(first_item, dict):
+                schema_info = {
+                    "columns": [{"name": key, "type": type(value).__name__} for key, value in first_item.items()],
+                    "sample_data": sample_data,
+                    "api_endpoint": full_url,
+                    "total_items": data_count
+                }
+        
+        # Map sharing level
+        sharing_level_map = {
+            "private": DataSharingLevel.PRIVATE,
+            "organization": DataSharingLevel.ORGANIZATION,
+            "public": DataSharingLevel.PUBLIC
+        }
+        sharing_level = sharing_level_map.get(dataset_data.sharing_level.lower(), DataSharingLevel.PRIVATE)
+        
+        # Create dataset record
+        dataset = Dataset(
+            name=dataset_data.dataset_name,
+            description=dataset_data.description or f"API dataset from {connector.name}",
+            type=DatasetType.API,
+            status=DatasetStatus.ACTIVE,
+            owner_id=user_id,
+            organization_id=connector.organization_id,
+            sharing_level=sharing_level,
+            connector_id=connector.id,
+            source_url=full_url,
+            row_count=data_count,
+            column_count=len(schema_info.get("columns", [])),
+            schema_info=schema_info,
+            allow_download=True,
+            allow_api_access=True,
+            allow_ai_chat=True,
+            # Store API data context for chat
+            chat_context={
+                "api_endpoint": full_url,
+                "data_sample": sample_data,
+                "total_items": data_count,
+                "connector_name": connector.name,
+                "schema": schema_info.get("columns", [])
+            }
+        )
+        
+        db.add(dataset)
+        db.commit()
+        db.refresh(dataset)
+        
+        logger.info(f"✅ Created API dataset: {dataset_data.dataset_name} (ID: {dataset.id})")
+        
+        return {
+            "success": True,
+            "dataset_id": dataset.id,
+            "dataset_name": dataset_data.dataset_name,
+            "api_endpoint": full_url,
+            "data_count": data_count
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to create API dataset: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        } 

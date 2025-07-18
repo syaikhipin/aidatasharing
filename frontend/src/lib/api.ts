@@ -646,6 +646,16 @@ export const dataConnectorsAPI = {
     const response = await apiClient.post(`/api/connectors/${connectorId}/sync`);
     return response.data;
   },
+
+  createDatasetFromConnector: async (connectorId: number, datasetData: {
+    dataset_name: string;
+    description?: string;
+    table_or_endpoint?: string;
+    sharing_level?: string;
+  }) => {
+    const response = await apiClient.post(`/api/connectors/${connectorId}/create-dataset`, datasetData);
+    return response.data;
+  },
 };
 
 export default apiClient; 
