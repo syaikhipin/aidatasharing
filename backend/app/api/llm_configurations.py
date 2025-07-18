@@ -48,6 +48,8 @@ class LLMConfigurationUpdate(BaseModel):
 
 
 class LLMConfigurationResponse(BaseModel):
+    model_config = {"protected_namespaces": ()}
+    
     id: int
     name: str
     provider: str
@@ -148,7 +150,7 @@ async def create_llm_configuration(
     db_config = LLMConfiguration(
         name=config_data.name,
         provider=config_data.provider,
-        model_name=config_data.model_name,
+        llm_model_name=config_data.model_name,
         description=config_data.description,
         organization_id=current_user.organization_id,
         api_key=config_data.api_key,  # TODO: Encrypt in production
@@ -394,7 +396,7 @@ async def _test_litellm_config(config: LLMConfiguration, message: str) -> Dict[s
         
         # Make test call
         response = litellm.completion(
-            model=config.model_name,
+            model=config.llm_model_name,
             messages=[{"role": "user", "content": message}],
             **config.model_params or {}
         )
@@ -402,7 +404,7 @@ async def _test_litellm_config(config: LLMConfiguration, message: str) -> Dict[s
         return {
             "success": True,
             "response": response.choices[0].message.content,
-            "model": config.model_name,
+            "model": config.llm_model_name,
             "provider": config.provider,
             "tokens_used": response.usage.total_tokens if response.usage else 0
         }
@@ -417,14 +419,14 @@ async def _test_gemini_config(config: LLMConfiguration, message: str) -> Dict[st
         import google.generativeai as genai
         
         genai.configure(api_key=config.api_key)
-        model = genai.GenerativeModel(config.model_name)
+        model = genai.GenerativeModel(config.llm_model_name)
         
         response = model.generate_content(message)
         
         return {
             "success": True,
             "response": response.text,
-            "model": config.model_name,
+            "model": config.llm_model_name,
             "provider": "gemini",
             "tokens_used": getattr(response, 'usage_metadata', {}).get('total_token_count', 0)
         }
@@ -444,7 +446,7 @@ async def _test_openai_config(config: LLMConfiguration, message: str) -> Dict[st
         )
         
         response = client.chat.completions.create(
-            model=config.model_name,
+            model=config.llm_model_name,
             messages=[{"role": "user", "content": message}],
             **config.model_params or {}
         )
@@ -452,7 +454,7 @@ async def _test_openai_config(config: LLMConfiguration, message: str) -> Dict[st
         return {
             "success": True,
             "response": response.choices[0].message.content,
-            "model": config.model_name,
+            "model": config.llm_model_name,
             "provider": "openai",
             "tokens_used": response.usage.total_tokens if response.usage else 0
         }
@@ -469,7 +471,7 @@ async def _test_anthropic_config(config: LLMConfiguration, message: str) -> Dict
         client = anthropic.Anthropic(api_key=config.api_key)
         
         response = client.messages.create(
-            model=config.model_name,
+            model=config.llm_model_name,
             max_tokens=1000,
             messages=[{"role": "user", "content": message}],
             **config.model_params or {}
@@ -478,7 +480,7 @@ async def _test_anthropic_config(config: LLMConfiguration, message: str) -> Dict
         return {
             "success": True,
             "response": response.content[0].text,
-            "model": config.model_name,
+            "model": config.llm_model_name,
             "provider": "anthropic",
             "tokens_used": response.usage.output_tokens + response.usage.input_tokens if response.usage else 0
         }

@@ -429,7 +429,7 @@ class LLMConfiguration(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     provider = Column(String, nullable=False)  # 'gemini', 'openai', 'anthropic', 'litellm'
-    model_name = Column(String, nullable=False)  # 'gemini-2.0-flash', 'gpt-4', etc.
+    llm_model_name = Column(String, nullable=False)  # 'gemini-2.0-flash', 'gpt-4', etc.
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
     
     # Configuration

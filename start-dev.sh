@@ -19,7 +19,7 @@ mkdir -p storage/uploads storage/documents storage/logs logs
 
 # Start backend in background
 echo "🔧 Starting backend server..."
-cd backend && python start.py &
+(cd backend && python start.py) &
 BACKEND_PID=$!
 
 # Wait a moment for backend to start
@@ -27,7 +27,7 @@ sleep 3
 
 # Start frontend in background  
 echo "🎨 Starting frontend server..."
-cd ../frontend && npm run dev &
+(cd frontend && npm run dev) &
 FRONTEND_PID=$!
 
 echo "✅ Development environment started!"
