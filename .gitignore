@@ -109,3 +109,5 @@ htmlcov/
 *.pem
 *.key
 !*.key.example 
+
+node_modules/
