@@ -331,8 +331,8 @@ function UploadDatasetContent() {
                     className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                   >
                     <option value="private">Private - Only me</option>
-                    <option value="department">Department - My department</option>
                     <option value="organization">Organization - All members</option>
+                    <option value="public">Public - Everyone</option>
                   </select>
                 </div>
               </div>
@@ -383,4 +383,4 @@ function formatFileSize(bytes: number): string {
   const sizes = ['Bytes', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-} 
+}

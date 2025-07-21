@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
 // Create axios instance
 const apiClient = axios.create({
@@ -259,6 +259,43 @@ export const datasetsAPI = {
 
   recreateDatasetModels: async (datasetId: number) => {
     const response = await apiClient.post(`/api/datasets/${datasetId}/recreate-models`);
+    return response.data;
+  },
+
+  // Download functionality
+  initiateDownload: async (datasetId: number, fileFormat: string = 'original', compression?: string) => {
+    const params: any = { file_format: fileFormat };
+    if (compression) {
+      params.compression = compression;
+    }
+    const response = await apiClient.get(`/api/datasets/${datasetId}/download`, { params });
+    return response.data;
+  },
+
+  getDownloadProgress: async (downloadToken: string) => {
+    const response = await apiClient.get(`/api/datasets/download/${downloadToken}/progress`);
+    return response.data;
+  },
+
+  retryDownload: async (downloadToken: string) => {
+    const response = await apiClient.post(`/api/datasets/download/${downloadToken}/retry`);
+    return response.data;
+  },
+
+  // Ownership transfer functionality
+  transferOwnership: async (datasetId: number, newOwnerId: number) => {
+    const response = await apiClient.post(`/api/datasets/${datasetId}/transfer-ownership`, {
+      new_owner_id: newOwnerId
+    });
+    return response.data;
+  },
+
+  getDatasetStats: async (datasetId: number, includeDownloads: boolean = true, includeAccessLogs: boolean = false) => {
+    const params = {
+      include_downloads: includeDownloads,
+      include_access_logs: includeAccessLogs
+    };
+    const response = await apiClient.get(`/api/datasets/${datasetId}/stats`, { params });
     return response.data;
   },
 };
@@ -658,4 +695,4 @@ export const dataConnectorsAPI = {
   },
 };
 
-export default apiClient; 
+export default apiClient;

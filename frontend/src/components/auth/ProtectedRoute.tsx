@@ -7,9 +7,10 @@ import { useEffect } from 'react';
 interface ProtectedRouteProps {
   children: React.ReactNode;
   requiredRole?: string;
+  requireAdmin?: boolean;
 }
 
-export function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) {
+export function ProtectedRoute({ children, requiredRole, requireAdmin }: ProtectedRouteProps) {
   const { user, isLoading } = useAuth();
   const router = useRouter();
 
@@ -18,8 +19,10 @@ export function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) 
       router.push('/login');
     } else if (!isLoading && user && requiredRole && user.role !== requiredRole) {
       router.push('/dashboard'); // Redirect to dashboard if insufficient permissions
+    } else if (!isLoading && user && requireAdmin && !user.is_superuser) {
+      router.push('/dashboard'); // Redirect to dashboard if not admin
     }
-  }, [user, isLoading, requiredRole, router]);
+  }, [user, isLoading, requiredRole, requireAdmin, router]);
 
   if (isLoading) {
     return (
@@ -44,5 +47,16 @@ export function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) 
     );
   }
 
+  if (requireAdmin && !user.is_superuser) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">Admin Access Required</h1>
+          <p className="text-gray-600">You need administrator privileges to access this page.</p>
+        </div>
+      </div>
+    );
+  }
+
   return <>{children}</>;
-} 
+}

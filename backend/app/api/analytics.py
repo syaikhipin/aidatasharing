@@ -194,12 +194,36 @@ async def get_organization_analytics(
         storage_limit=500.0  # Mock limit
     )
     
-    # Usage Statistics (mock data - replace with actual metrics)
+    # Usage Statistics
+    total_api_calls = db.query(func.sum(APIUsage.calls)).filter(
+        APIUsage.organization_id == current_user.organization_id,
+        APIUsage.timestamp.between(start_dt, end_dt)
+    ).scalar() or 0
+
+    total_predictions = db.query(func.sum(ModelPerformanceLog.predictions)).filter(
+        ModelPerformanceLog.organization_id == current_user.organization_id,
+        ModelPerformanceLog.timestamp.between(start_dt, end_dt)
+    ).scalar() or 0
+
+    avg_response_time = db.query(func.avg(ModelPerformanceLog.response_time)).filter(
+        ModelPerformanceLog.organization_id == current_user.organization_id,
+        ModelPerformanceLog.timestamp.between(start_dt, end_dt)
+    ).scalar() or 0.0
+
+    # Uptime calculation (example: percentage of successful operations)
+    total_operations = total_api_calls + total_predictions
+    successful_operations = db.query(func.count(ModelPerformanceLog.id)).filter(
+        ModelPerformanceLog.organization_id == current_user.organization_id,
+        ModelPerformanceLog.timestamp.between(start_dt, end_dt),
+        ModelPerformanceLog.status == 'success'
+    ).scalar() or 0
+    uptime = (successful_operations / total_operations * 100) if total_operations > 0 else 100.0
+
     usage_stats = UsageStatsResponse(
-        total_api_calls=45678,
-        total_predictions=123456,
-        average_response_time=245.0,
-        uptime=99.7
+        total_api_calls=total_api_calls,
+        total_predictions=total_predictions,
+        average_response_time=avg_response_time,
+        uptime=uptime
     )
     
     # Trends Data
@@ -265,10 +289,48 @@ def get_trends_data(db: Session, organization_id: int, start_date: datetime, end
     """Generate trends data for the specified date range"""
     
     # Dataset uploads trend
-    dataset_uploads = []
-    model_creations = []
-    predictions = []
-    user_activity = []
+    dataset_uploads_query = db.query(
+        func.date(Dataset.created_at),
+        func.count(Dataset.id)
+    ).filter(
+        Dataset.organization_id == organization_id,
+        Dataset.created_at.between(start_date, end_date)
+    ).group_by(func.date(Dataset.created_at)).all()
+
+    dataset_uploads = [TrendDataPoint(date=str(date), count=count) for date, count in dataset_uploads_query]
+
+    # Model creations trend (using ModelPerformanceLog as proxy)
+    model_creations_query = db.query(
+        func.date(ModelPerformanceLog.timestamp),
+        func.count(ModelPerformanceLog.id)
+    ).filter(
+        ModelPerformanceLog.organization_id == organization_id,
+        ModelPerformanceLog.timestamp.between(start_date, end_date)
+    ).group_by(func.date(ModelPerformanceLog.timestamp)).all()
+
+    model_creations = [TrendDataPoint(date=str(date), count=count) for date, count in model_creations_query]
+
+    # Predictions trend
+    predictions_query = db.query(
+        func.date(ModelPerformanceLog.timestamp),
+        func.sum(ModelPerformanceLog.predictions)
+    ).filter(
+        ModelPerformanceLog.organization_id == organization_id,
+        ModelPerformanceLog.timestamp.between(start_date, end_date)
+    ).group_by(func.date(ModelPerformanceLog.timestamp)).all()
+
+    predictions = [TrendDataPoint(date=str(date), count=count or 0) for date, count in predictions_query]
+
+    # User activity trend
+    user_activity_query = db.query(
+        func.date(UserSessionLog.login_time),
+        func.count(func.distinct(UserSessionLog.user_id))
+    ).filter(
+        UserSessionLog.organization_id == organization_id,
+        UserSessionLog.login_time.between(start_date, end_date)
+    ).group_by(func.date(UserSessionLog.login_time)).all()
+
+    user_activity = [TrendDataPoint(date=str(date), active_users=count) for date, count in user_activity_query]
     
     # Generate daily data points for the date range
     current_date = start_date
@@ -307,54 +369,68 @@ def get_trends_data(db: Session, organization_id: int, start_date: datetime, end
     )
 
 def get_user_activity(db: Session, organization_id: int, start_date: datetime, end_date: datetime) -> List[UserActivityResponse]:
-    """Get user activity data for the organization"""
-    
-    users = db.query(User).filter(
-        User.organization_id == organization_id
-    ).limit(10).all()
-    
+    users = db.query(User).filter(User.organization_id == organization_id).all()
+
     activity_data = []
     for user in users:
-        # Mock activity data - replace with actual activity tracking
+        last_active = db.query(func.max(ActivityLog.timestamp)).filter(
+            ActivityLog.user_id == user.id,
+            ActivityLog.timestamp.between(start_date, end_date)
+        ).scalar()
+
+        actions_today = db.query(func.count(ActivityLog.id)).filter(
+            ActivityLog.user_id == user.id,
+            func.date(ActivityLog.timestamp) == datetime.now().date()
+        ).scalar() or 0
+
         activity_data.append(UserActivityResponse(
             user_id=user.id,
             name=user.full_name or user.email.split('@')[0],
-            last_active=datetime.now().isoformat(),
-            actions_today=max(1, user.id % 50),
-            role="Data Scientist",  # Mock role
-            department="Analytics"  # Mock department
+            last_active=last_active.isoformat() if last_active else None,
+            actions_today=actions_today,
+            role=user.role or 'User',
+            department=user.department or 'General'
         ))
-    
     return activity_data
 
 def get_data_usage_stats(db: Session, organization_id: int) -> DataUsageResponse:
     """Get data usage statistics for the organization"""
     
     # Most accessed datasets
-    datasets = db.query(Dataset).filter(
+    most_accessed_query = db.query(
+        Dataset,
+        func.count(DatasetAccess.id).label('access_count')
+    ).outerjoin(DatasetAccess).filter(
         Dataset.organization_id == organization_id
-    ).limit(5).all()
-    
-    most_accessed = []
-    for dataset in datasets:
-        # Mock access count - replace with actual tracking
-        most_accessed.append(DatasetUsageResponse(
+    ).group_by(Dataset.id).order_by(desc('access_count')).limit(5).all()
+
+    most_accessed = [
+        DatasetUsageResponse(
             id=dataset.id,
             name=dataset.name,
-            access_count=max(10, dataset.id * 23),
-            last_accessed=datetime.now().isoformat(),
+            access_count=access_count,
+            last_accessed=db.query(func.max(DatasetAccess.timestamp)).filter(DatasetAccess.dataset_id == dataset.id).scalar().isoformat() if access_count > 0 else None,
             sharing_level=dataset.sharing_level
-        ))
-    
-    # Storage by department (mock data)
-    storage_by_dept = [
-        StorageByDepartmentResponse(department="Analytics", storage=89.4, percentage=36.4),
-        StorageByDepartmentResponse(department="Engineering", storage=67.2, percentage=27.3),
-        StorageByDepartmentResponse(department="Marketing", storage=45.8, percentage=18.6),
-        StorageByDepartmentResponse(department="IT", storage=28.9, percentage=11.8),
-        StorageByDepartmentResponse(department="Sales", storage=14.4, percentage=5.9)
+        ) for dataset, access_count in most_accessed_query
     ]
-    
+
+    # Storage by department
+    storage_by_dept_query = db.query(
+        User.department,
+        func.sum(Dataset.size_bytes)
+    ).join(Dataset, Dataset.owner_id == User.id).filter(
+        User.organization_id == organization_id
+    ).group_by(User.department).all()
+
+    total_storage = sum(size for _, size in storage_by_dept_query) or 1
+    storage_by_dept = [
+        StorageByDepartmentResponse(
+            department=dept or 'Unassigned',
+            storage=size / (1024**3),
+            percentage=(size / total_storage * 100)
+        ) for dept, size in storage_by_dept_query
+    ]
+
     return DataUsageResponse(
         most_accessed_datasets=most_accessed,
         storage_by_department=storage_by_dept
@@ -992,4 +1068,4 @@ async def export_dataset_analytics(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error exporting analytics: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Error exporting analytics: {str(e)}")

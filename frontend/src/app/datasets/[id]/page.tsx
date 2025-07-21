@@ -5,7 +5,7 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { datasetsAPI, dataSharingAPI } from '@/lib/api';
+import { datasetsAPI, dataSharingAPI, organizationsAPI } from '@/lib/api';
 import Link from 'next/link';
 import { 
   Download, 
@@ -22,7 +22,8 @@ import {
   ExternalLink,
   Calendar,
   Users,
-  Database
+  Database,
+  UserCheck
 } from 'lucide-react';
 
 function formatFileSize(bytes: number): string {
@@ -66,6 +67,15 @@ function DatasetDetailContent() {
   });
   const [isCreatingShare, setIsCreatingShare] = useState(false);
   const [isLoadingShares, setIsLoadingShares] = useState(false);
+  
+  // Ownership transfer state
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferForm, setTransferForm] = useState({
+    new_owner_id: '',
+    new_owner_email: ''
+  });
+  const [isTransferring, setIsTransferring] = useState(false);
+  const [orgUsers, setOrgUsers] = useState<any[]>([]);
 
   useEffect(() => {
     fetchDataset();
@@ -164,6 +174,57 @@ function DatasetDetailContent() {
     } finally {
       setIsChatting(false);
     }
+  };
+
+  const handleTransferOwnership = async () => {
+    if (!transferForm.new_owner_id) {
+      alert('Please select a new owner');
+      return;
+    }
+
+    if (!confirm('Are you sure you want to transfer ownership of this dataset? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      setIsTransferring(true);
+      await datasetsAPI.transferOwnership(datasetId, parseInt(transferForm.new_owner_id));
+      
+      setShowTransferModal(false);
+      setTransferForm({ new_owner_id: '', new_owner_email: '' });
+      
+      // Refresh dataset to show new owner
+      await fetchDataset();
+      
+      alert('Dataset ownership transferred successfully!');
+      
+    } catch (error: any) {
+      console.error('Failed to transfer ownership:', error);
+      alert(error.response?.data?.detail || 'Failed to transfer ownership');
+    } finally {
+      setIsTransferring(false);
+    }
+  };
+
+  const fetchOrgUsers = async () => {
+    try {
+      if (user?.organization_id) {
+        const members = await organizationsAPI.getMembers(user.organization_id);
+        // Filter out the current user from the list
+        const filteredMembers = members.filter((member: any) => member.user_id !== user.id);
+        setOrgUsers(filteredMembers);
+      } else {
+        setOrgUsers([]);
+      }
+    } catch (error) {
+      console.error('Failed to fetch organization users:', error);
+      setOrgUsers([]);
+    }
+  };
+
+  const openTransferModal = () => {
+    fetchOrgUsers();
+    setShowTransferModal(true);
   };
 
   if (isLoading) {
@@ -561,6 +622,19 @@ function DatasetDetailContent() {
                     <p className="text-xs text-gray-500">Build ML models from this data</p>
                   </div>
                 </Link>
+
+                {isOwner && (
+                  <button
+                    onClick={openTransferModal}
+                    className="w-full flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50"
+                  >
+                    <UserCheck className="w-5 h-5 text-orange-600 mr-3" />
+                    <div className="text-left">
+                      <p className="text-sm font-medium text-gray-900">Transfer Ownership</p>
+                      <p className="text-xs text-gray-500">Transfer to another user</p>
+                    </div>
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -634,7 +708,86 @@ function DatasetDetailContent() {
             </div>
           </div>
         )}
+
+        {/* Transfer Ownership Modal */}
+        {showTransferModal && (
+          <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+              <div className="mt-3">
+                <h3 className="text-lg font-medium text-gray-900 mb-4">Transfer Dataset Ownership</h3>
+                
+                <div className="space-y-4">
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
+                    <div className="flex">
+                      <div className="flex-shrink-0">
+                        <svg className="h-5 w-5 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.268 18.5c-.77.833.192 2.5 1.732 2.5z" />
+                        </svg>
+                      </div>
+                      <div className="ml-3">
+                        <p className="text-sm text-yellow-800">
+                          <strong>Warning:</strong> This action cannot be undone. You will lose ownership of this dataset.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Select New Owner
+                    </label>
+                    <select
+                      value={transferForm.new_owner_id}
+                      onChange={(e) => {
+                        const selectedUser = orgUsers.find(u => u.id.toString() === e.target.value);
+                        setTransferForm({
+                          new_owner_id: e.target.value,
+                          new_owner_email: selectedUser?.email || ''
+                        });
+                      }}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="">Select a user...</option>
+                      {orgUsers.filter(u => u.id !== user?.id).map(orgUser => (
+                        <option key={orgUser.id} value={orgUser.id}>
+                          {orgUser.full_name || 'No name'} ({orgUser.email}) - {orgUser.role}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {transferForm.new_owner_email && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+                      <p className="text-sm text-blue-800">
+                        Dataset ownership will be transferred to: <strong>{transferForm.new_owner_email}</strong>
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex space-x-3 mt-6">
+                  <button
+                    onClick={() => {
+                      setShowTransferModal(false);
+                      setTransferForm({ new_owner_id: '', new_owner_email: '' });
+                    }}
+                    className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-200 border border-gray-300 rounded-md hover:bg-gray-300"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleTransferOwnership}
+                    disabled={isTransferring || !transferForm.new_owner_id}
+                    className="flex-1 px-4 py-2 text-sm font-medium text-white bg-orange-600 border border-transparent rounded-md hover:bg-orange-700 disabled:opacity-50"
+                  >
+                    {isTransferring ? 'Transferring...' : 'Transfer Ownership'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
-} 
+}

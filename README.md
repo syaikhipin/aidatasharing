@@ -113,7 +113,7 @@ simpleaisharing/
 ## 🛠️ Development
 
 ### Prerequisites
-- **Python 3.9+** (recommended: conda environment)
+- **Python 3.12+** (recommended: conda environment)
 - **Node.js 18+**
 - **Git**
 

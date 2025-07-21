@@ -232,6 +232,12 @@ const DownloadComponent: React.FC<DownloadComponentProps> = ({
         { value: 'excel', label: 'Excel' },
         { value: 'csv', label: 'CSV' }
       );
+    } else if (dataset.type?.toLowerCase() === 'pdf') {
+      formats.push(
+        { value: 'pdf', label: 'PDF' },
+        { value: 'txt', label: 'Text (Extracted)' },
+        { value: 'json', label: 'JSON (Structured)' }
+      );
     }
     
     return formats;

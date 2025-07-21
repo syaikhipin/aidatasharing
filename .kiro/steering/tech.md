@@ -17,7 +17,7 @@
 - **Lucide React** - Icon library
 
 ## Development Environment
-- **Python 3.9+** with Conda environment management
+- **Python 3.12+** with Conda environment management
 - **Node.js 18+** for frontend development
 - **SQLite** for development database
 

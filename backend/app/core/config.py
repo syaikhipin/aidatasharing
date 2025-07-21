@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./storage/aishare_platform.db"
     
     # CORS origins - will be parsed from comma-separated string
-    BACKEND_CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8080,http://localhost:3001"
+    BACKEND_CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8080,http://localhost:3001,http://localhost:3004"
     
     def get_cors_origins(self) -> List[str]:
         """Parse CORS origins from comma-separated string."""
@@ -83,4 +83,4 @@ class Settings(BaseSettings):
         extra = "allow"
 
 
-settings = Settings() 
+settings = Settings()

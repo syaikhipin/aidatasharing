@@ -397,3 +397,71 @@ class SystemMetrics(Base):
     # MindsDB metrics
     mindsdb_health = Column(String, nullable=True)  # 'healthy', 'degraded', 'error'
     mindsdb_response_time_ms = Column(Float, nullable=True) 
+
+
+
+class RequestType(str, enum.Enum):
+    ACCESS = "access"
+    DOWNLOAD = "download"
+    SHARE = "share"
+
+class AccessLevel(str, enum.Enum):
+    READ = "read"
+    WRITE = "write"
+    ADMIN = "admin"
+
+class RequestStatus(str, enum.Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
+
+class UrgencyLevel(str, enum.Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+class RequestCategory(str, enum.Enum):
+    RESEARCH = "research"
+    ANALYSIS = "analysis"
+    COMPLIANCE = "compliance"
+    REPORTING = "reporting"
+    DEVELOPMENT = "development"
+
+class AccessRequest(Base):
+    __tablename__ = "access_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    requester_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    dataset_id = Column(Integer, ForeignKey("datasets.id"), nullable=False)
+    request_type = Column(Enum(RequestType), nullable=False)
+    requested_level = Column(Enum(AccessLevel), nullable=False)
+    purpose = Column(Text, nullable=False)
+    justification = Column(Text, nullable=False)
+    urgency = Column(Enum(UrgencyLevel), default=UrgencyLevel.MEDIUM)
+    category = Column(Enum(RequestCategory), default=RequestCategory.ANALYSIS)
+    expiry_date = Column(DateTime, nullable=True)
+    status = Column(Enum(RequestStatus), default=RequestStatus.PENDING)
+    approved_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_date = Column(DateTime, nullable=True)
+    rejection_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    requester = relationship("User", foreign_keys=[requester_id])
+    approved_by = relationship("User", foreign_keys=[approved_by_id])
+    dataset = relationship("Dataset")
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    action = Column(String, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    dataset_id = Column(Integer, ForeignKey("datasets.id"), nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    details = Column(Text, nullable=True)
+    ip_address = Column(String, nullable=True)
+    user_agent = Column(String, nullable=True)
+
+    user = relationship("User")
+    dataset = relationship("Dataset")

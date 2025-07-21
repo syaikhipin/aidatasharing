@@ -65,7 +65,7 @@ simpleaisharing/
 ## 🛠️ Installation & Setup
 
 ### Prerequisites
-- Python 3.9+
+- Python 3.12+
 - Node.js 18+
 - Anaconda/Miniconda
 
@@ -73,7 +73,7 @@ simpleaisharing/
 
 1. **Create conda environment:**
    ```bash
-   conda create --name aishare-platform python=3.9 -y
+   conda create -n aishare-platform python=3.9 -y
    conda activate aishare-platform
    ```
 
@@ -255,4 +255,4 @@ If you encounter any issues or have questions:
 
 ---
 
-**Happy coding! 🎉** 
+**Happy coding! 🎉**

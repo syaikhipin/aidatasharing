@@ -23,8 +23,8 @@ class DatasetCreate(DatasetBase):
     
     @validator('sharing_level')
     def validate_sharing_level(cls, v):
-        # Ensure no external sharing
-        if v not in [DataSharingLevel.PRIVATE, DataSharingLevel.DEPARTMENT, DataSharingLevel.ORGANIZATION]:
+        # Validate sharing level
+        if v not in [DataSharingLevel.PRIVATE, DataSharingLevel.ORGANIZATION, DataSharingLevel.PUBLIC]:
             raise ValueError('Invalid sharing level')
         return v
 
@@ -98,4 +98,4 @@ class DatasetAccessLog(BaseModel):
     created_at: datetime
     
     class Config:
-        from_attributes = True 
+        from_attributes = True

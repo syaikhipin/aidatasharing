@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import List, Optional, Dict, Any
@@ -1372,4 +1372,101 @@ async def get_dataset_schema(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get schema: {str(e)}"
+        )
+
+@router.post("/{dataset_id}/transfer-ownership")
+async def transfer_dataset_ownership(
+    dataset_id: int,
+    new_owner_id: int = Body(..., embed=True),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Transfer ownership of a dataset to another user within the same organization."""
+    from app.models.user import User
+    
+    # Get the dataset
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Dataset not found"
+        )
+    
+    # Check if current user is the owner or admin
+    if dataset.owner_id != current_user.id and not current_user.is_superuser:
+        # Check if user is organization admin
+        if not (current_user.organization_id == dataset.organization_id and 
+                current_user.role in ["owner", "admin"]):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only dataset owner or organization admin can transfer ownership"
+            )
+    
+    # Get the new owner
+    new_owner = db.query(User).filter(User.id == new_owner_id).first()
+    if not new_owner:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="New owner user not found"
+        )
+    
+    # Check if new owner is in the same organization
+    if new_owner.organization_id != dataset.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New owner must be in the same organization as the dataset"
+        )
+    
+    # Check if new owner is different from current owner
+    if new_owner_id == dataset.owner_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Dataset is already owned by this user"
+        )
+    
+    try:
+        # Store old owner info for logging
+        old_owner_id = dataset.owner_id
+        
+        # Transfer ownership
+        dataset.owner_id = new_owner_id
+        dataset.updated_at = datetime.utcnow()
+        
+        # Log the ownership transfer
+        from app.models.dataset import DatasetAccessLog
+        access_log = DatasetAccessLog(
+            dataset_id=dataset_id,
+            user_id=current_user.id,
+            access_type="ownership_transfer",
+            ip_address=None,
+            user_agent=None,
+            details={
+                "old_owner_id": old_owner_id,
+                "new_owner_id": new_owner_id,
+                "transferred_by": current_user.id
+            }
+        )
+        db.add(access_log)
+        
+        db.commit()
+        db.refresh(dataset)
+        
+        logger.info(f"📋 Dataset {dataset_id} ownership transferred from user {old_owner_id} to user {new_owner_id} by user {current_user.id}")
+        
+        return {
+            "message": "Dataset ownership transferred successfully",
+            "dataset_id": dataset_id,
+            "dataset_name": dataset.name,
+            "old_owner_id": old_owner_id,
+            "new_owner_id": new_owner_id,
+            "transferred_by": current_user.id,
+            "transferred_at": dataset.updated_at.isoformat()
+        }
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"❌ Failed to transfer ownership for dataset {dataset_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to transfer ownership: {str(e)}"
         )

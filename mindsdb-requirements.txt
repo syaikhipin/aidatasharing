@@ -1,0 +1,17 @@
+# MindsDB Installation Requirements
+# Install this separately to avoid conflicts with main application
+# Usage: pip install -r mindsdb-requirements.txt --no-deps
+
+# Core MindsDB
+mindsdb
+
+# Essential MindsDB dependencies (install only if needed)
+# lightwood
+# pandas>=1.3.0
+# numpy>=1.21.0
+# sqlalchemy>=1.4.0
+# requests>=2.25.0
+
+# Note: Install with --no-deps to avoid conflicts:
+# pip install mindsdb --no-deps
+# Then install only required dependencies manually if needed

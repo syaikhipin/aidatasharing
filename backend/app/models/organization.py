@@ -6,11 +6,10 @@ from app.core.database import Base
 
 
 class DataSharingLevel(str, enum.Enum):
-    """Data sharing levels within organization - all data is organization-scoped"""
-    ORGANIZATION = "organization"  # Accessible to all members within the organization
-    DEPARTMENT = "department"  # Accessible within specific department only
+    """Data sharing levels - simplified 3-level structure"""
     PRIVATE = "private"  # Accessible to owner only
-    # Note: No PUBLIC level - all data sharing is organization-scoped
+    ORGANIZATION = "organization"  # Accessible to all members within the organization (group level)
+    PUBLIC = "public"  # Accessible to everyone
 
 
 class OrganizationType(str, enum.Enum):
@@ -76,4 +75,4 @@ class UserRole(str, enum.Enum):
     ADMIN = "admin"  # Organization admin (manage users, settings)
     MANAGER = "manager"  # Department manager (manage department data)
     MEMBER = "member"  # Regular member (view/create data)
-    VIEWER = "viewer"  # Read-only access 
+    VIEWER = "viewer"  # Read-only access

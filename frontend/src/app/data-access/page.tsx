@@ -55,7 +55,7 @@ interface Dataset {
   description: string;
   owner: string;
   ownerDepartment: string;
-  sharingLevel: 'PRIVATE' | 'DEPARTMENT' | 'ORGANIZATION';
+  sharingLevel: 'PRIVATE' | 'ORGANIZATION' | 'PUBLIC';
   size: number;
   lastUpdated: string;
   accessCount: number;
@@ -117,181 +117,57 @@ function DataAccessPageContent() {
     try {
       setLoading(true);
       
-      // Mock data - replace with actual API calls
-      const mockDatasets: Dataset[] = [
-        {
-          id: "dataset_001",
-          name: "Customer_Behavior_Analysis_Q4_2023",
-          description: "Comprehensive customer behavior data including purchase patterns, demographics, and engagement metrics for Q4 2023.",
-          owner: "Sarah Johnson",
-          ownerDepartment: "Analytics",
-          sharingLevel: "DEPARTMENT",
-          size: 1.2, // GB
-          lastUpdated: "2024-01-15T14:22:00Z",
-          accessCount: 247,
-          hasAccess: true,
-          canRequest: false,
-          tags: ["customer", "behavior", "2023", "analytics"]
-        },
-        {
-          id: "dataset_002",
-          name: "Financial_Reports_Confidential_2023",
-          description: "Confidential financial reports and revenue data for strategic planning and compliance.",
-          owner: "Michael Chen",
-          ownerDepartment: "Finance",
-          sharingLevel: "PRIVATE",
-          size: 0.8,
-          lastUpdated: "2024-01-14T09:30:00Z",
-          accessCount: 12,
-          hasAccess: false,
-          canRequest: true,
-          tags: ["finance", "confidential", "revenue", "2023"]
-        },
-        {
-          id: "dataset_003",
-          name: "Marketing_Campaign_Performance_2024",
-          description: "Marketing campaign metrics, ROI analysis, and customer acquisition data for 2024 campaigns.",
-          owner: "Emily Rodriguez",
-          ownerDepartment: "Marketing",
-          sharingLevel: "ORGANIZATION",
-          size: 2.1,
-          lastUpdated: "2024-01-16T11:45:00Z",
-          accessCount: 89,
-          hasAccess: true,
-          canRequest: false,
-          tags: ["marketing", "campaigns", "ROI", "2024"]
-        },
-        {
-          id: "dataset_004",
-          name: "Product_Development_Research_Internal",
-          description: "Internal research data for product development including user feedback and competitive analysis.",
-          owner: "David Kim",
-          ownerDepartment: "Product",
-          sharingLevel: "PRIVATE",
-          size: 1.8,
-          lastUpdated: "2024-01-13T16:20:00Z",
-          accessCount: 34,
-          hasAccess: false,
-          canRequest: true,
-          tags: ["product", "research", "internal", "feedback"]
+      // Fetch real data from backend APIs
+      const token = localStorage.getItem('token');
+      const headers = {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      };
+      
+      // Fetch datasets
+      try {
+        const datasetsResponse = await fetch('/api/data-access/datasets', { headers });
+        if (datasetsResponse.ok) {
+          const datasetsData = await datasetsResponse.json();
+          setDatasets(datasetsData);
+        } else {
+          console.error('Failed to fetch datasets:', datasetsResponse.status);
+          setDatasets([]);
         }
-      ];
-
-      const mockAccessRequests: AccessRequest[] = [
-        {
-          id: "req_001",
-          requesterId: "user_001",
-          requesterName: "John Smith",
-          requesterEmail: "john.smith@techcorp.com",
-          requesterDepartment: "Sales",
-          datasetId: "dataset_002",
-          datasetName: "Financial_Reports_Confidential_2023",
-          datasetOwner: "Michael Chen",
-          requestType: "access",
-          requestedLevel: "read",
-          purpose: "Quarterly sales analysis and revenue forecasting",
-          justification: "Need access to financial data to create accurate sales projections for Q1 2024 and analyze correlation between revenue trends and sales performance.",
-          requestDate: "2024-01-15T10:30:00Z",
-          expiryDate: "2024-03-15T10:30:00Z",
-          status: "pending",
-          urgency: "high",
-          category: "analysis"
-        },
-        {
-          id: "req_002",
-          requesterId: "user_002",
-          requesterName: "Lisa Wong",
-          requesterEmail: "lisa.wong@techcorp.com",
-          requesterDepartment: "Research",
-          datasetId: "dataset_004",
-          datasetName: "Product_Development_Research_Internal",
-          datasetOwner: "David Kim",
-          requestType: "download",
-          requestedLevel: "read",
-          purpose: "Competitive analysis research project",
-          justification: "Conducting market research study that requires analysis of product development patterns and user feedback data.",
-          requestDate: "2024-01-14T14:15:00Z",
-          status: "approved",
-          approvedBy: "David Kim",
-          approvedDate: "2024-01-15T09:20:00Z",
-          urgency: "medium",
-          category: "research"
-        },
-        {
-          id: "req_003",
-          requesterId: "user_003",
-          requesterName: "Robert Taylor",
-          requesterEmail: "robert.taylor@techcorp.com",
-          requesterDepartment: "Compliance",
-          datasetId: "dataset_002",
-          datasetName: "Financial_Reports_Confidential_2023",
-          datasetOwner: "Michael Chen",
-          requestType: "access",
-          requestedLevel: "read",
-          purpose: "Regulatory compliance audit",
-          justification: "Required for annual compliance audit to verify financial reporting accuracy and regulatory adherence.",
-          requestDate: "2024-01-12T16:45:00Z",
-          status: "rejected",
-          rejectionReason: "Insufficient clearance level for confidential financial data",
-          urgency: "low",
-          category: "compliance"
+      } catch (error) {
+        console.error('Error fetching datasets:', error);
+        setDatasets([]);
+      }
+      
+      // Fetch access requests
+      try {
+        const requestsResponse = await fetch('/api/data-access/requests', { headers });
+        if (requestsResponse.ok) {
+          const requestsData = await requestsResponse.json();
+          setAccessRequests(requestsData);
+        } else {
+          console.error('Failed to fetch access requests:', requestsResponse.status);
+          setAccessRequests([]);
         }
-      ];
-
-      const mockAuditLogs: AuditLog[] = [
-        {
-          id: "audit_001",
-          action: "ACCESS_GRANTED",
-          userId: "user_002",
-          userName: "Lisa Wong",
-          datasetId: "dataset_004",
-          datasetName: "Product_Development_Research_Internal",
-          timestamp: "2024-01-15T09:20:00Z",
-          details: "Access granted by David Kim for research project",
-          ipAddress: "192.168.1.45",
-          userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        },
-        {
-          id: "audit_002",
-          action: "DATA_DOWNLOADED",
-          userId: "user_002",
-          userName: "Lisa Wong",
-          datasetId: "dataset_004",
-          datasetName: "Product_Development_Research_Internal",
-          timestamp: "2024-01-15T10:15:00Z",
-          details: "Dataset downloaded following approved access request",
-          ipAddress: "192.168.1.45",
-          userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        },
-        {
-          id: "audit_003",
-          action: "ACCESS_DENIED",
-          userId: "user_003",
-          userName: "Robert Taylor",
-          datasetId: "dataset_002",
-          datasetName: "Financial_Reports_Confidential_2023",
-          timestamp: "2024-01-12T17:30:00Z",
-          details: "Access request rejected due to insufficient clearance",
-          ipAddress: "192.168.1.78",
-          userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
-        },
-        {
-          id: "audit_004",
-          action: "DATASET_ACCESSED",
-          userId: "user_001",
-          userName: "Sarah Johnson",
-          datasetId: "dataset_001",
-          datasetName: "Customer_Behavior_Analysis_Q4_2023",
-          timestamp: "2024-01-16T13:20:00Z",
-          details: "Dataset accessed for regular analytics work",
-          ipAddress: "192.168.1.23",
-          userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+      } catch (error) {
+        console.error('Error fetching access requests:', error);
+        setAccessRequests([]);
+      }
+      
+      // Fetch audit logs
+      try {
+        const auditResponse = await fetch('/api/data-access/audit-logs', { headers });
+        if (auditResponse.ok) {
+          const auditData = await auditResponse.json();
+          setAuditLogs(auditData);
+        } else {
+          console.error('Failed to fetch audit logs:', auditResponse.status);
+          setAuditLogs([]);
         }
-      ];
-
-      setDatasets(mockDatasets);
-      setAccessRequests(mockAccessRequests);
-      setAuditLogs(mockAuditLogs);
+      } catch (error) {
+        console.error('Error fetching audit logs:', error);
+        setAuditLogs([]);
+      }
       
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -318,36 +194,101 @@ function DataAccessPageContent() {
     if (!selectedDataset) return;
 
     try {
-      // Create new access request
-      const newRequest: AccessRequest = {
-        id: `req_${Date.now()}`,
-        requesterId: "user_current",
-        requesterName: "Current User",
-        requesterEmail: "current.user@techcorp.com",
-        requesterDepartment: "Current Department",
-        datasetId: selectedDataset.id,
-        datasetName: selectedDataset.name,
-        datasetOwner: selectedDataset.owner,
-        requestType: requestForm.requestType,
-        requestedLevel: requestForm.requestedLevel,
+      const token = localStorage.getItem('token');
+      const headers = {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      };
+      
+      const requestData = {
+        dataset_id: selectedDataset.id,
+        request_type: requestForm.requestType,
+        requested_level: requestForm.requestedLevel,
         purpose: requestForm.purpose,
         justification: requestForm.justification,
-        requestDate: new Date().toISOString(),
-        expiryDate: requestForm.expiryDate || undefined,
-        status: 'pending',
         urgency: requestForm.urgency,
-        category: requestForm.category
+        category: requestForm.category,
+        expiry_date: requestForm.expiryDate || null
       };
-
-      setAccessRequests(prev => [newRequest, ...prev]);
-      setShowRequestModal(false);
       
-      // Show success notification
-      alert('Access request submitted successfully!');
+      const response = await fetch('/api/data-access/requests', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify(requestData)
+      });
       
+      if (response.ok) {
+        const result = await response.json();
+        setShowRequestModal(false);
+        alert('Access request submitted successfully!');
+        // Refresh data to show new request
+        fetchData();
+      } else {
+        const errorData = await response.json();
+        console.error('Failed to submit access request:', errorData);
+        alert(`Failed to submit access request: ${errorData.detail || 'Unknown error'}`);
+      }
     } catch (error) {
       console.error('Error submitting request:', error);
       alert('Error submitting request. Please try again.');
+    }
+  };
+
+  const handleApproveRequest = async (requestId: string) => {
+    try {
+      const token = localStorage.getItem('token');
+      const headers = {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      };
+      
+      const response = await fetch(`/api/data-access/requests/${requestId}/approve`, {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({ approved: true })
+      });
+      
+      if (response.ok) {
+        alert('Request approved successfully!');
+        // Refresh data to show updated status
+        fetchData();
+      } else {
+        const errorData = await response.json();
+        console.error('Failed to approve request:', errorData);
+        alert(`Failed to approve request: ${errorData.detail || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error approving request:', error);
+      alert('Error approving request. Please try again.');
+    }
+  };
+
+  const handleRejectRequest = async (requestId: string, reason: string) => {
+    try {
+      const token = localStorage.getItem('token');
+      const headers = {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      };
+      
+      const response = await fetch(`/api/data-access/requests/${requestId}/approve`, {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({ approved: false, rejection_reason: reason })
+      });
+      
+      if (response.ok) {
+        alert('Request rejected successfully!');
+        // Refresh data to show updated status
+        fetchData();
+      } else {
+        const errorData = await response.json();
+        console.error('Failed to reject request:', errorData);
+        alert(`Failed to reject request: ${errorData.detail || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error rejecting request:', error);
+      alert('Error rejecting request. Please try again.');
     }
   };
 
@@ -383,8 +324,8 @@ function DataAccessPageContent() {
   const getSharingLevelIcon = (level: string) => {
     switch (level) {
       case 'PRIVATE': return <Lock className="w-4 h-4 text-red-600" />;
-      case 'DEPARTMENT': return <Users className="w-4 h-4 text-blue-600" />;
-      case 'ORGANIZATION': return <Share2 className="w-4 h-4 text-green-600" />;
+      case 'ORGANIZATION': return <Users className="w-4 h-4 text-blue-600" />;
+      case 'PUBLIC': return <Share2 className="w-4 h-4 text-green-600" />;
       default: return <Lock className="w-4 h-4 text-gray-600" />;
     }
   };
@@ -499,8 +440,8 @@ function DataAccessPageContent() {
                     >
                       <option value="all">All Sharing Levels</option>
                       <option value="PRIVATE">Private</option>
-                      <option value="DEPARTMENT">Department</option>
                       <option value="ORGANIZATION">Organization</option>
+                      <option value="PUBLIC">Public</option>
                     </select>
                     
                     <select
@@ -530,8 +471,9 @@ function DataAccessPageContent() {
                           {getSharingLevelIcon(dataset.sharingLevel)}
                           <span className={`ml-2 px-2 py-1 text-xs rounded-full ${
                             dataset.sharingLevel === 'PRIVATE' ? 'bg-red-100 text-red-800' :
-                            dataset.sharingLevel === 'DEPARTMENT' ? 'bg-blue-100 text-blue-800' :
-                            'bg-green-100 text-green-800'
+                            dataset.sharingLevel === 'ORGANIZATION' ? 'bg-blue-100 text-blue-800' :
+                            dataset.sharingLevel === 'PUBLIC' ? 'bg-green-100 text-green-800' :
+                            'bg-gray-100 text-gray-800'
                           }`}>
                             {dataset.sharingLevel}
                           </span>
@@ -692,10 +634,19 @@ function DataAccessPageContent() {
                         <div className="flex items-center space-x-2 ml-6">
                           {request.status === 'pending' && (
                             <>
-                              <button className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm">
+                              <button 
+                                onClick={() => handleApproveRequest(request.id)}
+                                className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
+                              >
                                 Approve
                               </button>
-                              <button className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm">
+                              <button 
+                                onClick={() => {
+                                  const reason = prompt('Please provide a reason for rejection:');
+                                  if (reason) handleRejectRequest(request.id, reason);
+                                }}
+                                className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+                              >
                                 Reject
                               </button>
                             </>
@@ -925,4 +876,4 @@ export default function DataAccessPage() {
       <DataAccessPageContent />
     </ProtectedRoute>
   );
-} 
+}

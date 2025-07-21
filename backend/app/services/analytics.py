@@ -24,13 +24,7 @@ class AnalyticsService:
     """Service for comprehensive data logging and analytics"""
     
     def __init__(self):
-        self.db_session = None
-    
-    def get_session(self) -> Session:
-        """Get database session"""
-        if not self.db_session:
-            self.db_session = next(get_db())
-        return self.db_session
+        pass
     
     async def log_dataset_access(
         self,
@@ -56,7 +50,7 @@ class AnalyticsService:
             access_id: Unique identifier for this access event
         """
         try:
-            db = self.get_session()
+            db = next(get_db())
             
             # Extract technical details from request
             ip_address = None
@@ -102,8 +96,6 @@ class AnalyticsService:
             
         except Exception as e:
             logger.error(f"Error logging dataset access: {str(e)}")
-            if self.db_session:
-                self.db_session.rollback()
             return None
     
     async def log_dataset_download(
@@ -117,7 +109,7 @@ class AnalyticsService:
     ) -> str:
         """Log dataset download event"""
         try:
-            db = self.get_session()
+            db = next(get_db())
             
             ip_address = None
             user_agent = None
@@ -160,8 +152,6 @@ class AnalyticsService:
             
         except Exception as e:
             logger.error(f"Error logging dataset download: {str(e)}")
-            if self.db_session:
-                self.db_session.rollback()
             return None
     
     async def log_chat_interaction(
@@ -176,7 +166,7 @@ class AnalyticsService:
     ) -> str:
         """Log AI chat interaction"""
         try:
-            db = self.get_session()
+            db = next(get_db())
             
             ip_address = None
             user_agent = None
@@ -221,8 +211,6 @@ class AnalyticsService:
             
         except Exception as e:
             logger.error(f"Error logging chat interaction: {str(e)}")
-            if self.db_session:
-                self.db_session.rollback()
             return None
     
     async def log_api_usage(
@@ -237,7 +225,7 @@ class AnalyticsService:
     ) -> str:
         """Log API endpoint usage"""
         try:
-            db = self.get_session()
+            db = next(get_db())
             
             ip_address = None
             user_agent = None
@@ -269,8 +257,6 @@ class AnalyticsService:
             
         except Exception as e:
             logger.error(f"Error logging API usage: {str(e)}")
-            if self.db_session:
-                self.db_session.rollback()
             return None
     
     async def _update_usage_stats(
@@ -282,7 +268,7 @@ class AnalyticsService:
     ):
         """Update aggregated usage statistics"""
         try:
-            db = self.get_session()
+            db = next(get_db())
             
             # Update hourly stats
             current_hour = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
@@ -307,17 +293,17 @@ class AnalyticsService:
                 )
                 db.add(stats)
             
-            # Update counters based on access type
+            # Update counters based on access type (handle None values)
             if access_type == 'view':
-                stats.total_views += 1
+                stats.total_views = (stats.total_views or 0) + 1
             elif access_type == 'download':
-                stats.total_downloads += 1
+                stats.total_downloads = (stats.total_downloads or 0) + 1
             elif access_type == 'chat':
-                stats.total_chats += 1
+                stats.total_chats = (stats.total_chats or 0) + 1
             elif access_type == 'api_call':
-                stats.total_api_calls += 1
+                stats.total_api_calls = (stats.total_api_calls or 0) + 1
             elif access_type == 'share':
-                stats.total_shares += 1
+                stats.total_shares = (stats.total_shares or 0) + 1
             
             stats.updated_at = datetime.utcnow()
             
@@ -325,8 +311,6 @@ class AnalyticsService:
             
         except Exception as e:
             logger.error(f"Error updating usage stats: {str(e)}")
-            if self.db_session:
-                self.db_session.rollback()
     
     async def get_dataset_analytics(
         self,
@@ -337,7 +321,7 @@ class AnalyticsService:
     ) -> Dict[str, Any]:
         """Get comprehensive analytics for a specific dataset"""
         try:
-            db = self.get_session()
+            db = next(get_db())
             
             if not start_date:
                 start_date = datetime.utcnow() - timedelta(days=30)
@@ -441,7 +425,7 @@ class AnalyticsService:
     ) -> Dict[str, Any]:
         """Get comprehensive analytics for an organization"""
         try:
-            db = self.get_session()
+            db = next(get_db())
             
             if not start_date:
                 start_date = datetime.utcnow() - timedelta(days=30)
@@ -539,7 +523,7 @@ class AnalyticsService:
     async def record_system_metrics(self):
         """Record current system performance metrics"""
         try:
-            db = self.get_session()
+            db = next(get_db())
             
             # Get system metrics
             cpu_percent = psutil.cpu_percent(interval=1)
@@ -568,8 +552,6 @@ class AnalyticsService:
             
         except Exception as e:
             logger.error(f"Error recording system metrics: {str(e)}")
-            if self.db_session:
-                self.db_session.rollback()
 
 # Global analytics service instance
-analytics_service = AnalyticsService() 
+analytics_service = AnalyticsService()

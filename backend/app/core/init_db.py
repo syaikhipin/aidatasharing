@@ -119,6 +119,26 @@ def init_db():
                 print(f"Updated admin user with organization: {admin_org.name}")
             print(f"Superuser already exists: {settings.FIRST_SUPERUSER}")
         
+        # Create permanent test user for testing purposes
+        test_user_email = "testuser@demo.com"
+        test_user = db.query(User).filter(User.email == test_user_email).first()
+        if not test_user:
+            # Get demo organization for test user
+            demo_org = db.query(Organization).filter(Organization.slug == "demo-org").first()
+            test_user = User(
+                email=test_user_email,
+                hashed_password=get_password_hash("testpassword123"),
+                full_name="Test User",
+                is_active=True,
+                is_superuser=False,
+                organization_id=demo_org.id if demo_org else None,
+                role="member"
+            )
+            db.add(test_user)
+            print(f"Test user created: {test_user_email}")
+        else:
+            print(f"Test user already exists: {test_user_email}")
+        
         # Create default configurations
         default_configs = [
             {

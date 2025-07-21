@@ -126,15 +126,17 @@ def create_startup_scripts():
 
 echo "🚀 Starting AI Share Platform Development Environment..."
 
-# Check if conda environment exists and activate it
+# Activate conda environment
+echo "📦 Activating conda environment: aishare-platform"
 if conda info --envs | grep -q "aishare-platform"; then
-    echo "📦 Activating conda environment: aishare-platform"
-    source $(conda info --base)/etc/profile.d/conda.sh
+    source "$(conda info --base)/etc/profile.d/conda.sh"
     conda activate aishare-platform
+    echo "✅ Activated conda environment: aishare-platform"
 else
-    echo "⚠️  Conda environment 'aishare-platform' not found"
-    echo "   Create it with: conda create -n aishare-platform python=3.9"
-    echo "   Then run: conda activate aishare-platform && pip install -r backend/requirements.txt"
+    echo "❌ Conda environment 'aishare-platform' not found. Please create it first."
+    echo "   Run: conda create -n aishare-platform python=3.9"
+    echo "   Then run: ./install-deps.sh"
+    exit 1
 fi
 
 # Create necessary directories

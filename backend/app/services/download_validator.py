@@ -256,7 +256,7 @@ class DownloadValidator:
                     "csv": ["csv", "excel", "json"],
                     "json": ["json", "csv"],
                     "excel": ["excel", "csv", "json"],
-                    "pdf": ["pdf"],
+                    "pdf": ["pdf", "txt", "json"],
                     "parquet": ["parquet", "csv", "json"],
                     "s3_bucket": ["csv", "json", "parquet", "excel"]
                 }

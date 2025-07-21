@@ -119,174 +119,58 @@ function AnalyticsPageContent() {
     try {
       setLoading(true);
       
-      // Mock analytics data - replace with actual API call
-      const mockAnalytics: AnalyticsData = {
+      // Fetch real analytics data from backend API
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/analytics/api/analytics/organization`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch analytics data');
+      }
+      
+      const data = await response.json();
+      
+      // Transform backend data to frontend format
+      const analyticsData: AnalyticsData = {
         organization: {
-          id: "org_001",
-          name: "TechCorp Analytics",
-          totalUsers: 127,
-          totalDatasets: 89,
-          totalModels: 34,
-          storageUsed: 245.7, // GB
-          storageLimit: 500 // GB
+          id: data.organization.id.toString(),
+          name: data.organization.name,
+          totalUsers: data.organization.total_users,
+          totalDatasets: data.organization.total_datasets,
+          totalModels: 0, // Removed models functionality
+          storageUsed: data.organization.storage_used,
+          storageLimit: data.organization.storage_limit
         },
         usage: {
-          totalApiCalls: 45678,
-          totalPredictions: 123456,
-          averageResponseTime: 245, // ms
-          uptime: 99.7 // percentage
+          totalApiCalls: data.usage.total_api_calls,
+          totalPredictions: 0, // Removed predictions functionality
+          averageResponseTime: data.usage.average_response_time,
+          uptime: data.usage.uptime
         },
         trends: {
-          datasetUploads: [
-            { date: '2024-01-10', count: 12 },
-            { date: '2024-01-11', count: 8 },
-            { date: '2024-01-12', count: 15 },
-            { date: '2024-01-13', count: 18 },
-            { date: '2024-01-14', count: 22 },
-            { date: '2024-01-15', count: 19 },
-            { date: '2024-01-16', count: 14 }
-          ],
-          modelCreations: [
-            { date: '2024-01-10', count: 3 },
-            { date: '2024-01-11', count: 2 },
-            { date: '2024-01-12', count: 5 },
-            { date: '2024-01-13', count: 4 },
-            { date: '2024-01-14', count: 6 },
-            { date: '2024-01-15', count: 3 },
-            { date: '2024-01-16', count: 2 }
-          ],
-          predictions: [
-            { date: '2024-01-10', count: 1250 },
-            { date: '2024-01-11', count: 1100 },
-            { date: '2024-01-12', count: 1450 },
-            { date: '2024-01-13', count: 1680 },
-            { date: '2024-01-14', count: 1920 },
-            { date: '2024-01-15', count: 1750 },
-            { date: '2024-01-16', count: 1340 }
-          ],
-          userActivity: [
-            { date: '2024-01-10', active_users: 89 },
-            { date: '2024-01-11', active_users: 76 },
-            { date: '2024-01-12', active_users: 94 },
-            { date: '2024-01-13', active_users: 102 },
-            { date: '2024-01-14', active_users: 98 },
-            { date: '2024-01-15', active_users: 87 },
-            { date: '2024-01-16', active_users: 91 }
-          ]
+          datasetUploads: data.trends.dataset_uploads || [],
+          modelCreations: [], // Removed model functionality
+          predictions: [], // Removed predictions functionality
+          userActivity: data.trends.user_activity || []
         },
-        modelPerformance: [
-          {
-            id: "model_001",
-            name: "Customer Churn Prediction",
-            accuracy: 0.924,
-            predictions: 15847,
-            lastUpdated: "2024-01-15T14:22:00Z",
-            status: "excellent"
-          },
-          {
-            id: "model_002",
-            name: "Sales Forecasting",
-            accuracy: 0.887,
-            predictions: 8932,
-            lastUpdated: "2024-01-14T09:15:00Z",
-            status: "good"
-          },
-          {
-            id: "model_003",
-            name: "Demand Prediction",
-            accuracy: 0.756,
-            predictions: 3421,
-            lastUpdated: "2024-01-12T16:45:00Z",
-            status: "needs_attention"
-          },
-          {
-            id: "model_004",
-            name: "Price Optimization",
-            accuracy: 0.913,
-            predictions: 12054,
-            lastUpdated: "2024-01-16T11:30:00Z",
-            status: "excellent"
-          }
-        ],
-        userActivity: [
-          {
-            userId: "user_001",
-            name: "Sarah Johnson",
-            lastActive: "2024-01-16T14:22:00Z",
-            actionsToday: 23,
-            role: "Data Scientist",
-            department: "Analytics"
-          },
-          {
-            userId: "user_002",
-            name: "Mike Chen",
-            lastActive: "2024-01-16T13:45:00Z",
-            actionsToday: 17,
-            role: "Manager",
-            department: "Engineering"
-          },
-          {
-            userId: "user_003",
-            name: "Emily Rodriguez",
-            lastActive: "2024-01-16T12:30:00Z",
-            actionsToday: 31,
-            role: "Admin",
-            department: "IT"
-          },
-          {
-            userId: "user_004",
-            name: "David Kim",
-            lastActive: "2024-01-16T11:15:00Z",
-            actionsToday: 12,
-            role: "Analyst",
-            department: "Marketing"
-          }
-        ],
+        modelPerformance: [], // Removed model functionality
+        userActivity: data.user_activity || [],
         dataUsage: {
-          mostAccessedDatasets: [
-            {
-              id: "dataset_001",
-              name: "Customer_Behavior_Analysis_Q4_2023",
-              accessCount: 247,
-              lastAccessed: "2024-01-16T13:20:00Z",
-              sharingLevel: "ORGANIZATION"
-            },
-            {
-              id: "dataset_002",
-              name: "Sales_Data_2023_Complete",
-              accessCount: 189,
-              lastAccessed: "2024-01-16T12:45:00Z",
-              sharingLevel: "DEPARTMENT"
-            },
-            {
-              id: "dataset_003",
-              name: "Market_Research_Consumer_Trends",
-              accessCount: 156,
-              lastAccessed: "2024-01-16T11:30:00Z",
-              sharingLevel: "ORGANIZATION"
-            }
-          ],
-          storageByDepartment: [
-            { department: "Analytics", storage: 89.4, percentage: 36.4 },
-            { department: "Engineering", storage: 67.2, percentage: 27.3 },
-            { department: "Marketing", storage: 45.8, percentage: 18.6 },
-            { department: "IT", storage: 28.9, percentage: 11.8 },
-            { department: "Sales", storage: 14.4, percentage: 5.9 }
-          ]
+          mostAccessedDatasets: data.data_usage?.most_accessed_datasets || [],
+          storageByDepartment: data.data_usage?.storage_by_department || []
         },
         costs: {
-          totalCost: 2847.50,
-          costByCategory: [
-            { category: "Storage", amount: 1245.30, percentage: 43.7 },
-            { category: "API Calls", amount: 892.15, percentage: 31.3 },
-            { category: "Model Training", amount: 456.78, percentage: 16.0 },
-            { category: "Data Processing", amount: 253.27, percentage: 8.9 }
-          ],
-          projectedMonthlyCost: 8542.50
+          totalCost: data.costs?.total_cost || 0,
+          costByCategory: data.costs?.cost_by_category || [],
+          projectedMonthlyCost: data.costs?.projected_monthly_cost || 0
         }
       };
       
-      setAnalytics(mockAnalytics);
+      setAnalytics(analyticsData);
       
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load analytics');
@@ -390,7 +274,7 @@ function AnalyticsPageContent() {
         </div>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           <div className="bg-white p-6 rounded-lg shadow">
             <div className="flex items-center">
               <div className="p-3 bg-blue-100 rounded-lg">
@@ -419,26 +303,13 @@ function AnalyticsPageContent() {
           
           <div className="bg-white p-6 rounded-lg shadow">
             <div className="flex items-center">
-              <div className="p-3 bg-purple-100 rounded-lg">
-                <BarChart3 className="w-6 h-6 text-purple-600" />
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">AI Models</p>
-                <p className="text-2xl font-bold text-gray-900">{analytics.organization.totalModels}</p>
-                <p className="text-sm text-green-600">+15% from last month</p>
-              </div>
-            </div>
-          </div>
-          
-          <div className="bg-white p-6 rounded-lg shadow">
-            <div className="flex items-center">
               <div className="p-3 bg-orange-100 rounded-lg">
-                <Zap className="w-6 h-6 text-orange-600" />
+                <HardDrive className="w-6 h-6 text-orange-600" />
               </div>
               <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Predictions</p>
-                <p className="text-2xl font-bold text-gray-900">{analytics.usage.totalPredictions.toLocaleString()}</p>
-                <p className="text-sm text-green-600">+23% from last month</p>
+                <p className="text-sm font-medium text-gray-600">Storage Used</p>
+                <p className="text-2xl font-bold text-gray-900">{analytics.organization.storageUsed}GB</p>
+                <p className="text-sm text-gray-600">of {analytics.organization.storageLimit}GB</p>
               </div>
             </div>
           </div>
@@ -450,7 +321,6 @@ function AnalyticsPageContent() {
             <nav className="flex space-x-8 px-6">
               {[
                 { id: 'overview', label: 'Overview', icon: BarChart3 },
-                { id: 'models', label: 'Model Performance', icon: Target },
                 { id: 'users', label: 'User Activity', icon: Users },
                 { id: 'data', label: 'Data Usage', icon: Database },
                 { id: 'costs', label: 'Cost Analysis', icon: DollarSign }
@@ -515,7 +385,7 @@ function AnalyticsPageContent() {
                 </div>
 
                 {/* Activity Trends */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 lg:grid-cols-1 gap-6">
                   <div className="bg-white border border-gray-200 rounded-lg p-6">
                     <h3 className="text-lg font-semibold text-gray-900 mb-4">Dataset Uploads Trend</h3>
                     <div className="space-y-3">
@@ -530,26 +400,6 @@ function AnalyticsPageContent() {
                               ></div>
                             </div>
                             <span className="text-sm font-medium">{item.count}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  
-                  <div className="bg-white border border-gray-200 rounded-lg p-6">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Model Predictions Trend</h3>
-                    <div className="space-y-3">
-                      {analytics.trends.predictions.slice(-5).map((item, index) => (
-                        <div key={index} className="flex items-center justify-between">
-                          <span className="text-sm text-gray-600">{new Date(item.date).toLocaleDateString()}</span>
-                          <div className="flex items-center">
-                            <div className="w-20 bg-gray-200 rounded-full h-2 mr-3">
-                              <div 
-                                className="bg-green-600 h-2 rounded-full" 
-                                style={{ width: `${(item.count / 2000) * 100}%` }}
-                              ></div>
-                            </div>
-                            <span className="text-sm font-medium">{item.count.toLocaleString()}</span>
                           </div>
                         </div>
                       ))}
@@ -827,4 +677,4 @@ export default function AnalyticsPage() {
       <AnalyticsPageContent />
     </ProtectedRoute>
   );
-} 
+}

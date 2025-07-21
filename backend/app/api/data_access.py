@@ -10,7 +10,7 @@ from app.core.database import get_db
 from app.models.user import User
 from app.models.organization import Organization
 from app.models.dataset import Dataset
-from app.models.analytics import ActivityLog
+from app.models.analytics import ActivityLog, AccessRequest, AuditLog, RequestType, AccessLevel, RequestStatus, UrgencyLevel, RequestCategory
 from app.core.auth import get_current_user
 
 router = APIRouter()
@@ -109,8 +109,8 @@ class AuditLogResponse(BaseModel):
     user_agent: str
 
 # Mock data storage (replace with actual database models)
-access_requests_storage = []
-audit_logs_storage = []
+# access_requests_storage = []
+# audit_logs_storage = []
 
 @router.get("/datasets", response_model=List[DatasetAccessResponse])
 async def get_accessible_datasets(
@@ -155,7 +155,7 @@ async def get_accessible_datasets(
         result.append(DatasetAccessResponse(
             id=dataset.id,
             name=dataset.name,
-            description=dataset.description,
+            description=dataset.description or "No description available",
             owner=dataset.owner.full_name if dataset.owner and dataset.owner.full_name else (dataset.owner.email.split('@')[0] if dataset.owner else "Unknown"),
             owner_department="Analytics",  # Mock data
             sharing_level=dataset.sharing_level,
@@ -194,42 +194,35 @@ async def create_access_request(
     if dataset.owner_id == current_user.id or dataset.sharing_level in ["ORGANIZATION", "DEPARTMENT"]:
         raise HTTPException(status_code=400, detail="User already has access to this dataset")
     
-    # Create access request (mock storage)
-    new_request = {
-        "id": len(access_requests_storage) + 1,
-        "requester_id": current_user.id,
-        "requester_name": current_user.full_name or current_user.email.split('@')[0],
-        "requester_email": current_user.email,
-        "requester_department": "Current Department",  # Mock department
-        "dataset_id": dataset.id,
-        "dataset_name": dataset.name,
-        "dataset_owner": "Dataset Owner",  # Mock owner
-        "request_type": request_data.request_type,
-        "requested_level": request_data.requested_level,
-        "purpose": request_data.purpose,
-        "justification": request_data.justification,
-        "request_date": datetime.now().isoformat(),
-        "expiry_date": request_data.expiry_date,
-        "status": RequestStatus.PENDING,
-        "urgency": request_data.urgency,
-        "category": request_data.category
-    }
-    
-    access_requests_storage.append(new_request)
+    # Create access request
+    new_request = AccessRequest(
+        requester_id=current_user.id,
+        dataset_id=dataset.id,
+        request_type=request_data.request_type,
+        requested_level=request_data.requested_level,
+        purpose=request_data.purpose,
+        justification=request_data.justification,
+        urgency=request_data.urgency,
+        category=request_data.category,
+        expiry_date=datetime.fromisoformat(request_data.expiry_date) if request_data.expiry_date else None,
+        status=RequestStatus.PENDING
+    )
+    db.add(new_request)
+    db.commit()
+    db.refresh(new_request)
     
     # Log the activity
     await log_audit_activity(
+        db=db,
         action="ACCESS_REQUESTED",
         user_id=current_user.id,
-        user_name=current_user.full_name or current_user.email,
         dataset_id=dataset.id,
-        dataset_name=dataset.name,
         details=f"Access request submitted for {request_data.request_type} access",
-        ip_address="192.168.1.1",  # Mock IP
-        user_agent="MockAgent"
+        ip_address="192.168.1.1",  # Mock IP, replace with real in production
+        user_agent="MockAgent"  # Replace with real
     )
     
-    return {"message": "Access request submitted successfully", "request_id": str(new_request["id"])}
+    return {"message": "Access request submitted successfully", "request_id": str(new_request.id)}
 
 @router.get("/requests", response_model=List[AccessRequestResponse])
 async def get_access_requests(
@@ -243,26 +236,47 @@ async def get_access_requests(
     Get access requests (all for admins, user's own requests for regular users)
     """
     if not current_user.organization_id:
-        # Return empty list for users without organizations
         return []
     
-    # Filter requests
-    filtered_requests = access_requests_storage.copy()
+    query = db.query(AccessRequest).filter(
+        AccessRequest.dataset.has(organization_id=current_user.organization_id)
+    )
     
     if my_requests or not current_user.is_superuser:
-        filtered_requests = [r for r in filtered_requests if r["requester_id"] == current_user.id]
+        query = query.filter(AccessRequest.requester_id == current_user.id)
     
     if status:
-        filtered_requests = [r for r in filtered_requests if r["status"] == status]
+        query = query.filter(AccessRequest.status == status)
     
     if urgency:
-        filtered_requests = [r for r in filtered_requests if r["urgency"] == urgency]
+        query = query.filter(AccessRequest.urgency == urgency)
     
-    # Convert to response model
+    requests = query.all()
+    
     result = []
-    for request in filtered_requests:
-        result.append(AccessRequestResponse(**request))
-    
+    for req in requests:
+        result.append(AccessRequestResponse(
+            id=req.id,
+            requester_id=req.requester_id,
+            requester_name=req.requester.full_name or req.requester.email.split('@')[0],
+            requester_email=req.requester.email,
+            requester_department="Current Department",  # TODO: Get from user model
+            dataset_id=req.dataset_id,
+            dataset_name=req.dataset.name,
+            dataset_owner=req.dataset.owner.full_name or req.dataset.owner.email.split('@')[0],
+            request_type=req.request_type,
+            requested_level=req.requested_level,
+            purpose=req.purpose,
+            justification=req.justification,
+            request_date=req.created_at.isoformat(),
+            expiry_date=req.expiry_date.isoformat() if req.expiry_date else None,
+            status=req.status,
+            approved_by=req.approved_by.full_name if req.approved_by else None,
+            approved_date=req.approved_date.isoformat() if req.approved_date else None,
+            rejection_reason=req.rejection_reason,
+            urgency=req.urgency,
+            category=req.category
+        ))
     return result
 
 @router.put("/requests/{request_id}/approve")
@@ -278,45 +292,40 @@ async def approve_access_request(
     if not current_user.organization_id:
         raise HTTPException(status_code=400, detail="User must belong to an organization to approve requests")
     
-    # Find the request
-    request = None
-    for req in access_requests_storage:
-        if req["id"] == request_id:
-            request = req
-            break
+    request = db.query(AccessRequest).filter(AccessRequest.id == request_id).first()
     
     if not request:
         raise HTTPException(status_code=404, detail="Access request not found")
     
-    if request["status"] != RequestStatus.PENDING:
+    if request.status != RequestStatus.PENDING:
         raise HTTPException(status_code=400, detail="Request is not pending")
     
-    # Update request status
     if approval_data.decision == "approve":
-        request["status"] = RequestStatus.APPROVED
-        request["approved_by"] = current_user.full_name or current_user.email
-        request["approved_date"] = datetime.now().isoformat()
+        request.status = RequestStatus.APPROVED
+        request.approved_by_id = current_user.id
+        request.approved_date = datetime.utcnow()
         if approval_data.expiry_date:
-            request["expiry_date"] = approval_data.expiry_date
+            request.expiry_date = datetime.fromisoformat(approval_data.expiry_date)
         
         action = "ACCESS_GRANTED"
         details = "Access request approved"
     else:
-        request["status"] = RequestStatus.REJECTED
-        request["rejection_reason"] = approval_data.reason or "No reason provided"
+        request.status = RequestStatus.REJECTED
+        request.rejection_reason = approval_data.reason or "No reason provided"
         
         action = "ACCESS_DENIED"
         details = f"Access request rejected: {approval_data.reason or 'No reason provided'}"
     
+    db.commit()
+    
     # Log the activity
     await log_audit_activity(
+        db=db,
         action=action,
         user_id=current_user.id,
-        user_name=current_user.full_name or current_user.email,
-        dataset_id=request["dataset_id"],
-        dataset_name=request["dataset_name"],
+        dataset_id=request.dataset_id,
         details=details,
-        ip_address="192.168.1.1",  # Mock IP
+        ip_address="192.168.1.1",
         user_agent="MockAgent"
     )
     
@@ -335,41 +344,44 @@ async def get_audit_trail(
     Get audit trail for data access activities
     """
     if not current_user.organization_id:
-        # Return empty list for users without organizations
         return []
     
-    # Filter audit logs
-    filtered_logs = audit_logs_storage.copy()
+    query = db.query(AuditLog).filter(
+        AuditLog.dataset.has(organization_id=current_user.organization_id)
+    )
     
     if action:
-        filtered_logs = [log for log in filtered_logs if action.upper() in log["action"]]
+        query = query.filter(AuditLog.action.ilike(f"%{action}%"))
     
     if dataset_id:
-        filtered_logs = [log for log in filtered_logs if log["dataset_id"] == dataset_id]
+        query = query.filter(AuditLog.dataset_id == dataset_id)
     
-    # Apply date filters if provided
     if start_date:
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-        filtered_logs = [
-            log for log in filtered_logs 
-            if datetime.fromisoformat(log["timestamp"]) >= start_dt
-        ]
+        query = query.filter(AuditLog.timestamp >= start_dt)
     
     if end_date:
         end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
-        filtered_logs = [
-            log for log in filtered_logs 
-            if datetime.fromisoformat(log["timestamp"]) < end_dt
-        ]
+        query = query.filter(AuditLog.timestamp < end_dt)
     
-    # Sort by timestamp (newest first)
-    filtered_logs.sort(key=lambda x: x["timestamp"], reverse=True)
+    query = query.order_by(desc(AuditLog.timestamp))
     
-    # Convert to response model
+    logs = query.all()
+    
     result = []
-    for log in filtered_logs:
-        result.append(AuditLogResponse(**log))
-    
+    for log in logs:
+        result.append(AuditLogResponse(
+            id=log.id,
+            action=log.action,
+            user_id=log.user_id,
+            user_name=log.user.full_name or log.user.email,
+            dataset_id=log.dataset_id,
+            dataset_name=log.dataset.name,
+            timestamp=log.timestamp.isoformat(),
+            details=log.details,
+            ip_address=log.ip_address,
+            user_agent=log.user_agent
+        ))
     return result
 
 @router.post("/notify")
@@ -412,33 +424,48 @@ async def send_notification(
     
     return {"message": "Notification sent successfully", "notification": notification_data}
 
-@router.get("/requests/{request_id}")
-async def get_access_request_details(
+@router.get("/requests/{request_id}", response_model=AccessRequestResponse)
+async def get_request_details(
     request_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Get detailed information about a specific access request
+    Get details of a specific access request
     """
-    if not current_user.organization_id:
-        raise HTTPException(status_code=400, detail="User must belong to an organization")
-    
-    # Find the request
-    request = None
-    for req in access_requests_storage:
-        if req["id"] == request_id:
-            request = req
-            break
+    request = db.query(AccessRequest).filter(
+        AccessRequest.id == request_id,
+        AccessRequest.dataset.has(organization_id=current_user.organization_id)
+    ).first()
     
     if not request:
         raise HTTPException(status_code=404, detail="Access request not found")
     
-    # Check permissions (users can only see their own requests unless they're admin)
-    if not current_user.is_superuser and request["requester_id"] != current_user.id:
+    if not current_user.is_superuser and request.requester_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to view this request")
     
-    return AccessRequestResponse(**request)
+    return AccessRequestResponse(
+        id=request.id,
+        requester_id=request.requester_id,
+        requester_name=request.requester.full_name or request.requester.email.split('@')[0],
+        requester_email=request.requester.email,
+        requester_department="Current Department",
+        dataset_id=request.dataset_id,
+        dataset_name=request.dataset.name,
+        dataset_owner=request.dataset.owner.full_name or request.dataset.owner.email.split('@')[0],
+        request_type=request.request_type,
+        requested_level=request.requested_level,
+        purpose=request.purpose,
+        justification=request.justification,
+        request_date=request.created_at.isoformat(),
+        expiry_date=request.expiry_date.isoformat() if request.expiry_date else None,
+        status=request.status,
+        approved_by=request.approved_by.full_name if request.approved_by else None,
+        approved_date=request.approved_date.isoformat() if request.approved_date else None,
+        rejection_reason=request.rejection_reason,
+        urgency=request.urgency,
+        category=request.category
+    )
 
 @router.delete("/requests/{request_id}")
 async def cancel_access_request(
@@ -449,38 +476,23 @@ async def cancel_access_request(
     """
     Cancel a pending access request
     """
-    if not current_user.organization_id:
-        raise HTTPException(status_code=400, detail="User must belong to an organization")
-    
-    # Find the request
-    request_index = None
-    request = None
-    for i, req in enumerate(access_requests_storage):
-        if req["id"] == request_id:
-            request_index = i
-            request = req
-            break
+    request = db.query(AccessRequest).filter(
+        AccessRequest.id == request_id,
+        AccessRequest.requester_id == current_user.id,
+        AccessRequest.status == RequestStatus.PENDING
+    ).first()
     
     if not request:
-        raise HTTPException(status_code=404, detail="Access request not found")
+        raise HTTPException(status_code=404, detail="Pending request not found or not authorized to cancel")
     
-    # Check permissions (users can only cancel their own requests)
-    if request["requester_id"] != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to cancel this request")
+    db.delete(request)
+    db.commit()
     
-    if request["status"] != RequestStatus.PENDING:
-        raise HTTPException(status_code=400, detail="Can only cancel pending requests")
-    
-    # Remove the request
-    access_requests_storage.pop(request_index)
-    
-    # Log the activity
     await log_audit_activity(
+        db=db,
         action="REQUEST_CANCELLED",
         user_id=current_user.id,
-        user_name=current_user.full_name or current_user.email,
-        dataset_id=request["dataset_id"],
-        dataset_name=request["dataset_name"],
+        dataset_id=request.dataset_id,
         details="Access request cancelled by requester",
         ip_address="192.168.1.1",
         user_agent="MockAgent"
@@ -488,12 +500,61 @@ async def cancel_access_request(
     
     return {"message": "Access request cancelled successfully"}
 
+@router.get("/audit-logs", response_model=List[AuditLogResponse])
+async def get_audit_logs(
+    action: Optional[str] = Query(None, description="Filter by action type"),
+    user_id: Optional[int] = Query(None, description="Filter by user ID"),
+    dataset_id: Optional[int] = Query(None, description="Filter by dataset ID"),
+    limit: int = Query(50, description="Maximum number of logs to return"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get audit logs for the organization
+    """
+    if not current_user.organization_id:
+        return []
+    
+    # Build query for audit logs from user's organization
+    query = db.query(AuditLog).join(User, AuditLog.user_id == User.id).filter(
+        User.organization_id == current_user.organization_id
+    )
+    
+    # Apply filters
+    if action:
+        query = query.filter(AuditLog.action == action)
+    
+    if user_id:
+        query = query.filter(AuditLog.user_id == user_id)
+    
+    if dataset_id:
+        query = query.filter(AuditLog.dataset_id == dataset_id)
+    
+    # Order by timestamp descending and limit results
+    audit_logs = query.order_by(AuditLog.timestamp.desc()).limit(limit).all()
+    
+    result = []
+    for log in audit_logs:
+        result.append(AuditLogResponse(
+            id=log.id,
+            action=log.action,
+            user_id=log.user_id,
+            user_name=log.user.full_name or log.user.email.split('@')[0],
+            dataset_id=log.dataset_id,
+            dataset_name=log.dataset.name if log.dataset else "Unknown",
+            timestamp=log.timestamp.isoformat(),
+            details=log.details,
+            ip_address=log.ip_address or "Unknown",
+            user_agent=log.user_agent or "Unknown"
+        ))
+    
+    return result
+
 async def log_audit_activity(
+    db: Session,
     action: str,
     user_id: int,
-    user_name: str,
     dataset_id: int,
-    dataset_name: str,
     details: str,
     ip_address: str,
     user_agent: str
@@ -501,110 +562,105 @@ async def log_audit_activity(
     """
     Log an audit activity
     """
-    audit_entry = {
-        "id": len(audit_logs_storage) + 1,
-        "action": action,
-        "user_id": user_id,
-        "user_name": user_name,
-        "dataset_id": dataset_id,
-        "dataset_name": dataset_name,
-        "timestamp": datetime.now().isoformat(),
-        "details": details,
-        "ip_address": ip_address,
-        "user_agent": user_agent
-    }
-    
-    audit_logs_storage.append(audit_entry)
+    audit_entry = AuditLog(
+        action=action,
+        user_id=user_id,
+        dataset_id=dataset_id,
+        details=details,
+        ip_address=ip_address,
+        user_agent=user_agent
+    )
+    db.add(audit_entry)
+    db.commit()
 
-# Initialize with some sample data
-def initialize_sample_data():
-    """Initialize sample access requests and audit logs"""
-    
-    # Sample access requests
-    sample_requests = [
-        {
-            "id": 1,
-            "requester_id": 1,
-            "requester_name": "John Smith",
-            "requester_email": "john.smith@techcorp.com",
-            "requester_department": "Sales",
-            "dataset_id": 1,
-            "dataset_name": "Financial_Reports_Confidential_2023",
-            "dataset_owner": "Michael Chen",
-            "request_type": RequestType.ACCESS,
-            "requested_level": AccessLevel.READ,
-            "purpose": "Quarterly sales analysis and revenue forecasting",
-            "justification": "Need access to financial data to create accurate sales projections for Q1 2024.",
-            "request_date": "2024-01-15T10:30:00Z",
-            "expiry_date": "2024-03-15T10:30:00Z",
-            "status": RequestStatus.PENDING,
-            "urgency": UrgencyLevel.HIGH,
-            "category": RequestCategory.ANALYSIS
-        },
-        {
-            "id": 2,
-            "requester_id": 2,
-            "requester_name": "Lisa Wong",
-            "requester_email": "lisa.wong@techcorp.com",
-            "requester_department": "Research",
-            "dataset_id": 2,
-            "dataset_name": "Product_Development_Research_Internal",
-            "dataset_owner": "David Kim",
-            "request_type": RequestType.DOWNLOAD,
-            "requested_level": AccessLevel.READ,
-            "purpose": "Competitive analysis research project",
-            "justification": "Conducting market research study that requires analysis of product development patterns.",
-            "request_date": "2024-01-14T14:15:00Z",
-            "status": RequestStatus.APPROVED,
-            "approved_by": "David Kim",
-            "approved_date": "2024-01-15T09:20:00Z",
-            "urgency": UrgencyLevel.MEDIUM,
-            "category": RequestCategory.RESEARCH
-        }
-    ]
-    
-    # Sample audit logs
-    sample_audit_logs = [
-        {
-            "id": 1,
-            "action": "ACCESS_GRANTED",
-            "user_id": 2,
-            "user_name": "Lisa Wong",
-            "dataset_id": 2,
-            "dataset_name": "Product_Development_Research_Internal",
-            "timestamp": "2024-01-15T09:20:00Z",
-            "details": "Access granted by David Kim for research project",
-            "ip_address": "192.168.1.45",
-            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        },
-        {
-            "id": 2,
-            "action": "DATA_DOWNLOADED",
-            "user_id": 2,
-            "user_name": "Lisa Wong",
-            "dataset_id": 2,
-            "dataset_name": "Product_Development_Research_Internal",
-            "timestamp": "2024-01-15T10:15:00Z",
-            "details": "Dataset downloaded following approved access request",
-            "ip_address": "192.168.1.45",
-            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        },
-        {
-            "id": 3,
-            "action": "ACCESS_DENIED",
-            "user_id": 3,
-            "user_name": "Robert Taylor",
-            "dataset_id": 1,
-            "dataset_name": "Financial_Reports_Confidential_2023",
-            "timestamp": "2024-01-12T17:30:00Z",
-            "details": "Access request rejected due to insufficient clearance",
-            "ip_address": "192.168.1.78",
-            "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
-        }
-    ]
-    
-    access_requests_storage.extend(sample_requests)
-    audit_logs_storage.extend(sample_audit_logs)
+# Remove sample data initialization
+# def initialize_sample_data():
+#     """Initialize sample access requests and audit logs"""
+#     
+#     # Sample access requests
+#     sample_requests = [
+#         {
+#             "id": 1,
+#             "requester_id": 1,
+#             "requester_name": "John Smith",
+#             "requester_email": "john.smith@techcorp.com",
+#             "requester_department": "Sales",
+#             "dataset_id": 1,
+#             "dataset_name": "Financial_Reports_Confidential_2023",
+#             "dataset_owner": "Michael Chen",
+#             "request_type": RequestType.ACCESS,
+#             "requested_level": AccessLevel.READ,
+#             "purpose": "Quarterly sales analysis and revenue forecasting",
+#             "justification": "Need access to financial data to create accurate sales projections for Q1 2024.",
+#             "request_date": "2024-01-15T10:30:00Z",
+#             "expiry_date": "2024-03-15T10:30:00Z",
+#             "status": RequestStatus.PENDING,
+#             "urgency": UrgencyLevel.HIGH,
+#             "category": RequestCategory.ANALYSIS
+#         },
+#         {
+#             "id": 2,
+#             "requester_id": 2,
+#             "requester_name": "Lisa Wong",
+#             "requester_email": "lisa.wong@techcorp.com",
+#             "requester_department": "Research",
+#             "dataset_id": 2,
+#             "dataset_name": "Product_Development_Research_Internal",
+#             "dataset_owner": "David Kim",
+#             "request_type": RequestType.DOWNLOAD,
+#             "requested_level": AccessLevel.READ,
+#             "purpose": "Competitive analysis research project",
+#             "justification": "Conducting market research study that requires analysis of product development patterns.",
+#             "request_date": "2024-01-14T14:15:00Z",
+#             "status": RequestStatus.APPROVED,
+#             "approved_by": "David Kim",
+#             "approved_date": "2024-01-15T09:20:00Z",
+#             "urgency": UrgencyLevel.MEDIUM,
+#             "category": RequestCategory.RESEARCH
+#         }
+#     ]
+#     
+#     # Sample audit logs
+#     sample_audit_logs = [
+#         {
+#             "id": 1,
+#             "action": "ACCESS_GRANTED",
+#             "user_id": 2,
+#             "user_name": "Lisa Wong",
+#             "dataset_id": 2,
+#             "dataset_name": "Product_Development_Research_Internal",
+#             "timestamp": "2024-01-15T09:20:00Z",
+#             "details": "Access granted by David Kim for research project",
+#             "ip_address": "192.168.1.45",
+#             "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+#         },
+#         {
+#             "id": 2,
+#             "action": "DATA_DOWNLOADED",
+#             "user_id": 2,
+#             "user_name": "Lisa Wong",
+#             "dataset_id": 2,
+#             "dataset_name": "Product_Development_Research_Internal",
+#             "timestamp": "2024-01-15T10:15:00Z",
+#             "details": "Dataset downloaded following approved access request",
+#             "ip_address": "192.168.1.45",
+#             "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+#         },
+#         {
+#             "id": 3,
+#             "action": "ACCESS_DENIED",
+#             "user_id": 3,
+#             "user_name": "Robert Taylor",
+#             "dataset_id": 1,
+#             "dataset_name": "Financial_Reports_Confidential_2023",
+#             "timestamp": "2024-01-12T17:30:00Z",
+#             "details": "Access request rejected due to insufficient clearance",
+#             "ip_address": "192.168.1.78",
+#             "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+#         }
+#     ]
+#     
+#     access_requests_storage.extend(sample_requests)
+#     audit_logs_storage.extend(sample_audit_logs)
 
-# Initialize sample data when module loads
-initialize_sample_data() 
+# Sample data initialization removed - using real database data

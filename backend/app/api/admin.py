@@ -1,10 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func, and_
 from typing import List, Dict, Any
+from datetime import datetime, timedelta
 from app.core.database import get_db
 from app.core.auth import get_current_superuser
 from app.models.user import User
 from app.models.config import Configuration
+from app.models.dataset import Dataset
+from app.models.analytics import DatasetAccess, SystemMetrics, AccessRequest, AuditLog
 from app.schemas.config import Configuration as ConfigSchema, ConfigurationCreate, ConfigurationUpdate
 
 router = APIRouter()
@@ -128,4 +132,70 @@ async def get_google_api_key(
     return {
         "has_api_key": config is not None and config.value is not None,
         "key_length": len(config.value) if config and config.value else 0
-    } 
+    }
+
+
+@router.get("/stats")
+async def get_admin_stats(
+    current_user: User = Depends(get_current_superuser),
+    db: Session = Depends(get_db)
+):
+    """Get admin dashboard statistics."""
+    try:
+        # Get date ranges
+        now = datetime.utcnow()
+        last_24h = now - timedelta(hours=24)
+        last_7d = now - timedelta(days=7)
+        
+        # Total users
+        total_users = db.query(User).count()
+        
+        # Active users (users who accessed data in last 7 days)
+        active_users = db.query(func.count(func.distinct(DatasetAccess.user_id))).filter(
+            DatasetAccess.timestamp >= last_7d
+        ).scalar() or 0
+        
+        # Total datasets
+        total_datasets = db.query(Dataset).count()
+        
+        # Pending requests
+        pending_requests = db.query(func.count(AccessRequest.id)).filter(AccessRequest.status == 'pending').scalar() or 0
+        
+        # Get latest system metrics
+        latest_metrics = db.query(SystemMetrics).order_by(
+            SystemMetrics.timestamp.desc()
+        ).first()
+        
+        # System health data
+        system_health = {
+            "uptime": "99.9%",  # Mock - would calculate from system start time
+            "cpuUsage": latest_metrics.cpu_usage_percent if latest_metrics else 45,
+            "memoryUsage": latest_metrics.memory_usage_percent if latest_metrics else 67,
+            "diskUsage": latest_metrics.disk_usage_percent if latest_metrics else 78,
+            "networkStatus": "healthy" if latest_metrics and latest_metrics.network_latency_ms < 200 else "warning"
+        }
+        
+        # Recent activity (last 10 audit logs)
+        recent_logs = db.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(10).all()
+        
+        recent_activity = []
+        for log in recent_logs:
+            recent_activity.append({
+                "id": str(log.id),
+                "type": log.action,
+                "description": log.details,
+                "timestamp": log.timestamp.isoformat() + "Z",
+                "severity": "info"
+            })
+        
+        return {
+            "totalUsers": total_users,
+            "activeUsers": active_users,
+            "totalDatasets": total_datasets,
+            "pendingRequests": pending_requests,
+            "systemHealth": system_health,
+            "recentActivity": recent_activity
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting admin stats: {str(e)}")
