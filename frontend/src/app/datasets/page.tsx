@@ -2,6 +2,7 @@
 
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { SharingLevelSelector, SharingLevelBadge } from '@/components/datasets/SharingLevelSelector';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -64,6 +65,21 @@ function DatasetsContent() {
     }
   };
 
+  const handleSharingLevelChange = async (datasetId: number, newLevel: 'private' | 'organization' | 'public') => {
+    try {
+      await datasetsAPI.updateDataset(datasetId, { sharing_level: newLevel });
+      // Update the dataset in local state
+      setDatasets(datasets.map(dataset => 
+        dataset.id === datasetId 
+          ? { ...dataset, sharing_level: newLevel }
+          : dataset
+      ));
+    } catch (error: any) {
+      console.error('Error updating sharing level:', error);
+      alert(error.response?.data?.detail || 'Failed to update sharing level');
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -119,7 +135,19 @@ function DatasetsContent() {
               </Link>
             </div>
             
-            <div className="flex justify-center">
+            <div className="flex justify-center space-x-3">
+               <Link
+                 href="/datasets/sharing"
+                 className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+               >
+                 Manage Sharing
+               </Link>
+               <Link
+                 href="/datasets/shared"
+                 className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+               >
+                 Shared Datasets
+               </Link>
                <button
                  onClick={() => {
                    if (!showDatasets) {
@@ -201,13 +229,22 @@ function DatasetsContent() {
                             <p className="mt-1 text-sm text-gray-600">
                               {dataset.description || 'No description provided'}
                             </p>
-                            <div className="mt-2 flex items-center space-x-4 text-xs text-gray-500">
-                              <span>Type: {dataset.type?.toUpperCase() || 'Unknown'}</span>
-                              <span>Sharing: {dataset.sharing_level || 'Private'}</span>
-                              {dataset.size_bytes && (
-                                <span>Size: {formatFileSize(dataset.size_bytes)}</span>
-                              )}
-                              <span>Created: {new Date(dataset.created_at).toLocaleDateString()}</span>
+                            <div className="mt-2 flex items-center justify-between">
+                              <div className="flex items-center space-x-4 text-xs text-gray-500">
+                                <span>Type: {dataset.type?.toUpperCase() || 'Unknown'}</span>
+                                {dataset.size_bytes && (
+                                  <span>Size: {formatFileSize(dataset.size_bytes)}</span>
+                                )}
+                                <span>Created: {new Date(dataset.created_at).toLocaleDateString()}</span>
+                              </div>
+                              <div className="flex items-center space-x-2">
+                                <span className="text-xs text-gray-500">Sharing:</span>
+                                <SharingLevelSelector
+                                  currentLevel={dataset.sharing_level || 'private'}
+                                  onLevelChange={(level) => handleSharingLevelChange(dataset.id, level)}
+                                  size="sm"
+                                />
+                              </div>
                             </div>
                           </div>
                           <div className="flex items-center space-x-2">

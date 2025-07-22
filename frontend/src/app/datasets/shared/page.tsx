@@ -5,6 +5,7 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { useState, useEffect } from 'react';
 import { dataSharingAPI } from '@/lib/api';
+import { SharingLevelBadge } from '@/components/datasets/SharingLevelSelector';
 import Link from 'next/link';
 import { 
   Share2, 
@@ -34,6 +35,9 @@ interface SharedDataset {
   password_protected: boolean;
   created_at: string;
   last_accessed?: string;
+  sharing_level?: 'private' | 'organization' | 'public';
+  type?: string;
+  size_bytes?: number;
 }
 
 export default function SharedDatasetsPage() {
@@ -51,6 +55,14 @@ function SharedDatasetsContent() {
   const [sharedDatasets, setSharedDatasets] = useState<SharedDataset[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
 
   useEffect(() => {
     fetchSharedDatasets();
@@ -134,9 +146,12 @@ function SharedDatasetsContent() {
         <div className="mb-8">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Shared Datasets</h1>
+              <h1 className="text-2xl font-bold text-gray-900 flex items-center">
+                <Share2 className="h-7 w-7 mr-3 text-blue-600" />
+                Shared Datasets
+              </h1>
               <p className="mt-1 text-sm text-gray-600">
-                Manage your shared datasets and monitor access analytics.
+                Manage your shared datasets and monitor access analytics across different sharing levels.
               </p>
             </div>
             <div className="flex space-x-3">
@@ -260,6 +275,7 @@ function SharedDatasetsContent() {
                           <h3 className="text-lg font-medium text-gray-900 truncate">
                             {dataset.name}
                           </h3>
+                          <SharingLevelBadge level={dataset.sharing_level || 'private'} />
                           <div className="flex space-x-2">
                             {dataset.chat_enabled && (
                               <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
@@ -279,6 +295,16 @@ function SharedDatasetsContent() {
                         <p className="mt-1 text-sm text-gray-600 line-clamp-2">
                           {dataset.description || 'No description provided'}
                         </p>
+                        
+                        <div className="flex items-center space-x-4 text-xs text-gray-500 mt-2">
+                          {dataset.type && <span>Type: {dataset.type.toUpperCase()}</span>}
+                          {dataset.size_bytes && (
+                            <>
+                              <span>•</span>
+                              <span>Size: {formatFileSize(dataset.size_bytes)}</span>
+                            </>
+                          )}
+                        </div>
 
                         {/* Share Link */}
                         <div className="mt-3 bg-gray-50 rounded-md p-3">
@@ -358,4 +384,4 @@ function SharedDatasetsContent() {
       </div>
     </div>
   );
-} 
+}
