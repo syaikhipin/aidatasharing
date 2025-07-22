@@ -273,10 +273,11 @@ class DownloadService:
                 )
                 raise self.error_handler.create_http_exception(error)
             
-            # Verify file exists
-            if not Path(file_path).exists():
+            # Verify file exists using storage service (handles relative paths correctly)
+            resolved_file_path = await storage_service.retrieve_dataset_file(file_path)
+            if not resolved_file_path:
                 download_record.download_status = "failed"
-                download_record.error_message = "File does not exist on storage"
+                download_record.error_message = f"File does not exist on storage: {file_path}"
                 self.db.commit()
                 
                 error = self.error_handler.handle_file_not_found_error(
@@ -286,29 +287,32 @@ class DownloadService:
                 )
                 raise self.error_handler.create_http_exception(error)
             
+            # Use the resolved file path for all subsequent operations
+            file_path = resolved_file_path
+            
             # Handle format conversion if needed
             final_file_path = file_path
             cleanup_converted_file = False
             
-            if download_record.file_format and download_record.file_format.lower() != dataset.dataset_type.lower():
+            if download_record.file_format and download_record.file_format.lower() != 'original' and download_record.file_format.lower() != dataset.type.value.lower():
                 try:
                     # Convert file to requested format
                     dataset_metadata = {
                         "dataset_id": dataset.id,
                         "dataset_name": dataset.name,
-                        "original_format": dataset.dataset_type,
+                        "original_format": dataset.type.value,
                         "requested_format": download_record.file_format
                     }
                     
                     final_file_path = await format_converter.convert_file(
                         source_path=file_path,
-                        source_format=dataset.dataset_type,
+                        source_format=dataset.type.value,
                         target_format=download_record.file_format,
                         dataset_metadata=dataset_metadata
                     )
                     cleanup_converted_file = True
                     
-                    logger.info(f"📄 Format conversion completed: {dataset.dataset_type} -> {download_record.file_format}")
+                    logger.info(f"📄 Format conversion completed: {dataset.type.value} -> {download_record.file_format}")
                     
                 except Exception as e:
                     download_record.download_status = "failed"

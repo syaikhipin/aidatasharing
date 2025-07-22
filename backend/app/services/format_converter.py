@@ -5,7 +5,7 @@ Handles conversion between different file formats during download operations
 import json
 import tempfile
 import os
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional, Union, List
 from pathlib import Path
 from datetime import datetime
 import logging
