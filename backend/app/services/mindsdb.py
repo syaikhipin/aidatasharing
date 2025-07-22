@@ -986,6 +986,128 @@ class MindsDBService:
             logger.error(f"❌ Model deletion failed: {e}")
             return {"status": "error", "message": str(e)}
 
+    def get_databases(self) -> List[Dict[str, Any]]:
+        """Get list of all database connections in MindsDB."""
+        try:
+            if not self._ensure_connection():
+                logger.error("❌ Cannot connect to MindsDB to fetch databases")
+                return []
+            
+            # Query to get all databases
+            databases_query = "SHOW DATABASES"
+            
+            try:
+                result = self.connection.query(databases_query)
+                df = result.fetch()
+                
+                databases = []
+                if not df.empty:
+                    for _, row in df.iterrows():
+                        # MindsDB returns database info in different formats
+                        # Handle both 'Database' and 'database' column names
+                        db_name = row.get('Database') or row.get('database') or row.get('name')
+                        if db_name:
+                            databases.append({
+                                "name": str(db_name),
+                                "type": "database",
+                                "status": "active"
+                            })
+                
+                logger.info(f"✅ Retrieved {len(databases)} databases from MindsDB")
+                return databases
+                
+            except Exception as e:
+                logger.error(f"❌ Failed to execute SHOW DATABASES query: {e}")
+                # Return default databases that should exist in MindsDB
+                return [
+                    {"name": "mindsdb", "type": "system", "status": "active"},
+                    {"name": "information_schema", "type": "system", "status": "active"}
+                ]
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to get databases: {e}")
+            return []
+    
+    def create_database_connection(self, db_name: str, engine: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new database connection in MindsDB."""
+        try:
+            if not self._ensure_connection():
+                return {"status": "error", "message": "Cannot connect to MindsDB"}
+            
+            # Build CREATE DATABASE SQL
+            params_json = json.dumps(parameters)
+            create_db_sql = f"""
+            CREATE DATABASE IF NOT EXISTS {db_name}
+            WITH ENGINE = '{engine}',
+            PARAMETERS = {params_json}
+            """
+            
+            try:
+                self.connection.query(create_db_sql)
+                logger.info(f"✅ Created database connection: {db_name}")
+                return {
+                    "status": "success",
+                    "message": f"Database {db_name} created successfully",
+                    "database_name": db_name,
+                    "engine": engine
+                }
+            except Exception as e:
+                if "already exists" in str(e).lower():
+                    logger.info(f"✅ Database {db_name} already exists")
+                    return {
+                        "status": "exists",
+                        "message": f"Database {db_name} already exists",
+                        "database_name": db_name,
+                        "engine": engine
+                    }
+                else:
+                    raise e
+                    
+        except Exception as e:
+            logger.error(f"❌ Failed to create database connection {db_name}: {e}")
+            return {
+                "status": "error",
+                "message": f"Failed to create database: {str(e)}",
+                "database_name": db_name
+            }
+    
+    def execute_sql(self, query: str) -> Dict[str, Any]:
+        """Execute a custom SQL query."""
+        try:
+            if not self._ensure_connection():
+                return {"status": "error", "message": "Cannot connect to MindsDB"}
+            
+            try:
+                result = self.connection.query(query)
+                df = result.fetch()
+                
+                # Convert DataFrame to list of dictionaries
+                rows = df.to_dict('records') if not df.empty else []
+                
+                logger.info(f"✅ Executed SQL query, returned {len(rows)} rows")
+                return {
+                    "status": "success",
+                    "rows": rows,
+                    "row_count": len(rows),
+                    "query": query
+                }
+                
+            except Exception as e:
+                logger.error(f"❌ SQL execution failed: {e}")
+                return {
+                    "status": "error",
+                    "message": f"SQL execution failed: {str(e)}",
+                    "query": query
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to execute SQL: {e}")
+            return {
+                "status": "error",
+                "message": f"Failed to execute SQL: {str(e)}",
+                "query": query
+            }
+
     def initialize_gemini_integration(self) -> Dict[str, Any]:
         """Initialize complete Gemini integration."""
         logger.info("🚀 Initializing Gemini integration")

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Lock, Users, Globe, ChevronDown } from 'lucide-react';
 
 type SharingLevel = 'private' | 'organization' | 'public';
@@ -49,6 +49,8 @@ export function SharingLevelSelector({
   size = 'md'
 }: SharingLevelSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [dropdownPosition, setDropdownPosition] = useState<'bottom' | 'top'>('bottom');
+  const buttonRef = useRef<HTMLButtonElement>(null);
   
   const currentLevelData = SHARING_LEVELS.find(level => level.value === currentLevel);
   const CurrentIcon = currentLevelData?.icon || Lock;
@@ -65,9 +67,28 @@ export function SharingLevelSelector({
     lg: 'h-5 w-5'
   };
 
+  // Calculate dropdown position based on available space
+  useEffect(() => {
+    if (isOpen && buttonRef.current) {
+      const buttonRect = buttonRef.current.getBoundingClientRect();
+      const viewportHeight = window.innerHeight;
+      const dropdownHeight = 280; // Approximate height of dropdown
+      const spaceBelow = viewportHeight - buttonRect.bottom;
+      const spaceAbove = buttonRect.top;
+      
+      // Position dropdown above if there's not enough space below
+      if (spaceBelow < dropdownHeight && spaceAbove > dropdownHeight) {
+        setDropdownPosition('top');
+      } else {
+        setDropdownPosition('bottom');
+      }
+    }
+  }, [isOpen]);
+
   return (
     <div className="relative">
       <button
+        ref={buttonRef}
         type="button"
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}
@@ -91,12 +112,15 @@ export function SharingLevelSelector({
         <>
           {/* Backdrop */}
           <div 
-            className="fixed inset-0 z-10" 
+            className="fixed inset-0 z-[9999]" 
             onClick={() => setIsOpen(false)}
           />
           
           {/* Dropdown */}
-          <div className="absolute right-0 z-20 mt-2 w-72 bg-white border border-gray-200 rounded-md shadow-lg">
+          <div className={`
+            absolute right-0 z-[10000] w-72 bg-white border border-gray-200 rounded-md shadow-xl
+            ${dropdownPosition === 'bottom' ? 'mt-2' : 'mb-2 bottom-full'}
+          `}>
             <div className="py-1">
               {SHARING_LEVELS.map((level) => {
                 const Icon = level.icon;

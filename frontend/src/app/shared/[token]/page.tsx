@@ -45,11 +45,40 @@ export default function SharedDatasetPage() {
       setIsLoading(true);
       setError(null);
       
-      const response = await dataSharingAPI.getSharedDataset(token);
-      setDataset(response);
-      
-      if (response.requires_password && !response.access_allowed) {
-        setShowPasswordForm(true);
+      // First try public access (no authentication required)
+      try {
+        const response = await dataSharingAPI.getPublicSharedDataset(token);
+        setDataset(response);
+        
+        if (response.requires_password && !response.access_allowed) {
+          setShowPasswordForm(true);
+        }
+        return;
+      } catch (publicError: any) {
+        // If public access fails, try authenticated access
+        console.log('Public access failed, trying authenticated access:', publicError.response?.status);
+        
+        if (publicError.response?.status === 401 || publicError.response?.status === 403) {
+          // This might be an organization-level dataset requiring authentication
+          try {
+            const response = await dataSharingAPI.getSharedDataset(token);
+            setDataset(response);
+            
+            if (response.requires_password && !response.access_allowed) {
+              setShowPasswordForm(true);
+            }
+            return;
+          } catch (authError: any) {
+            // If authenticated access also fails, show appropriate error
+            if (authError.response?.status === 401) {
+              setError('This dataset requires you to be logged in. Please login and try again.');
+            } else {
+              throw authError;
+            }
+          }
+        } else {
+          throw publicError;
+        }
       }
     } catch (error: any) {
       console.error('Failed to fetch shared dataset:', error);
@@ -66,9 +95,22 @@ export default function SharedDatasetPage() {
       setIsAuthenticating(true);
       setError(null);
       
-      const response = await dataSharingAPI.accessSharedDatasetWithPassword(token, password);
-      setDataset(response);
-      setShowPasswordForm(false);
+      // First try public access with password
+      try {
+        const response = await dataSharingAPI.accessPublicSharedDatasetWithPassword(token, password);
+        setDataset(response);
+        setShowPasswordForm(false);
+        return;
+      } catch (publicError: any) {
+        // If public access fails, try authenticated access with password
+        if (publicError.response?.status === 401 || publicError.response?.status === 403) {
+          const response = await dataSharingAPI.accessSharedDatasetWithPassword(token, password);
+          setDataset(response);
+          setShowPasswordForm(false);
+        } else {
+          throw publicError;
+        }
+      }
     } catch (error: any) {
       console.error('Password authentication failed:', error);
       setError(error.response?.data?.detail || 'Invalid password');

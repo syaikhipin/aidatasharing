@@ -212,7 +212,10 @@ async def get_my_shared_datasets(
             "chat_enabled": dataset.ai_chat_enabled,
             "password_protected": bool(dataset.share_password),
             "created_at": dataset.created_at,
-            "last_accessed": dataset.last_accessed
+            "last_accessed": dataset.last_accessed,
+            "sharing_level": dataset.sharing_level.value if dataset.sharing_level else "private",
+            "type": dataset.type.value if dataset.type else None,
+            "size_bytes": dataset.size_bytes
         }
         for dataset in datasets
     ]
@@ -322,7 +325,7 @@ async def access_shared_dataset_public(
     # Create session record
     session = ShareAccessSession(
         session_token=session_token,
-        dataset_id=dataset_info["id"],
+        dataset_id=dataset_info["dataset_id"],
         share_token=share_token,
         ip_address=ip_address,
         user_agent=user_agent,
@@ -467,4 +470,4 @@ async def download_shared_dataset(
         "filename": f"{dataset.name}.{dataset.type}",
         "size_bytes": dataset.size_bytes,
         "mime_type": f"application/{dataset.type}"
-    } 
+    }

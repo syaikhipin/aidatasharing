@@ -345,6 +345,19 @@ export const dataSharingAPI = {
     const response = await apiClient.get(`/api/data-sharing/public/shared/${shareToken}/info`);
     return response.data;
   },
+
+  getPublicSharedDataset: async (shareToken: string, password?: string) => {
+    const params = password ? { password } : {};
+    const response = await apiClient.get(`/api/data-sharing/public/shared/${shareToken}`, { params });
+    return response.data;
+  },
+
+  accessPublicSharedDatasetWithPassword: async (shareToken: string, password: string) => {
+    const response = await apiClient.get(`/api/data-sharing/public/shared/${shareToken}`, {
+      params: { password }
+    });
+    return response.data;
+  },
 };
 
 // Chat API
