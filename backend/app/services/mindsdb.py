@@ -963,27 +963,68 @@ class MindsDBService:
             }
 
     def delete_dataset_models(self, dataset_id: int) -> Dict[str, Any]:
-        """Delete models associated with a dataset using raw SQL."""
+        """Delete all models associated with a dataset including Gemini predictors."""
         try:
-            model_name = f"dataset_{dataset_id}_chat"
-            
             if not self._ensure_connection():
-                logger.warning(f"No connection available for deleting {model_name}")
+                logger.warning(f"No connection available for deleting models for dataset {dataset_id}")
                 return {"status": "warning", "message": "No connection available"}
 
-            # Use raw SQL to drop the model
-            drop_sql = f"DROP MODEL IF EXISTS mindsdb.{model_name};"
+            # List of model patterns to delete
+            model_patterns = [
+                f"dataset_{dataset_id}_chat",
+                f"dataset_{dataset_id}_predictor", 
+                f"dataset_{dataset_id}_gemini",
+                f"dataset_{dataset_id}_vision",
+                f"dataset_{dataset_id}_embedding",
+                f"gemini_dataset_{dataset_id}",
+                f"predictor_dataset_{dataset_id}"
+            ]
             
+            deleted_models = []
+            failed_models = []
+            
+            for model_name in model_patterns:
+                try:
+                    # Use raw SQL to drop the model
+                    drop_sql = f"DROP MODEL IF EXISTS mindsdb.{model_name};"
+                    self.connection.query(drop_sql)
+                    deleted_models.append(model_name)
+                    logger.info(f"✅ Deleted model: {model_name}")
+                except Exception as e:
+                    failed_models.append(f"{model_name}: {str(e)}")
+                    logger.warning(f"Model deletion failed for {model_name}: {e}")
+            
+            # Also try to delete any models that contain the dataset_id in their name
             try:
-                self.connection.query(drop_sql)
-                logger.info(f"✅ Deleted model: {model_name}")
-                return {"status": "success", "message": f"Model {model_name} deleted"}
+                # Get list of all models
+                models_query = "SELECT name FROM mindsdb.models WHERE name LIKE '%dataset_%';"
+                result = self.connection.query(models_query)
+                
+                if result and hasattr(result, 'fetch'):
+                    models_data = result.fetch()
+                    for row in models_data:
+                        model_name = row.get('name', '')
+                        if f"dataset_{dataset_id}" in model_name and model_name not in deleted_models:
+                            try:
+                                drop_sql = f"DROP MODEL IF EXISTS mindsdb.{model_name};"
+                                self.connection.query(drop_sql)
+                                deleted_models.append(model_name)
+                                logger.info(f"✅ Deleted additional model: {model_name}")
+                            except Exception as e:
+                                failed_models.append(f"{model_name}: {str(e)}")
+                                logger.warning(f"Additional model deletion failed for {model_name}: {e}")
             except Exception as e:
-                logger.warning(f"Model deletion failed (may not exist): {e}")
-                return {"status": "warning", "message": f"Model may not exist: {e}"}
+                logger.warning(f"Could not query for additional models: {e}")
+            
+            return {
+                "status": "success" if deleted_models else "warning",
+                "message": f"Deleted {len(deleted_models)} models",
+                "deleted_models": deleted_models,
+                "failed_models": failed_models
+            }
             
         except Exception as e:
-            logger.error(f"❌ Model deletion failed: {e}")
+            logger.error(f"❌ Model deletion failed for dataset {dataset_id}: {e}")
             return {"status": "error", "message": str(e)}
 
     def get_databases(self) -> List[Dict[str, Any]]:

@@ -102,6 +102,40 @@ export const adminAPI = {
     const response = await apiClient.get('/api/admin/google-api-key');
     return response.data;
   },
+
+  // Admin dataset management
+  getAdminDatasets: async (params?: {
+    skip?: number;
+    limit?: number;
+    include_deleted?: boolean;
+    include_inactive?: boolean;
+    organization_id?: number;
+  }) => {
+    const response = await apiClient.get('/api/admin/datasets', { params });
+    return response.data;
+  },
+
+  deleteAdminDataset: async (datasetId: number, forceDelete: boolean = false) => {
+    const response = await apiClient.delete(`/api/admin/datasets/${datasetId}`, {
+      params: { force_delete: forceDelete }
+    });
+    return response.data;
+  },
+
+  restoreDataset: async (datasetId: number) => {
+    const response = await apiClient.patch(`/api/admin/datasets/${datasetId}/restore`);
+    return response.data;
+  },
+
+  getAdminDatasetStats: async () => {
+    const response = await apiClient.get('/api/admin/datasets/stats');
+    return response.data;
+  },
+
+  getAdminStats: async () => {
+    const response = await apiClient.get('/api/admin/stats');
+    return response.data;
+  },
 };
 
 // Organizations API
@@ -585,6 +619,19 @@ export const dataAccessAPI = {
     notification_type?: string;
   }) => {
     const response = await apiClient.post('/api/data-access/notify', data);
+    return response.data;
+  },
+
+  getNotifications: async (params?: {
+    unread_only?: boolean;
+    limit?: number;
+  }) => {
+    const response = await apiClient.get('/api/data-access/notifications', { params });
+    return response.data;
+  },
+
+  markNotificationRead: async (notificationId: number) => {
+    const response = await apiClient.patch(`/api/data-access/notifications/${notificationId}/read`);
     return response.data;
   },
 };

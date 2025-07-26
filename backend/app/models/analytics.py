@@ -465,3 +465,22 @@ class AuditLog(Base):
 
     user = relationship("User")
     dataset = relationship("Dataset")
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    recipient_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    sender_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    title = Column(String, nullable=False)
+    message = Column(Text, nullable=False)
+    notification_type = Column(String, default="info")  # info, warning, error, success
+    is_read = Column(Boolean, default=False)
+    related_resource_type = Column(String, nullable=True)  # dataset, model, etc.
+    related_resource_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    read_at = Column(DateTime, nullable=True)
+
+    recipient = relationship("User", foreign_keys=[recipient_id])
+    sender = relationship("User", foreign_keys=[sender_id])

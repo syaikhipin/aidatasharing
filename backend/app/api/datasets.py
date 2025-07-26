@@ -37,7 +37,11 @@ async def get_datasets(
     current_user: User = Depends(get_current_user)
 ):
     """Get datasets accessible to the current user within their organization."""
+    logger.info(f"get_datasets called by user {current_user.id} ({current_user.email})")
+    logger.info(f"Parameters: skip={skip}, limit={limit}, include_deleted={include_deleted}, include_inactive={include_inactive}")
+    
     if not current_user.organization_id:
+        logger.info(f"User {current_user.id} has no organization, returning empty list")
         # Return empty list for users without organizations
         return []
     
@@ -49,6 +53,15 @@ async def get_datasets(
         include_deleted=include_deleted
     )
     
+    logger.info(f"DataSharingService returned {len(datasets)} datasets")
+    
+    # Filter out deleted datasets unless explicitly requested
+    if not include_deleted:
+        original_count = len(datasets)
+        datasets = [d for d in datasets if not d.is_deleted]
+        filtered_count = len(datasets)
+        logger.info(f"Filtered out deleted datasets: {original_count} -> {filtered_count}")
+    
     # Apply additional filters
     filtered_datasets = []
     for dataset in datasets:
@@ -57,8 +70,13 @@ async def get_datasets(
             continue
         filtered_datasets.append(dataset)
     
+    logger.info(f"Final result: {len(filtered_datasets)} datasets after all filtering")
+    
     # Apply pagination
-    return filtered_datasets[skip:skip + limit]
+    result = filtered_datasets[skip:skip + limit]
+    logger.info(f"Returning {len(result)} datasets after pagination (skip={skip}, limit={limit})")
+    
+    return result
 
 @router.post("/", response_model=DatasetResponse, status_code=201)
 async def create_dataset(

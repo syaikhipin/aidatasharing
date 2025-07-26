@@ -65,20 +65,26 @@ function AdminContent() {
         setGoogleApiKeyStatus({ configured: false });
       }
 
-      // Mock admin stats (these would come from real admin endpoints)
-      const mockStats: AdminStats = {
-        totalUsers: 0, // Would come from users API
-        activeUsers: 0, // Would come from analytics API
-        totalDatasets: datasets?.length || 0,
-        totalOrganizations: 0, // Would come from organizations API
-        systemHealth: {
-          status: 'healthy',
-          uptime: '99.9%',
-          lastCheck: new Date().toISOString()
-        }
-      };
-      
-      setStats(mockStats);
+      // Fetch admin stats
+      try {
+        const adminStats = await adminAPI.getAdminStats();
+        setStats(adminStats);
+      } catch (error) {
+        console.error('Failed to fetch admin stats:', error);
+        // Fallback to mock stats
+        const mockStats: AdminStats = {
+          totalUsers: 0,
+          activeUsers: 0,
+          totalDatasets: datasets?.length || 0,
+          totalOrganizations: 0,
+          systemHealth: {
+            status: 'critical',
+            uptime: 'Unknown',
+            lastCheck: new Date().toISOString()
+          }
+        };
+        setStats(mockStats);
+      }
       
     } catch (error) {
       console.error('Error fetching admin data:', error);
@@ -260,7 +266,7 @@ function AdminContent() {
                 </Button>
               </Link>
               
-              <Link href="/datasets">
+              <Link href="/admin/datasets">
                 <Button variant="outline" className="w-full justify-start">
                   <span className="mr-2">📊</span>
                   Manage Datasets

@@ -10,7 +10,7 @@ from app.core.database import get_db
 from app.models.user import User
 from app.models.organization import Organization
 from app.models.dataset import Dataset
-from app.models.analytics import ActivityLog, AccessRequest, AuditLog, RequestType, AccessLevel, RequestStatus, UrgencyLevel, RequestCategory
+from app.models.analytics import ActivityLog, AccessRequest, AuditLog, RequestType, AccessLevel, RequestStatus, UrgencyLevel, RequestCategory, Notification
 from app.core.auth import get_current_user
 
 router = APIRouter()
@@ -107,6 +107,16 @@ class AuditLogResponse(BaseModel):
     details: str
     ip_address: str
     user_agent: str
+class NotificationResponse(BaseModel):
+    id: int
+    title: str
+    message: str
+    notification_type: str
+    is_read: bool
+    created_at: str
+    sender_name: Optional[str] = None
+    related_resource_type: Optional[str] = None
+    related_resource_id: Optional[int] = None
 
 # Mock data storage (replace with actual database models)
 # access_requests_storage = []
@@ -121,15 +131,16 @@ async def get_accessible_datasets(
     db: Session = Depends(get_db)
 ):
     """
-    Get all datasets that user can see or request access to
+    Get all datasets that user can see or request access to from other users
     """
     if not current_user.organization_id:
         # Return empty list for users without organizations
         return []
     
-    # Get datasets from user's organization
+    # Get datasets that are NOT owned by current user and NOT deleted
     query = db.query(Dataset).filter(
-        Dataset.organization_id == current_user.organization_id
+        Dataset.owner_id != current_user.id,  # Not owned by current user
+        Dataset.is_deleted == False  # Not deleted
     )
     
     # Apply filters
@@ -148,24 +159,36 @@ async def get_accessible_datasets(
     
     result = []
     for dataset in datasets:
-        # Determine access status
-        has_access = dataset.owner_id == current_user.id or dataset.sharing_level in ["ORGANIZATION", "DEPARTMENT"]
-        can_request = not has_access and dataset.sharing_level == "PRIVATE"
+        # Determine access status based on sharing level and organization
+        has_access = False
+        can_request = False
         
-        result.append(DatasetAccessResponse(
-            id=dataset.id,
-            name=dataset.name,
-            description=dataset.description or "No description available",
-            owner=dataset.owner.full_name if dataset.owner and dataset.owner.full_name else (dataset.owner.email.split('@')[0] if dataset.owner else "Unknown"),
-            owner_department="Analytics",  # Mock data
-            sharing_level=dataset.sharing_level,
-            size=round(dataset.size_bytes / (1024**3), 2) if dataset.size_bytes else 0.0,
-            last_updated=dataset.updated_at.isoformat() if dataset.updated_at else datetime.now().isoformat(),
-            access_count=max(10, dataset.id * 12),  # Mock access count
-            has_access=has_access,
-            can_request=can_request,
-            tags=["data", "analytics", "2024"]  # Mock tags
-        ))
+        sharing_level_str = dataset.sharing_level.value if hasattr(dataset.sharing_level, 'value') else str(dataset.sharing_level)
+        sharing_level_str = sharing_level_str.upper()  # Normalize to uppercase
+        
+        if sharing_level_str == "PUBLIC":
+            has_access = True
+        elif sharing_level_str == "ORGANIZATION" and dataset.organization_id == current_user.organization_id:
+            has_access = True
+        elif sharing_level_str == "PRIVATE":
+            can_request = True
+        
+        # Only include datasets that user can either access or request access to
+        if has_access or can_request:
+            result.append(DatasetAccessResponse(
+                id=dataset.id,
+                name=dataset.name,
+                description=dataset.description or "No description available",
+                owner=dataset.owner.full_name if dataset.owner and dataset.owner.full_name else (dataset.owner.email.split('@')[0] if dataset.owner else "Unknown"),
+                owner_department="Analytics",  # Mock data
+                sharing_level=sharing_level_str,
+                size=round(dataset.size_bytes / (1024**3), 2) if dataset.size_bytes else 0.0,
+                last_updated=dataset.updated_at.isoformat() if dataset.updated_at else datetime.now().isoformat(),
+                access_count=max(10, dataset.id * 12),  # Mock access count
+                has_access=has_access,
+                can_request=can_request,
+                tags=["data", "analytics", "2024"]  # Mock tags
+            ))
     
     return result
 
@@ -181,14 +204,14 @@ async def create_access_request(
     if not current_user.organization_id:
         raise HTTPException(status_code=400, detail="User must belong to an organization to create access requests")
     
-    # Get the dataset
+    # Get the dataset (allow cross-organization access for sharing)
     dataset = db.query(Dataset).filter(
         Dataset.id == request_data.dataset_id,
-        Dataset.organization_id == current_user.organization_id
+        Dataset.is_deleted == False  # Only allow requests for non-deleted datasets
     ).first()
     
     if not dataset:
-        raise HTTPException(status_code=404, detail="Dataset not found")
+        raise HTTPException(status_code=404, detail="Dataset not found or has been deleted")
     
     # Check if user already has access
     if dataset.owner_id == current_user.id or dataset.sharing_level in ["ORGANIZATION", "DEPARTMENT"]:
@@ -210,6 +233,19 @@ async def create_access_request(
     db.add(new_request)
     db.commit()
     db.refresh(new_request)
+    
+    # Create notification for dataset owner
+    notification = Notification(
+        recipient_id=dataset.owner_id,
+        sender_id=current_user.id,
+        title=f"New Data Access Request for {dataset.name}",
+        message=f"{current_user.full_name or current_user.email} has requested {request_data.requested_level} access to your dataset '{dataset.name}'. Purpose: {request_data.purpose}",
+        notification_type="info",
+        related_resource_type="access_request",
+        related_resource_id=new_request.id
+    )
+    db.add(notification)
+    db.commit()
     
     # Log the activity
     log_audit_activity(
@@ -309,13 +345,36 @@ async def approve_access_request(
         
         action = "ACCESS_GRANTED"
         details = "Access request approved"
+        
+        # Create notification for requester
+        notification = Notification(
+            recipient_id=request.requester_id,
+            sender_id=current_user.id,
+            title=f"Data Access Request Approved",
+            message=f"Your request for {request.requested_level} access to '{request.dataset.name}' has been approved.",
+            notification_type="success",
+            related_resource_type="access_request",
+            related_resource_id=request.id
+        )
     else:
         request.status = RequestStatus.REJECTED
         request.rejection_reason = approval_data.reason or "No reason provided"
         
         action = "ACCESS_DENIED"
         details = f"Access request rejected: {approval_data.reason or 'No reason provided'}"
+        
+        # Create notification for requester
+        notification = Notification(
+            recipient_id=request.requester_id,
+            sender_id=current_user.id,
+            title=f"Data Access Request Rejected",
+            message=f"Your request for {request.requested_level} access to '{request.dataset.name}' has been rejected. Reason: {approval_data.reason or 'No reason provided'}",
+            notification_type="warning",
+            related_resource_type="access_request",
+            related_resource_id=request.id
+        )
     
+    db.add(notification)
     db.commit()
     
     # Log the activity
@@ -411,12 +470,11 @@ async def send_notification(
     
     # In a real implementation, this would integrate with email service
     # For now, just log the notification
-    await log_audit_activity(
+    log_audit_activity(
+        db=db,
         action="NOTIFICATION_SENT",
         user_id=current_user.id,
-        user_name=current_user.full_name or current_user.email,
         dataset_id=0,  # Not dataset-specific
-        dataset_name="System",
         details=f"Notification sent to {recipient_email}: {subject}",
         ip_address="192.168.1.1",
         user_agent="MockAgent"
@@ -488,7 +546,7 @@ async def cancel_access_request(
     db.delete(request)
     db.commit()
     
-    await log_audit_activity(
+    log_audit_activity(
         db=db,
         action="REQUEST_CANCELLED",
         user_id=current_user.id,
@@ -499,6 +557,62 @@ async def cancel_access_request(
     )
     
     return {"message": "Access request cancelled successfully"}
+@router.get("/notifications", response_model=List[NotificationResponse])
+async def get_notifications(
+    unread_only: bool = Query(False, description="Show only unread notifications"),
+    limit: int = Query(50, description="Maximum number of notifications to return"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get notifications for the current user
+    """
+    query = db.query(Notification).filter(Notification.recipient_id == current_user.id)
+    
+    if unread_only:
+        query = query.filter(Notification.is_read == False)
+    
+    notifications = query.order_by(Notification.created_at.desc()).limit(limit).all()
+    
+    result = []
+    for notification in notifications:
+        result.append(NotificationResponse(
+            id=notification.id,
+            title=notification.title,
+            message=notification.message,
+            notification_type=notification.notification_type,
+            is_read=notification.is_read,
+            created_at=notification.created_at.isoformat(),
+            sender_name=notification.sender.full_name if notification.sender else None,
+            related_resource_type=notification.related_resource_type,
+            related_resource_id=notification.related_resource_id
+        ))
+    
+    return result
+
+@router.patch("/notifications/{notification_id}/read")
+async def mark_notification_read(
+    notification_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Mark a notification as read
+    """
+    notification = db.query(Notification).filter(
+        Notification.id == notification_id,
+        Notification.recipient_id == current_user.id
+    ).first()
+    
+    if not notification:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    
+    notification.is_read = True
+    notification.read_at = datetime.utcnow()
+    db.commit()
+    
+    return {"message": "Notification marked as read"}
+
 
 @router.get("/audit-logs", response_model=List[AuditLogResponse])
 async def get_audit_logs(

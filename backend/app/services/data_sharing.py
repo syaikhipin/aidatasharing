@@ -26,24 +26,34 @@ class DataSharingService:
     
     def can_access_dataset(self, user: User, dataset: Dataset) -> bool:
         """
-        Check if a user can access a dataset within their organization.
-        All data sharing is organization-scoped only.
+        Check if a user can access a dataset based on sharing level.
+        PUBLIC datasets are accessible to all users.
+        ORGANIZATION datasets are accessible within the same organization.
+        PRIVATE datasets are only accessible to owners.
         """
-        # Users can only access datasets from their own organization
-        if not user.organization_id or user.organization_id != dataset.organization_id:
+        # Check if dataset is deleted
+        if dataset.is_deleted:
             return False
         
-        # Owner can always access their own datasets
+        # Owner can always access their own datasets (even if private)
         if dataset.owner_id == user.id:
             return True
         
-        # Check sharing level within the organization
-        if dataset.sharing_level == DataSharingLevel.PRIVATE:
-            return False
+        # Check sharing level
+        sharing_level_str = dataset.sharing_level.value if hasattr(dataset.sharing_level, 'value') else str(dataset.sharing_level)
+        sharing_level_str = sharing_level_str.upper()
         
-        elif dataset.sharing_level == DataSharingLevel.ORGANIZATION:
-            # All organization members can access
+        if sharing_level_str == "PUBLIC":
+            # PUBLIC datasets are accessible to all users
             return True
+        
+        elif sharing_level_str == "ORGANIZATION":
+            # ORGANIZATION datasets are accessible within the same organization
+            return user.organization_id and user.organization_id == dataset.organization_id
+        
+        elif sharing_level_str == "PRIVATE":
+            # PRIVATE datasets are only accessible to owners (already checked above)
+            return False
         
         return False
     

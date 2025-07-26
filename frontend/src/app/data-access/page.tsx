@@ -61,36 +61,26 @@ function DataAccessContent() {
     try {
       setLoading(true);
       
-      // Fetch all datasets from the organization (no additional filtering)
-      const datasetsResponse = await datasetsAPI.getDatasets();
-      console.log('Raw datasets response:', datasetsResponse);
+      // Fetch accessible datasets using the data-access API
+      const datasetsResponse = await dataAccessAPI.getAccessibleDatasets();
+      console.log('Raw accessible datasets response:', datasetsResponse);
       
-      // Process datasets to show only others' datasets for access requests
+      // Process datasets from data-access API (already filtered for accessibility)
       const processedDatasets = (datasetsResponse || []).map((dataset: any) => {
-        const isOwnDataset = dataset.owner_id === user?.id;
-        const canDirectlyAccess = dataset.sharing_level === 'public' || 
-                                 (dataset.sharing_level === 'organization' && !isOwnDataset);
-        const canRequestAccess = !isOwnDataset && dataset.sharing_level === 'private';
-        
         return {
           ...dataset,
-          can_access: canDirectlyAccess,
-          owner_name: dataset.owner?.full_name || dataset.owner?.email || 'Unknown',
-          is_own_dataset: isOwnDataset,
-          can_request_access: canRequestAccess
+          can_access: dataset.has_access,
+          owner_name: dataset.owner,
+          is_own_dataset: false, // Data-access API only returns others' datasets
+          can_request_access: dataset.can_request,
+          sharing_level: dataset.sharing_level.toLowerCase() // Normalize to lowercase for display
         };
       });
       
-      console.log('Processed datasets:', processedDatasets);
+      console.log('Processed accessible datasets:', processedDatasets);
       
-      // Filter to show only datasets from other users that can be accessed or requested
-      const filteredDatasets = processedDatasets.filter((dataset: any) => 
-        !dataset.is_own_dataset && (dataset.can_access || dataset.can_request_access)
-      );
-      
-      console.log('Filtered datasets for data access:', filteredDatasets);
-      
-      setDatasets(filteredDatasets);
+      // No need to filter since data-access API already returns only accessible datasets
+      setDatasets(processedDatasets);
       
       // Mock access requests since we don't have this endpoint yet
       setAccessRequests([]);
@@ -265,13 +255,12 @@ function DataAccessContent() {
                   <div className="w-24 h-24 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
                     <span className="text-4xl">🔍</span>
                   </div>
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">No datasets found</h3>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">No datasets available for access</h3>
                   <p className="text-gray-600">
                     {searchTerm || selectedSharingLevel !== 'all'
                       ? 'Try adjusting your search or filter criteria.'
-                      : 'No datasets are available for access at the moment.'
-                    }
-                  </p>
+                      : 'No datasets from other users are available for access at the moment. Datasets may be private or you may already have access to all available datasets.'
+                    }</p>
                 </CardContent>
               </Card>
             ) : (
@@ -301,10 +290,10 @@ function DataAccessContent() {
                           <span className="mr-2">📁</span>
                           <span>{dataset.type?.toUpperCase() || 'Unknown'}</span>
                         </div>
-                        {dataset.size_bytes && (
+                        {dataset.size && (
                           <div className="flex items-center text-sm text-gray-600">
                             <span className="mr-2">💾</span>
-                            <span>{formatFileSize(dataset.size_bytes)}</span>
+                            <span>{dataset.size} GB</span>
                           </div>
                         )}
                         <div className="flex items-center text-sm text-gray-600">
@@ -313,7 +302,7 @@ function DataAccessContent() {
                         </div>
                         <div className="flex items-center text-sm text-gray-600">
                           <span className="mr-2">📅</span>
-                          <span>{new Date(dataset.created_at).toLocaleDateString()}</span>
+                          <span>{new Date(dataset.last_updated).toLocaleDateString()}</span>
                         </div>
                       </div>
                       
