@@ -372,6 +372,15 @@ export const dataSharingAPI = {
     });
     return response.data;
   },
+
+  // Chat with shared dataset (public endpoint)
+  chatWithSharedDataset: async (shareToken: string, message: string, sessionToken?: string) => {
+    const response = await apiClient.post(`/api/data-sharing/public/shared/${shareToken}/chat`, {
+      message,
+      session_token: sessionToken
+    });
+    return response.data;
+  },
 };
 
 // Chat API
@@ -693,6 +702,16 @@ export const dataConnectorsAPI = {
     return response.data;
   },
 
+  createSimplifiedConnector: async (connectorData: {
+    name: string;
+    connector_type: string;
+    description?: string;
+    connection_url: string;
+  }) => {
+    const response = await apiClient.post('/api/connectors/simplified', connectorData);
+    return response.data;
+  },
+
   getConnector: async (connectorId: number) => {
     const response = await apiClient.get(`/api/connectors/${connectorId}`);
     return response.data;
@@ -731,6 +750,77 @@ export const dataConnectorsAPI = {
     sharing_level?: string;
   }) => {
     const response = await apiClient.post(`/api/connectors/${connectorId}/create-dataset`, datasetData);
+    return response.data;
+  },
+};
+
+// Proxy Connectors API
+export const proxyConnectorsAPI = {
+  getProxyConnectors: async () => {
+    const response = await apiClient.get('/api/proxy-connectors');
+    return response.data;
+  },
+
+  createProxyConnector: async (connectorData: {
+    name: string;
+    connector_type: string;
+    description?: string;
+    real_connection_config: Record<string, any>;
+    real_credentials: Record<string, any>;
+    is_public?: boolean;
+    allowed_operations?: string[];
+  }) => {
+    const response = await apiClient.post('/api/proxy-connectors', connectorData);
+    return response.data;
+  },
+
+  getProxyConnector: async (connectorId: number) => {
+    const response = await apiClient.get(`/api/proxy-connectors/${connectorId}`);
+    return response.data;
+  },
+
+  deleteProxyConnector: async (connectorId: number) => {
+    const response = await apiClient.delete(`/api/proxy-connectors/${connectorId}`);
+    return response.data;
+  },
+
+  executeProxyOperation: async (proxyId: string, operationData: {
+    operation_type: string;
+    operation_data: Record<string, any>;
+  }) => {
+    const response = await apiClient.post(`/api/proxy/${proxyId}/execute`, operationData);
+    return response.data;
+  },
+
+  getProxyAnalytics: async (connectorId: number) => {
+    const response = await apiClient.get(`/api/proxy-connectors/${connectorId}/analytics`);
+    return response.data;
+  },
+};
+
+// Shared Links API
+export const sharedLinksAPI = {
+  getSharedLinks: async () => {
+    const response = await apiClient.get('/api/shared-links');
+    return response.data;
+  },
+
+  createSharedLink: async (linkData: {
+    proxy_connector_id: number;
+    name: string;
+    description?: string;
+    is_public?: boolean;
+    requires_authentication?: boolean;
+    allowed_users?: string[];
+    expires_in_hours?: number;
+    max_uses?: number;
+  }) => {
+    const response = await apiClient.post('/api/shared-links', linkData);
+    return response.data;
+  },
+
+  accessSharedLink: async (shareId: string) => {
+    const response = await apiClient.get(`/api/share/${shareId}`);
     return response.data;
   },
 };

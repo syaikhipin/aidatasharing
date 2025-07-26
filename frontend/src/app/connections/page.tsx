@@ -18,8 +18,11 @@ import {
   RefreshCw,
   AlertCircle,
   Eye,
-  EyeOff
+  EyeOff,
+  Sparkles
 } from 'lucide-react';
+import SimplifiedConnectorForm from '@/components/connectors/SimplifiedConnectorForm';
+import { parseConnectionUrl } from '@/utils/connectionParser';
 
 interface DatabaseConnector {
   id: number;
@@ -154,6 +157,7 @@ function ConnectionsPageContent() {
   const [syncing, setSyncing] = useState<Record<number, boolean>>({});
   const [showCredentials, setShowCredentials] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [useSimplifiedMode, setUseSimplifiedMode] = useState(true);
 
   useEffect(() => {
     fetchConnectors();
@@ -182,6 +186,33 @@ function ConnectionsPageContent() {
       fetchConnectors();
     } catch (error: any) {
       setErrors({ general: error.response?.data?.detail || 'Failed to create connector' });
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleCreateSimplifiedConnector = async (data: {
+    name: string;
+    description: string;
+    connector_type: string;
+    connection_url: string;
+  }) => {
+    setCreating(true);
+    setErrors({});
+
+    try {
+      // Validate the URL before sending to backend
+      const parseResult = parseConnectionUrl(data.connection_url, data.connector_type);
+      if (!parseResult.success) {
+        throw new Error(parseResult.error);
+      }
+
+      await dataConnectorsAPI.createSimplifiedConnector(data);
+      setShowCreateModal(false);
+      fetchConnectors();
+    } catch (error: any) {
+      setErrors({ general: error.response?.data?.detail || error.message || 'Failed to create connector' });
+      throw error; // Re-throw to let the form handle it
     } finally {
       setCreating(false);
     }
@@ -344,13 +375,41 @@ function ConnectionsPageContent() {
             <h1 className="text-3xl font-bold text-gray-900">Data Connections</h1>
             <p className="text-gray-600 mt-2">Manage your database connections and data sources</p>
           </div>
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Add Connection
-          </button>
+          <div className="flex items-center space-x-4">
+            {/* Mode Toggle */}
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setUseSimplifiedMode(true)}
+                className={`inline-flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  useSimplifiedMode
+                    ? 'bg-blue-100 text-blue-700 border border-blue-200'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <Sparkles className="w-4 h-4 mr-1" />
+                Simple
+              </button>
+              <button
+                onClick={() => setUseSimplifiedMode(false)}
+                className={`inline-flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  !useSimplifiedMode
+                    ? 'bg-gray-100 text-gray-700 border border-gray-200'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <Settings className="w-4 h-4 mr-1" />
+                Advanced
+              </button>
+            </div>
+            
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Add Connection
+            </button>
+          </div>
         </div>
 
         {/* Recent Connectors Summary */}
@@ -529,25 +588,33 @@ function ConnectionsPageContent() {
         {showCreateModal && (
           <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
             <div className="relative top-20 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-2/3 shadow-lg rounded-md bg-white max-h-[80vh] overflow-y-auto">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">Create New Connection</h3>
-                <button
-                  onClick={() => setShowCreateModal(false)}
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  <span className="sr-only">Close</span>
-                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              
-              <form onSubmit={handleCreateConnector} className="space-y-6">
-                {errors.general && (
-                  <div className="bg-red-50 border border-red-200 rounded-md p-4">
-                    <p className="text-red-600 text-sm">{errors.general}</p>
+              {useSimplifiedMode ? (
+                <SimplifiedConnectorForm
+                  onSubmit={handleCreateSimplifiedConnector}
+                  onCancel={() => setShowCreateModal(false)}
+                  isSubmitting={creating}
+                />
+              ) : (
+                <>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900">Create New Connection</h3>
+                    <button
+                      onClick={() => setShowCreateModal(false)}
+                      className="text-gray-400 hover:text-gray-600"
+                    >
+                      <span className="sr-only">Close</span>
+                      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
                   </div>
-                )}
+                  
+                  <form onSubmit={handleCreateConnector} className="space-y-6">
+                    {errors.general && (
+                      <div className="bg-red-50 border border-red-200 rounded-md p-4">
+                        <p className="text-red-600 text-sm">{errors.general}</p>
+                      </div>
+                    )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
@@ -645,6 +712,8 @@ function ConnectionsPageContent() {
                   </button>
                 </div>
               </form>
+                </>
+              )}
             </div>
           </div>
         )}

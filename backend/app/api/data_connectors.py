@@ -40,6 +40,14 @@ class DatabaseConnectorUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
+# New simplified connector model
+class SimplifiedConnectorCreate(BaseModel):
+    name: str
+    connector_type: str
+    description: Optional[str] = None
+    connection_url: str
+
+
 class DatasetInfo(BaseModel):
     id: int
     name: str
@@ -191,7 +199,100 @@ async def create_connector(
     # Test connection in background
     background_tasks.add_task(test_connector_connection, db_connector.id)
     
-    return db_connector
+    return DatabaseConnectorResponse(
+        id=db_connector.id,
+        name=db_connector.name,
+        connector_type=db_connector.connector_type,
+        description=db_connector.description,
+        is_active=db_connector.is_active,
+        test_status=db_connector.test_status,
+        last_tested_at=db_connector.last_tested_at,
+        created_at=db_connector.created_at,
+        mindsdb_database_name=db_connector.mindsdb_database_name,
+        organization_id=db_connector.organization_id
+    )
+
+
+@router.post("/simplified", response_model=DatabaseConnectorResponse)
+async def create_simplified_connector(
+    connector_data: SimplifiedConnectorCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create a new database connector using simplified URL input."""
+    from app.utils.connection_parser import parse_connection_url, ConnectionParseError
+    
+    if not current_user.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Must belong to an organization"
+        )
+    
+    # Validate connector type
+    supported_types = ['mysql', 'postgresql', 's3', 'api', 'mongodb', 'clickhouse']
+    if connector_data.connector_type not in supported_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported connector type. Supported: {supported_types}"
+        )
+    
+    # Parse connection URL
+    try:
+        connection_config, credentials = parse_connection_url(
+            connector_data.connection_url, 
+            connector_data.connector_type
+        )
+    except ConnectionParseError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid connection URL: {str(e)}"
+        )
+    
+    # Check for duplicate names in organization
+    existing = db.query(DatabaseConnector).filter(
+        DatabaseConnector.organization_id == current_user.organization_id,
+        DatabaseConnector.name == connector_data.name,
+        DatabaseConnector.is_deleted == False
+    ).first()
+    
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Connector with this name already exists"
+        )
+    
+    # Create connector using parsed configuration
+    db_connector = DatabaseConnector(
+        name=connector_data.name,
+        connector_type=connector_data.connector_type,
+        description=connector_data.description,
+        organization_id=current_user.organization_id,
+        connection_config=connection_config,
+        credentials=credentials,  # TODO: Encrypt in production
+        created_by=current_user.id,
+        mindsdb_database_name=f"org_{current_user.organization_id}_{connector_data.name.lower().replace(' ', '_')}"
+    )
+    
+    db.add(db_connector)
+    db.commit()
+    db.refresh(db_connector)
+    
+    # Test connection in background
+    background_tasks.add_task(test_connector_connection, db_connector.id)
+    
+    return DatabaseConnectorResponse(
+        id=db_connector.id,
+        name=db_connector.name,
+        connector_type=db_connector.connector_type,
+        description=db_connector.description,
+        is_active=db_connector.is_active,
+        test_status=db_connector.test_status,
+        last_tested_at=db_connector.last_tested_at,
+        created_at=db_connector.created_at,
+        mindsdb_database_name=db_connector.mindsdb_database_name,
+        organization_id=db_connector.organization_id
+    )
 
 
 @router.get("/{connector_id}", response_model=DatabaseConnectorResponse)

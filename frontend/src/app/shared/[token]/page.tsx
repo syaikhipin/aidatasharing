@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import { dataSharingAPI } from '@/lib/api';
-import { Eye, Download, MessageSquare, Lock, Calendar, User, Database } from 'lucide-react';
+import { Eye, Download, MessageSquare, Lock, Calendar, User, Database, Shield, Copy } from 'lucide-react';
 
 interface SharedDataset {
   dataset_id: number;
@@ -143,6 +143,74 @@ export default function SharedDatasetPage() {
   const formatDate = (dateString?: string): string => {
     if (!dateString) return 'N/A';
     return new Date(dateString).toLocaleString();
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    // Simple toast notification - can be enhanced with proper toast library
+    const originalTitle = document.title;
+    document.title = '✓ Copied to clipboard!';
+    setTimeout(() => {
+      document.title = originalTitle;
+    }, 2000);
+  };
+
+  const generateConnectionString = (dataset: SharedDataset, token: string): string => {
+    const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+    const proxyHost = `${host}:${getPortForType(dataset.file_type)}`;
+    
+    switch (dataset.file_type?.toLowerCase()) {
+      case 'mysql':
+        return `mysql://proxy_user:${token}@${proxyHost}/${dataset.dataset_name}`;
+      case 'postgresql':
+        return `postgresql://proxy_user:${token}@${proxyHost}/${dataset.dataset_name}`;
+      case 'clickhouse':
+        return `clickhouse://proxy_user:${token}@${proxyHost}/${dataset.dataset_name}`;
+      case 's3':
+        return `s3://${proxyHost}/${dataset.dataset_name}?access_key=proxy_user&secret_key=${token}`;
+      case 'mongodb':
+        return `mongodb://proxy_user:${token}@${proxyHost}/${dataset.dataset_name}`;
+      case 'api':
+        return `https://${proxyHost}/api/${dataset.dataset_name}?token=${token}`;
+      default:
+        return `${proxyHost}/${dataset.dataset_name}?token=${token}`;
+    }
+  };
+
+  const getPortForType = (fileType?: string): string => {
+    switch (fileType?.toLowerCase()) {
+      case 'mysql':
+        return '3306';
+      case 'postgresql':
+        return '5432';
+      case 'clickhouse':
+        return '8123';
+      case 'mongodb':
+        return '27017';
+      case 's3':
+        return '443';
+      case 'api':
+        return '443';
+      default:
+        return '8080';
+    }
+  };
+
+  const getSupportedOperations = (fileType?: string): string[] => {
+    switch (fileType?.toLowerCase()) {
+      case 'mysql':
+      case 'postgresql':
+      case 'clickhouse':
+        return ['SELECT', 'SHOW', 'DESCRIBE'];
+      case 's3':
+        return ['GET', 'LIST'];
+      case 'api':
+        return ['GET'];
+      case 'mongodb':
+        return ['find', 'aggregate'];
+      default:
+        return ['READ'];
+    }
   };
 
   if (isLoading) {
@@ -295,6 +363,137 @@ export default function SharedDatasetPage() {
                 <div>
                   <div className="text-sm font-medium text-gray-900">Expires</div>
                   <div className="text-sm text-gray-600">{formatDate(dataset.expires_at)}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Proxy Connection Details */}
+        <div className="bg-white shadow rounded-lg mb-6">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <div className="flex items-center">
+              <Shield className="h-5 w-5 text-blue-600 mr-2" />
+              <h2 className="text-lg font-medium text-gray-900">Third-Party Database Access</h2>
+            </div>
+            <p className="mt-1 text-sm text-gray-600">
+              Connect to this dataset using your preferred database client or BI tool
+            </p>
+          </div>
+          <div className="px-6 py-4">
+            <div className="grid gap-4">
+              {/* Connection Details */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center">
+                    <Database className="h-5 w-5 text-blue-600 mr-2" />
+                    <span className="font-medium text-blue-900">
+                      {dataset.file_type?.toUpperCase() || 'DATABASE'} Connection
+                    </span>
+                  </div>
+                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                    Secure Proxy
+                  </span>
+                </div>
+                
+                {/* Connection String */}
+                <div className="mb-3">
+                  <label className="block text-sm font-medium text-blue-900 mb-1">
+                    Connection String
+                  </label>
+                  <div className="flex items-center space-x-2">
+                    <code className="flex-1 text-sm bg-white border border-blue-200 rounded px-3 py-2 font-mono">
+                      {generateConnectionString(dataset, token)}
+                    </code>
+                    <button
+                      onClick={() => copyToClipboard(generateConnectionString(dataset, token))}
+                      className="p-2 text-blue-600 hover:bg-blue-100 rounded"
+                      title="Copy connection string"
+                    >
+                      <Copy className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Credentials */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-blue-900 mb-1">
+                      Username
+                    </label>
+                    <div className="flex items-center space-x-2">
+                      <code className="flex-1 text-sm bg-white border border-blue-200 rounded px-3 py-2">
+                        proxy_user
+                      </code>
+                      <button
+                        onClick={() => copyToClipboard('proxy_user')}
+                        className="p-2 text-blue-600 hover:bg-blue-100 rounded"
+                        title="Copy username"
+                      >
+                        <Copy className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-blue-900 mb-1">
+                      Password/Token
+                    </label>
+                    <div className="flex items-center space-x-2">
+                      <code className="flex-1 text-sm bg-white border border-blue-200 rounded px-3 py-2 font-mono">
+                        {token}
+                      </code>
+                      <button
+                        onClick={() => copyToClipboard(token)}
+                        className="p-2 text-blue-600 hover:bg-blue-100 rounded"
+                        title="Copy token"
+                      >
+                        <Copy className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Additional Connection Info */}
+                <div className="mt-3 pt-3 border-t border-blue-200">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                    <div>
+                      <span className="font-medium text-blue-900">Host:</span>
+                      <span className="ml-1 text-blue-700">{typeof window !== 'undefined' ? window.location.hostname : 'localhost'}</span>
+                    </div>
+                    <div>
+                      <span className="font-medium text-blue-900">Port:</span>
+                      <span className="ml-1 text-blue-700">{getPortForType(dataset.file_type)}</span>
+                    </div>
+                    <div>
+                      <span className="font-medium text-blue-900">Database:</span>
+                      <span className="ml-1 text-blue-700">{dataset.dataset_name}</span>
+                    </div>
+                    <div>
+                      <span className="font-medium text-blue-900">SSL:</span>
+                      <span className="ml-1 text-blue-700">Required</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Supported Operations */}
+                <div className="mt-3 pt-3 border-t border-blue-200">
+                  <span className="text-sm font-medium text-blue-900">Supported Operations: </span>
+                  <span className="text-sm text-blue-700">
+                    {getSupportedOperations(dataset.file_type).join(', ')}
+                  </span>
+                </div>
+              </div>
+
+              {/* Usage Instructions */}
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <h4 className="font-medium text-gray-900 mb-2">How to Connect</h4>
+                <div className="text-sm text-gray-700 space-y-2">
+                  <p>1. Copy the connection string above</p>
+                  <p>2. Use it in your preferred database client (DBeaver, TablePlus, etc.)</p>
+                  <p>3. Or use the individual credentials for manual configuration</p>
+                  <p className="text-xs text-gray-500 mt-2">
+                    Note: This is a secure proxy connection that provides read-only access to the shared dataset.
+                  </p>
                 </div>
               </div>
             </div>
