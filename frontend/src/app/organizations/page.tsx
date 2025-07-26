@@ -31,12 +31,6 @@ export default function OrganizationsPage() {
                         <label className="text-sm font-medium text-gray-500">Your Role</label>
                         <p className="text-gray-900 capitalize">{user.role}</p>
                       </div>
-                      {user.department_name && (
-                        <div>
-                          <label className="text-sm font-medium text-gray-500">Department</label>
-                          <p className="text-gray-900">{user.department_name}</p>
-                        </div>
-                      )}
                     </div>
                   </div>
                   

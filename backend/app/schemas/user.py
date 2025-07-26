@@ -12,7 +12,6 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str
     organization_id: Optional[int] = None
-    department_id: Optional[int] = None
     create_organization: Optional[bool] = False
     organization_name: Optional[str] = None
 
@@ -23,7 +22,6 @@ class UserUpdate(BaseModel):
     username: Optional[str] = None  # For compatibility with tests
     password: Optional[str] = None
     organization_id: Optional[int] = None
-    department_id: Optional[int] = None
     role: Optional[str] = None
     is_active: Optional[bool] = None
 
@@ -31,7 +29,6 @@ class UserUpdate(BaseModel):
 class UserInDBBase(UserBase):
     id: Optional[int] = None
     organization_id: Optional[int] = None
-    department_id: Optional[int] = None
     role: Optional[str] = None
     is_superuser: Optional[bool] = False
     created_at: Optional[datetime] = None
@@ -47,7 +44,6 @@ class User(UserInDBBase):
 
 class UserWithOrganization(UserInDBBase):
     organization_name: Optional[str] = None
-    department_name: Optional[str] = None
 
 
 class UserInDB(UserInDBBase):

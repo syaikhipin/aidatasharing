@@ -1,20 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 from typing import List
 import re
 from app.core.database import get_db
 from app.core.auth import get_current_active_user, get_current_superuser
 from app.models.user import User
-from app.models.organization import Organization, Department, OrganizationType, DataSharingLevel
+from app.models.organization import Organization, OrganizationType, DataSharingLevel
 from app.schemas.organization import (
     OrganizationCreate, 
     OrganizationUpdate, 
     Organization as OrganizationSchema,
-    OrganizationWithDepartments,
     OrganizationOption,
-    DepartmentCreate,
-    DepartmentUpdate,
-    Department as DepartmentSchema,
     OrganizationMember
 )
 
@@ -121,7 +117,7 @@ async def get_my_organization(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    """Get current user's organization with departments"""
+    """Get current user's organization"""
     if not current_user.organization_id:
         raise HTTPException(
             status_code=404,
@@ -139,11 +135,6 @@ async def get_my_organization(
             detail="Organization not found"
         )
     
-    # Manually load departments
-    departments = db.query(Department).filter(
-        Department.organization_id == organization.id
-    ).all()
-    
     # Create a dictionary response
     return {
         "id": organization.id,
@@ -157,22 +148,11 @@ async def get_my_organization(
         "website": organization.website,
         "contact_email": organization.contact_email,
         "created_at": organization.created_at,
-        "updated_at": organization.updated_at,
-        "departments": [
-            {
-                "id": dept.id,
-                "name": dept.name,
-                "description": dept.description,
-                "is_active": dept.is_active,
-                "organization_id": dept.organization_id,
-                "created_at": dept.created_at,
-                "updated_at": dept.updated_at
-            } for dept in departments
-        ]
+        "updated_at": organization.updated_at
     }
 
 
-@router.get("/{organization_id}", response_model=OrganizationWithDepartments)
+@router.get("/{organization_id}", response_model=OrganizationSchema)
 async def get_organization(
     organization_id: int,
     current_user: User = Depends(get_current_active_user),
@@ -186,9 +166,7 @@ async def get_organization(
             detail="Not enough permissions to access this organization"
         )
     
-    organization = db.query(Organization).options(
-        joinedload(Organization.departments)
-    ).filter(Organization.id == organization_id).first()
+    organization = db.query(Organization).filter(Organization.id == organization_id).first()
     
     if not organization:
         raise HTTPException(status_code=404, detail="Organization not found")
@@ -285,76 +263,13 @@ async def get_organization_members(
     
     result = []
     for member in members:
-        department_name = None
-        if member.department_id:
-            dept = db.query(Department).filter(Department.id == member.department_id).first()
-            if dept:
-                department_name = dept.name
-        
         result.append(OrganizationMember(
             id=member.id,
             email=member.email,
             full_name=member.full_name,
             role=member.role,
-            department_id=member.department_id,
-            department_name=department_name,
             is_active=member.is_active,
             created_at=member.created_at
         ))
     
     return result
-
-
-# Department endpoints
-@router.post("/{organization_id}/departments", response_model=DepartmentSchema)
-async def create_department(
-    organization_id: int,
-    dept: DepartmentCreate,
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    """Create a new department"""
-    # Check permissions
-    if not current_user.is_superuser and (
-        current_user.organization_id != organization_id or 
-        current_user.role not in ["owner", "admin"]
-    ):
-        raise HTTPException(
-            status_code=403,
-            detail="Not enough permissions to create departments"
-        )
-    
-    # Create Department model with organization_id set
-    db_dept = Department(
-        name=dept.name,
-        description=dept.description,
-        is_active=dept.is_active,
-        organization_id=organization_id
-    )
-    db.add(db_dept)
-    db.commit()
-    db.refresh(db_dept)
-    
-    return db_dept
-
-
-@router.get("/{organization_id}/departments", response_model=List[DepartmentSchema])
-async def get_departments(
-    organization_id: int,
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    """Get organization departments"""
-    # Check permissions
-    if not current_user.is_superuser and current_user.organization_id != organization_id:
-        raise HTTPException(
-            status_code=403,
-            detail="Not enough permissions to view departments"
-        )
-    
-    departments = db.query(Department).filter(
-        Department.organization_id == organization_id,
-        Department.is_active == True
-    ).all()
-    
-    return departments 

@@ -19,8 +19,6 @@ class DatasetBase(BaseModel):
 
 
 class DatasetCreate(DatasetBase):
-    department_id: Optional[int] = None
-    
     @validator('sharing_level')
     def validate_sharing_level(cls, v):
         # Validate sharing level
@@ -33,7 +31,6 @@ class DatasetUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     sharing_level: Optional[DataSharingLevel] = None
-    department_id: Optional[int] = None
     connector_id: Optional[int] = None
     allow_download: Optional[bool] = None
     allow_api_access: Optional[bool] = None
@@ -54,7 +51,6 @@ class DatasetResponse(DatasetBase):
     status: DatasetStatus
     owner_id: int
     organization_id: int
-    department_id: Optional[int] = None
     connector_id: Optional[int] = None
     size_bytes: Optional[int] = None
     row_count: Optional[int] = None
@@ -75,7 +71,6 @@ class DatasetUpload(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     sharing_level: DataSharingLevel = DataSharingLevel.PRIVATE
-    department_id: Optional[int] = None
 
 
 class DatasetStats(BaseModel):

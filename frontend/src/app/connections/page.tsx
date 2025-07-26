@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { dataConnectorsAPI } from '@/lib/api';
 import { 
   Database, 
@@ -64,6 +65,84 @@ const CONNECTOR_TYPES = [
   { value: 'clickhouse', label: 'ClickHouse', icon: '⚡' },
   { value: 'api', label: 'REST API', icon: '🔗' },
 ];
+
+const CONNECTOR_FIELDS = {
+  mysql: {
+    connection_config: [
+      { name: 'host', label: 'Host', type: 'text', placeholder: 'localhost', required: true },
+      { name: 'port', label: 'Port', type: 'number', placeholder: '3306', required: true },
+      { name: 'database', label: 'Database Name', type: 'text', placeholder: 'mydb', required: true },
+    ],
+    credentials: [
+      { name: 'user', label: 'Username', type: 'text', placeholder: 'root', required: true },
+      { name: 'password', label: 'Password', type: 'password', placeholder: '••••••••', required: true },
+    ]
+  },
+  postgresql: {
+    connection_config: [
+      { name: 'host', label: 'Host', type: 'text', placeholder: 'localhost', required: true },
+      { name: 'port', label: 'Port', type: 'number', placeholder: '5432', required: true },
+      { name: 'database', label: 'Database Name', type: 'text', placeholder: 'postgres', required: true },
+    ],
+    credentials: [
+      { name: 'user', label: 'Username', type: 'text', placeholder: 'postgres', required: true },
+      { name: 'password', label: 'Password', type: 'password', placeholder: '••••••••', required: true },
+    ]
+  },
+  s3: {
+    connection_config: [
+      { name: 'bucket_name', label: 'Bucket Name', type: 'text', placeholder: 'my-bucket', required: true },
+      { name: 'region', label: 'Region', type: 'text', placeholder: 'us-east-1', required: true },
+    ],
+    credentials: [
+      { name: 'aws_access_key_id', label: 'Access Key ID', type: 'text', placeholder: 'AKIA...', required: true },
+      { name: 'aws_secret_access_key', label: 'Secret Access Key', type: 'password', placeholder: '••••••••', required: true },
+    ]
+  },
+  mongodb: {
+    connection_config: [
+      { name: 'host', label: 'Host', type: 'text', placeholder: 'localhost', required: true },
+      { name: 'port', label: 'Port', type: 'number', placeholder: '27017', required: true },
+      { name: 'database', label: 'Database Name', type: 'text', placeholder: 'mydb', required: true },
+    ],
+    credentials: [
+      { name: 'username', label: 'Username', type: 'text', placeholder: 'admin', required: false },
+      { name: 'password', label: 'Password', type: 'password', placeholder: '••••••••', required: false },
+    ]
+  },
+  clickhouse: {
+    connection_config: [
+      { name: 'host', label: 'Host', type: 'text', placeholder: 'localhost', required: true },
+      { name: 'port', label: 'Port', type: 'number', placeholder: '9000', required: true },
+      { name: 'database', label: 'Database Name', type: 'text', placeholder: 'default', required: true },
+    ],
+    credentials: [
+      { name: 'user', label: 'Username', type: 'text', placeholder: 'default', required: true },
+      { name: 'password', label: 'Password', type: 'password', placeholder: '••••••••', required: false },
+    ]
+  },
+  api: {
+    connection_config: [
+      { name: 'base_url', label: 'Base URL', type: 'url', placeholder: 'https://api.example.com', required: true },
+      { name: 'endpoint', label: 'Endpoint Path', type: 'text', placeholder: '/data', required: false },
+      { name: 'method', label: 'HTTP Method', type: 'select', options: ['GET', 'POST'], placeholder: 'GET', required: true },
+    ],
+    credentials: [
+      { name: 'api_key', label: 'API Key', type: 'password', placeholder: '••••••••', required: false },
+      { name: 'auth_header', label: 'Auth Header Name', type: 'text', placeholder: 'Authorization', required: false },
+    ]
+  }
+};
+
+export default function ConnectionsPage() {
+  return (
+    <ProtectedRoute>
+      <DashboardLayout>
+        <ConnectionsPageContent />
+      </DashboardLayout>
+    </ProtectedRoute>
+  );
+}
 
 function ConnectionsPageContent() {
   const [connectors, setConnectors] = useState<DatabaseConnector[]>([]);
@@ -167,606 +246,409 @@ function ConnectionsPageContent() {
     }
   };
 
-  const renderConnectionForm = () => {
-    const selectedType = CONNECTOR_TYPES.find(t => t.value === form.connector_type);
+  const handleFormFieldChange = (section: 'connection_config' | 'credentials', field: string, value: any) => {
+    setForm(prev => ({
+      ...prev,
+      [section]: {
+        ...prev[section],
+        [field]: value
+      }
+    }));
+  };
+
+  const handleConnectorTypeChange = (newType: string) => {
+    setForm(prev => ({
+      ...prev,
+      connector_type: newType,
+      connection_config: {},
+      credentials: {}
+    }));
+  };
+
+  const renderFormField = (field: any, section: 'connection_config' | 'credentials', value: any) => {
+    const fieldKey = `${section}.${field.name}`;
     
-    return (
-      <form onSubmit={handleCreateConnector} className="space-y-6">
-        {errors.general && (
-          <div className="bg-red-50 border border-red-200 rounded-md p-4">
-            <p className="text-red-600 text-sm">{errors.general}</p>
-          </div>
-        )}
+    if (field.type === 'select') {
+      return (
+        <select
+          value={value || ''}
+          onChange={(e) => handleFormFieldChange(section, field.name, e.target.value)}
+          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          required={field.required}
+        >
+          <option value="">{field.placeholder}</option>
+          {field.options?.map((option: string) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      );
+    }
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Connection Name
-            </label>
-            <input
-              type="text"
-              value={form.name}
-              onChange={(e) => setForm(prev => ({ ...prev, name: e.target.value }))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="My Database Connection"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Connection Type
-            </label>
-            <select
-              value={form.connector_type}
-              onChange={(e) => setForm(prev => ({ 
-                ...prev, 
-                connector_type: e.target.value,
-                connection_config: {},
-                credentials: {}
-              }))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              {CONNECTOR_TYPES.map(type => (
-                <option key={type.value} value={type.value}>
-                  {type.icon} {type.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Description
-          </label>
-          <textarea
-            value={form.description}
-            onChange={(e) => setForm(prev => ({ ...prev, description: e.target.value }))}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            rows={3}
-            placeholder="Description of this connection..."
+    if (field.type === 'password') {
+      return (
+        <div className="relative">
+          <input
+            type={showCredentials[fieldKey] ? 'text' : 'password'}
+            value={value || ''}
+            onChange={(e) => handleFormFieldChange(section, field.name, e.target.value)}
+            className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder={field.placeholder}
+            required={field.required}
           />
-        </div>
-
-        {/* Dynamic connection configuration based on type */}
-        {renderTypeSpecificFields()}
-
-        <div className="flex justify-end space-x-3">
           <button
             type="button"
-            onClick={() => setShowCreateModal(false)}
-            className="px-4 py-2 text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50"
+            onClick={() => setShowCredentials(prev => ({ ...prev, [fieldKey]: !prev[fieldKey] }))}
+            className="absolute inset-y-0 right-0 pr-3 flex items-center"
           >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={creating}
-            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
-          >
-            {creating ? 'Creating...' : 'Create Connection'}
+            {showCredentials[fieldKey] ? (
+              <EyeOff className="w-4 h-4 text-gray-400" />
+            ) : (
+              <Eye className="w-4 h-4 text-gray-400" />
+            )}
           </button>
         </div>
-      </form>
+      );
+    }
+
+    return (
+      <input
+        type={field.type}
+        value={value || ''}
+        onChange={(e) => handleFormFieldChange(section, field.name, field.type === 'number' ? parseInt(e.target.value) || '' : e.target.value)}
+        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+        placeholder={field.placeholder}
+        required={field.required}
+      />
     );
-  };
-
-  const renderTypeSpecificFields = () => {
-    switch (form.connector_type) {
-      case 'mysql':
-      case 'postgresql':
-        return (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Host
-              </label>
-              <input
-                type="text"
-                value={form.connection_config.host || ''}
-                onChange={(e) => setForm(prev => ({
-                  ...prev,
-                  connection_config: { ...prev.connection_config, host: e.target.value }
-                }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="localhost"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Port
-              </label>
-              <input
-                type="number"
-                value={form.connection_config.port || ''}
-                onChange={(e) => setForm(prev => ({
-                  ...prev,
-                  connection_config: { ...prev.connection_config, port: parseInt(e.target.value) }
-                }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder={form.connector_type === 'mysql' ? '3306' : '5432'}
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Database
-              </label>
-              <input
-                type="text"
-                value={form.connection_config.database || ''}
-                onChange={(e) => setForm(prev => ({
-                  ...prev,
-                  connection_config: { ...prev.connection_config, database: e.target.value }
-                }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="database_name"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Username
-              </label>
-              <input
-                type="text"
-                value={form.credentials.user || ''}
-                onChange={(e) => setForm(prev => ({
-                  ...prev,
-                  credentials: { ...prev.credentials, user: e.target.value }
-                }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="username"
-                required
-              />
-            </div>
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Password
-              </label>
-              <input
-                type="password"
-                value={form.credentials.password || ''}
-                onChange={(e) => setForm(prev => ({
-                  ...prev,
-                  credentials: { ...prev.credentials, password: e.target.value }
-                }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="password"
-                required
-              />
-            </div>
-          </div>
-        );
-
-      case 's3':
-        return (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Bucket Name
-              </label>
-              <input
-                type="text"
-                value={form.connection_config.bucket || ''}
-                onChange={(e) => setForm(prev => ({
-                  ...prev,
-                  connection_config: { ...prev.connection_config, bucket: e.target.value }
-                }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="my-bucket"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Region
-              </label>
-              <input
-                type="text"
-                value={form.connection_config.region || ''}
-                onChange={(e) => setForm(prev => ({
-                  ...prev,
-                  connection_config: { ...prev.connection_config, region: e.target.value }
-                }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="us-east-1"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                AWS Access Key ID
-              </label>
-              <input
-                type="text"
-                value={form.credentials.aws_access_key_id || ''}
-                onChange={(e) => setForm(prev => ({
-                  ...prev,
-                  credentials: { ...prev.credentials, aws_access_key_id: e.target.value }
-                }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="AKIA..."
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                AWS Secret Access Key
-              </label>
-              <input
-                type="password"
-                value={form.credentials.aws_secret_access_key || ''}
-                onChange={(e) => setForm(prev => ({
-                  ...prev,
-                  credentials: { ...prev.credentials, aws_secret_access_key: e.target.value }
-                }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Secret key"
-                required
-              />
-            </div>
-          </div>
-        );
-
-      case 'mongodb':
-        return (
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Connection URI
-              </label>
-              <input
-                type="text"
-                value={form.connection_config.uri || ''}
-                onChange={(e) => setForm(prev => ({
-                  ...prev,
-                  connection_config: { ...prev.connection_config, uri: e.target.value }
-                }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="mongodb://username:password@host:port/database"
-                required
-              />
-            </div>
-          </div>
-        );
-
-      case 'api':
-        return (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Base URL
-              </label>
-              <input
-                type="url"
-                value={form.connection_config.base_url || ''}
-                onChange={(e) => setForm(prev => ({
-                  ...prev,
-                  connection_config: { ...prev.connection_config, base_url: e.target.value }
-                }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="https://jsonplaceholder.typicode.com"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Endpoint
-              </label>
-              <input
-                type="text"
-                value={form.connection_config.endpoint || ''}
-                onChange={(e) => setForm(prev => ({
-                  ...prev,
-                  connection_config: { ...prev.connection_config, endpoint: e.target.value }
-                }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="/posts"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                HTTP Method
-              </label>
-              <select
-                value={form.connection_config.method || 'GET'}
-                onChange={(e) => setForm(prev => ({
-                  ...prev,
-                  connection_config: { ...prev.connection_config, method: e.target.value }
-                }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="GET">GET</option>
-                <option value="POST">POST</option>
-                <option value="PUT">PUT</option>
-                <option value="DELETE">DELETE</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Timeout (seconds)
-              </label>
-              <input
-                type="number"
-                value={form.connection_config.timeout || 30}
-                onChange={(e) => setForm(prev => ({
-                  ...prev,
-                  connection_config: { ...prev.connection_config, timeout: parseInt(e.target.value) }
-                }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="30"
-                min="1"
-                max="300"
-              />
-            </div>
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Headers (JSON format) - Optional
-              </label>
-              <textarea
-                value={JSON.stringify(form.connection_config.headers || {}, null, 2)}
-                onChange={(e) => {
-                  try {
-                    const headers = JSON.parse(e.target.value);
-                    setForm(prev => ({
-                      ...prev,
-                      connection_config: { ...prev.connection_config, headers }
-                    }));
-                  } catch {
-                    // Invalid JSON, ignore
-                  }
-                }}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-                rows={3}
-                placeholder='{"Content-Type": "application/json"}'
-              />
-            </div>
-          </div>
-        );
-
-      default:
-        return (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Configuration (JSON)
-            </label>
-            <textarea
-              value={JSON.stringify(form.connection_config, null, 2)}
-              onChange={(e) => {
-                try {
-                  const config = JSON.parse(e.target.value);
-                  setForm(prev => ({ ...prev, connection_config: config }));
-                } catch {
-                  // Invalid JSON, ignore
-                }
-              }}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-              rows={6}
-              placeholder="{}"
-            />
-          </div>
-        );
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'success':
-        return <CheckCircle className="h-5 w-5 text-green-500" />;
-      case 'failed':
-        return <XCircle className="h-5 w-5 text-red-500" />;
-      default:
-        return <Clock className="h-5 w-5 text-gray-400" />;
-    }
-  };
-
-  const getTypeIcon = (type: string) => {
-    const connectorType = CONNECTOR_TYPES.find(t => t.value === type);
-    return connectorType ? connectorType.icon : '🔗';
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <div className="flex items-center justify-center h-64">
+        <div className="flex flex-col items-center space-y-4">
+          <div className="h-12 w-12 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600"></div>
+          <p className="text-gray-600">Loading connections...</p>
+        </div>
       </div>
     );
   }
 
+  const currentFields = CONNECTOR_FIELDS[form.connector_type as keyof typeof CONNECTOR_FIELDS];
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+    <div className="py-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8">
         {/* Header */}
-        <div className="md:flex md:items-center md:justify-between mb-8">
-          <div className="flex-1 min-w-0">
-            <h2 className="text-2xl font-bold leading-7 text-gray-900 sm:text-3xl sm:truncate">
-              <Database className="inline h-8 w-8 mr-2" />
-              Data Connections
-            </h2>
-            <p className="mt-1 text-sm text-gray-500">
-              Manage database connections and external data sources
-            </p>
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Data Connections</h1>
+            <p className="text-gray-600 mt-2">Manage your database connections and data sources</p>
           </div>
-          <div className="mt-4 flex md:mt-0 md:ml-4">
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="ml-3 inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Connection
-            </button>
-          </div>
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Add Connection
+          </button>
         </div>
 
-        {/* Connections Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {connectors.map((connector) => (
-            <div key={connector.id} className="bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
-              <div className="p-6">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center">
-                    <span className="text-2xl mr-3">{getTypeIcon(connector.connector_type)}</span>
-                    <div>
-                      <h3 className="text-lg font-medium text-gray-900">{connector.name}</h3>
-                      <p className="text-sm text-gray-500 capitalize">{connector.connector_type}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    {connector.is_active ? (
-                      <Wifi className="h-5 w-5 text-green-500" />
-                    ) : (
-                      <WifiOff className="h-5 w-5 text-gray-400" />
-                    )}
-                    {getStatusIcon(connector.test_status)}
-                  </div>
-                </div>
-
-                {connector.description && (
-                  <p className="mt-2 text-sm text-gray-600">{connector.description}</p>
-                )}
-
-                <div className="mt-4">
-                  <div className="flex items-center justify-between text-xs text-gray-500">
-                    <span>Status: {connector.test_status}</span>
-                    {connector.last_tested_at && (
-                      <span>Tested: {new Date(connector.last_tested_at).toLocaleDateString()}</span>
-                    )}
-                  </div>
-                  {connector.mindsdb_database_name && (
-                    <div className="mt-1 text-xs text-blue-600">
-                      MindsDB: {connector.mindsdb_database_name}
-                    </div>
-                  )}
-                  
-                  {/* Associated Datasets */}
-                  {connector.datasets && connector.datasets.length > 0 && (
-                    <div className="mt-3 border-t border-gray-100 pt-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-medium text-gray-500">Associated Datasets ({connector.datasets.length})</span>
-                      </div>
-                      <div className="space-y-1 max-h-20 overflow-y-auto">
-                        {connector.datasets.map((dataset) => (
-                          <div key={dataset.id} className="flex items-center justify-between text-xs">
-                            <div className="flex items-center space-x-1">
-                              <span className="w-2 h-2 bg-blue-400 rounded-full"></span>
-                              <span className="text-gray-700 truncate" title={dataset.name}>
-                                {dataset.name}
-                              </span>
-                            </div>
-                            <div className="flex items-center space-x-1">
-                              <span className="text-gray-500">{dataset.type}</span>
-                              {dataset.public_share_enabled && (
-                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                  Shared
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-6 flex items-center justify-between">
-                  <div className="flex space-x-2">
-                    <button
-                      onClick={() => handleTestConnection(connector.id)}
-                      disabled={testing[connector.id]}
-                      className="flex items-center px-3 py-1 text-xs font-medium text-blue-600 bg-blue-50 rounded-full hover:bg-blue-100 disabled:opacity-50"
-                    >
-                      {testing[connector.id] ? (
-                        <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
-                      ) : (
-                        <TestTube className="h-3 w-3 mr-1" />
-                      )}
-                      Test
-                    </button>
-                    <button
-                      onClick={() => handleSyncWithMindsDB(connector.id)}
-                      disabled={syncing[connector.id]}
-                      className="flex items-center px-3 py-1 text-xs font-medium text-green-600 bg-green-50 rounded-full hover:bg-green-100 disabled:opacity-50"
-                    >
-                      {syncing[connector.id] ? (
-                        <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
-                      ) : (
-                        <Database className="h-3 w-3 mr-1" />
-                      )}
-                      Sync
-                    </button>
-                    {connector.connector_type === 'api' && connector.test_status === 'success' && (
-                      <button
-                        onClick={() => handleCreateDatasetFromConnector(connector.id)}
-                        className="flex items-center px-3 py-1 text-xs font-medium text-purple-600 bg-purple-50 rounded-full hover:bg-purple-100"
-                      >
-                        <Plus className="h-3 w-3 mr-1" />
-                        Dataset
-                      </button>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => handleDeleteConnector(connector.id)}
-                    className="text-red-600 hover:text-red-800"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
+        {/* Recent Connectors Summary */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <div className="bg-white p-6 rounded-lg shadow">
+            <div className="flex items-center">
+              <div className="p-3 bg-blue-100 rounded-lg">
+                <Database className="w-6 h-6 text-blue-600" />
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Total Connections</p>
+                <p className="text-2xl font-bold text-gray-900">{connectors.length}</p>
               </div>
             </div>
-          ))}
-        </div>
-
-        {connectors.length === 0 && (
-          <div className="text-center py-12">
-            <Database className="mx-auto h-12 w-12 text-gray-400" />
-            <h3 className="mt-2 text-sm font-medium text-gray-900">No connections</h3>
-            <p className="mt-1 text-sm text-gray-500">
-              Get started by creating your first database connection.
-            </p>
-            <div className="mt-6">
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Add Connection
-              </button>
+          </div>
+          
+          <div className="bg-white p-6 rounded-lg shadow">
+            <div className="flex items-center">
+              <div className="p-3 bg-green-100 rounded-lg">
+                <CheckCircle className="w-6 h-6 text-green-600" />
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Active Connections</p>
+                <p className="text-2xl font-bold text-gray-900">{connectors.filter(c => c.is_active).length}</p>
+              </div>
             </div>
           </div>
-        )}
-      </div>
 
-      {/* Create Connection Modal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md bg-white">
-            <div className="mt-3">
+          <div className="bg-white p-6 rounded-lg shadow">
+            <div className="flex items-center">
+              <div className="p-3 bg-orange-100 rounded-lg">
+                <Wifi className="w-6 h-6 text-orange-600" />
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Recent Activity</p>
+                <p className="text-2xl font-bold text-gray-900">{connectors.filter(c => c.last_tested_at).length}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Connectors List */}
+        <div className="bg-white rounded-lg shadow">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <h2 className="text-lg font-semibold text-gray-900">Your Connections</h2>
+          </div>
+          
+          {connectors.length === 0 ? (
+            <div className="p-12 text-center">
+              <Database className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">No connections yet</h3>
+              <p className="text-gray-600 mb-4">
+                Connect your databases and data sources to start sharing and analyzing data.
+              </p>
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Create Your First Connection
+              </button>
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-200">
+              {connectors.map((connector) => (
+                <div key={connector.id} className="p-6">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-start space-x-4">
+                      <div className="p-3 bg-blue-100 rounded-lg">
+                        <Database className="w-6 h-6 text-blue-600" />
+                      </div>
+                      
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-2">
+                          <h3 className="text-lg font-semibold text-gray-900">{connector.name}</h3>
+                          <span className="text-sm text-gray-500">
+                            {CONNECTOR_TYPES.find(t => t.value === connector.connector_type)?.icon}
+                            {CONNECTOR_TYPES.find(t => t.value === connector.connector_type)?.label}
+                          </span>
+                        </div>
+                        
+                        {connector.description && (
+                          <p className="text-gray-600 mt-1">{connector.description}</p>
+                        )}
+                        
+                        <div className="flex items-center space-x-4 mt-3">
+                          <div className="flex items-center">
+                            {connector.is_active ? (
+                              <Wifi className="w-4 h-4 text-green-500 mr-1" />
+                            ) : (
+                              <WifiOff className="w-4 h-4 text-red-500 mr-1" />
+                            )}
+                            <span className={`text-sm ${connector.is_active ? 'text-green-600' : 'text-red-600'}`}>
+                              {connector.is_active ? 'Active' : 'Inactive'}
+                            </span>
+                          </div>
+                          
+                          <div className="flex items-center">
+                            {connector.test_status === 'success' && <CheckCircle className="w-4 h-4 text-green-500 mr-1" />}
+                            {connector.test_status === 'failed' && <XCircle className="w-4 h-4 text-red-500 mr-1" />}
+                            {connector.test_status === 'untested' && <Clock className="w-4 h-4 text-gray-400 mr-1" />}
+                            <span className={`text-sm ${
+                              connector.test_status === 'success' ? 'text-green-600' :
+                              connector.test_status === 'failed' ? 'text-red-600' : 'text-gray-600'
+                            }`}>
+                              {connector.test_status === 'success' ? 'Test Passed' :
+                               connector.test_status === 'failed' ? 'Test Failed' : 'Not Tested'}
+                            </span>
+                          </div>
+                          
+                          <span className="text-sm text-gray-500">
+                            Created {new Date(connector.created_at).toLocaleDateString()}
+                          </span>
+                        </div>
+
+                        {/* Datasets from this connector */}
+                        {connector.datasets && connector.datasets.length > 0 && (
+                          <div className="mt-4">
+                            <h4 className="text-sm font-medium text-gray-700 mb-2">
+                              Datasets ({connector.datasets.length})
+                            </h4>
+                            <div className="flex flex-wrap gap-2">
+                              {connector.datasets.map((dataset) => (
+                                <span
+                                  key={dataset.id}
+                                  className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
+                                >
+                                  {dataset.name}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => handleTestConnection(connector.id)}
+                        disabled={testing[connector.id]}
+                        className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+                      >
+                        {testing[connector.id] ? (
+                          <RefreshCw className="w-4 h-4 mr-1 animate-spin" />
+                        ) : (
+                          <TestTube className="w-4 h-4 mr-1" />
+                        )}
+                        Test
+                      </button>
+                      
+                      {connector.connector_type === 'api' && (
+                        <button
+                          onClick={() => handleCreateDatasetFromConnector(connector.id)}
+                          className="inline-flex items-center px-3 py-2 border border-blue-300 rounded-md text-sm font-medium text-blue-700 bg-blue-50 hover:bg-blue-100"
+                        >
+                          <Plus className="w-4 h-4 mr-1" />
+                          Create Dataset
+                        </button>
+                      )}
+                      
+                      <button
+                        onClick={() => handleDeleteConnector(connector.id)}
+                        className="inline-flex items-center px-3 py-2 border border-red-300 rounded-md text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Create Modal */}
+        {showCreateModal && (
+          <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div className="relative top-20 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-2/3 shadow-lg rounded-md bg-white max-h-[80vh] overflow-y-auto">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-medium text-gray-900">Add New Connection</h3>
+                <h3 className="text-lg font-semibold text-gray-900">Create New Connection</h3>
                 <button
                   onClick={() => setShowCreateModal(false)}
                   className="text-gray-400 hover:text-gray-600"
                 >
-                  <XCircle className="h-6 w-6" />
+                  <span className="sr-only">Close</span>
+                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
                 </button>
               </div>
-              {renderConnectionForm()}
+              
+              <form onSubmit={handleCreateConnector} className="space-y-6">
+                {errors.general && (
+                  <div className="bg-red-50 border border-red-200 rounded-md p-4">
+                    <p className="text-red-600 text-sm">{errors.general}</p>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Connection Name
+                    </label>
+                    <input
+                      type="text"
+                      value={form.name}
+                      onChange={(e) => setForm(prev => ({ ...prev, name: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="My Database Connection"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Connection Type
+                    </label>
+                    <select
+                      value={form.connector_type}
+                      onChange={(e) => handleConnectorTypeChange(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      {CONNECTOR_TYPES.map(type => (
+                        <option key={type.value} value={type.value}>
+                          {type.icon} {type.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Description
+                  </label>
+                  <textarea
+                    value={form.description}
+                    onChange={(e) => setForm(prev => ({ ...prev, description: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    rows={3}
+                    placeholder="Description of this connection..."
+                  />
+                </div>
+
+                {/* Connection Configuration Fields */}
+                {currentFields && (
+                  <>
+                    <div>
+                      <h4 className="text-md font-medium text-gray-900 mb-4">Connection Configuration</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {currentFields.connection_config.map((field) => (
+                          <div key={field.name}>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              {field.label} {field.required && <span className="text-red-500">*</span>}
+                            </label>
+                            {renderFormField(field, 'connection_config', form.connection_config[field.name])}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4 className="text-md font-medium text-gray-900 mb-4">Credentials</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {currentFields.credentials.map((field) => (
+                          <div key={field.name}>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              {field.label} {field.required && <span className="text-red-500">*</span>}
+                            </label>
+                            {renderFormField(field, 'credentials', form.credentials[field.name])}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                <div className="flex justify-end space-x-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateModal(false)}
+                    className="px-4 py-2 text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={creating}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {creating ? 'Creating...' : 'Create Connection'}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
-
-export default function ConnectionsPage() {
-  return (
-    <ProtectedRoute>
-      <ConnectionsPageContent />
-    </ProtectedRoute>
-  );
-} 

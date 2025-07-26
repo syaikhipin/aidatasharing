@@ -29,7 +29,6 @@ function UploadDatasetContent() {
     name: '',
     description: '',
     sharing_level: 'private',
-    department_id: '',
   });
 
   const handleDragOver = useCallback((e: React.DragEvent) => {

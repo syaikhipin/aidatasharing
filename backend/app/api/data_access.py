@@ -212,7 +212,7 @@ async def create_access_request(
     db.refresh(new_request)
     
     # Log the activity
-    await log_audit_activity(
+    log_audit_activity(
         db=db,
         action="ACCESS_REQUESTED",
         user_id=current_user.id,
@@ -319,7 +319,7 @@ async def approve_access_request(
     db.commit()
     
     # Log the activity
-    await log_audit_activity(
+    log_audit_activity(
         db=db,
         action=action,
         user_id=current_user.id,
@@ -550,7 +550,7 @@ async def get_audit_logs(
     
     return result
 
-async def log_audit_activity(
+def log_audit_activity(
     db: Session,
     action: str,
     user_id: int,

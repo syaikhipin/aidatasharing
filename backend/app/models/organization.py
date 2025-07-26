@@ -8,7 +8,7 @@ from app.core.database import Base
 class DataSharingLevel(str, enum.Enum):
     """Data sharing levels - simplified 3-level structure"""
     PRIVATE = "private"  # Accessible to owner only
-    ORGANIZATION = "organization"  # Accessible to all members within the organization (group level)
+    ORGANIZATION = "organization"  # Accessible to all members within the organization (internal level)
     PUBLIC = "public"  # Accessible to everyone
 
 
@@ -46,33 +46,12 @@ class Organization(Base):
 
     # Relationships - using string references to avoid circular imports
     users = relationship("User", back_populates="organization", lazy="dynamic")
-    departments = relationship("Department", back_populates="organization", lazy="dynamic")
-
-
-class Department(Base):
-    __tablename__ = "departments"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False)
-    description = Column(Text, nullable=True)
-    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
-    
-    # Settings
-    is_active = Column(Boolean, default=True)
-    
-    # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    # Relationships
-    organization = relationship("Organization", back_populates="departments")
-    users = relationship("User", back_populates="department")
 
 
 class UserRole(str, enum.Enum):
     """User roles within organization"""
     OWNER = "owner"  # Organization owner (full access)
     ADMIN = "admin"  # Organization admin (manage users, settings)
-    MANAGER = "manager"  # Department manager (manage department data)
+    MANAGER = "manager"  # Manager (manage organization data)
     MEMBER = "member"  # Regular member (view/create data)
     VIEWER = "viewer"  # Read-only access

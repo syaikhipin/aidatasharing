@@ -131,22 +131,6 @@ export const organizationsAPI = {
     const response = await apiClient.get(`/api/organizations/${organizationId}/members`);
     return response.data;
   },
-  
-  getDepartments: async (organizationId: number) => {
-    const response = await apiClient.get(`/api/organizations/${organizationId}/departments`);
-    return response.data;
-  },
-  
-  createDepartment: async (organizationId: number, deptData: {
-    name: string;
-    description?: string;
-  }) => {
-    const response = await apiClient.post(`/api/organizations/${organizationId}/departments`, {
-      ...deptData,
-      organization_id: organizationId
-    });
-    return response.data;
-  },
 };
 
 // Datasets API
@@ -166,7 +150,6 @@ export const datasetsAPI = {
     description?: string;
     type: string;
     sharing_level?: string;
-    department_id?: number;
     source_url?: string;
     connection_params?: Record<string, any>;
     schema_info?: Record<string, any>;
@@ -186,7 +169,6 @@ export const datasetsAPI = {
     name?: string;
     description?: string;
     sharing_level?: string;
-    department_id?: number;
     allow_download?: boolean;
     allow_api_access?: boolean;
     schema_info?: Record<string, any>;
@@ -204,7 +186,6 @@ export const datasetsAPI = {
     name: string;
     description?: string;
     sharing_level?: string;
-    department_id?: number;
   }) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -227,7 +208,6 @@ export const datasetsAPI = {
     name: string;
     description?: string;
     sharing_level?: string;
-    department_id?: number;
   }) => {
     const formData = new FormData();
     formData.append('file', file);

@@ -64,7 +64,6 @@ class Dataset(Base):
     # Organization and sharing - ORGANIZATION IS REQUIRED (no cross-org sharing)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)  # Required!
-    department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
     sharing_level = Column(Enum(DataSharingLevel), default=DataSharingLevel.PRIVATE)
     
     # Metadata
@@ -130,7 +129,6 @@ class Dataset(Base):
     owner = relationship("User", back_populates="owned_datasets", foreign_keys=[owner_id])
     deleted_by_user = relationship("User", foreign_keys=[deleted_by])
     organization = relationship("Organization")
-    department = relationship("Department")
     connector = relationship("DatabaseConnector", back_populates="datasets")
     access_logs = relationship("DatasetAccessLog", back_populates="dataset")
     downloads = relationship("DatasetDownload", back_populates="dataset")

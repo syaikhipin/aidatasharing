@@ -11,10 +11,8 @@ interface User {
   is_active: boolean;
   is_superuser: boolean;
   organization_id?: number;
-  department_id?: number;
   role?: string;
   organization_name?: string;
-  department_name?: string;
   created_at?: string;
   updated_at?: string;
 }

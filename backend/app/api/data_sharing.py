@@ -471,3 +471,48 @@ async def download_shared_dataset(
         "size_bytes": dataset.size_bytes,
         "mime_type": f"application/{dataset.type}"
     }
+@router.get("/shared/{share_token}/download")
+async def download_shared_dataset_authenticated(
+    share_token: str,
+    password: Optional[str] = None,
+    request: Request = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Download a shared dataset (authenticated endpoint)."""
+    # Verify dataset and access
+    dataset = db.query(Dataset).filter(
+        Dataset.share_token == share_token,
+        Dataset.public_share_enabled == True,
+        Dataset.allow_download == True,
+        Dataset.is_deleted == False
+    ).first()
+    
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Shared dataset not found or download not allowed"
+        )
+    
+    # Check expiration
+    if dataset.share_expires_at and dataset.share_expires_at < datetime.utcnow():
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Share link has expired"
+        )
+    
+    # Check password if required
+    if dataset.share_password and dataset.share_password != password:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid password"
+        )
+    
+    # Return download info (would be actual file in production)
+    return {
+        "download_url": f"/files/{dataset.source_url}",
+        "filename": f"{dataset.name}.{dataset.type}",
+        "size_bytes": dataset.size_bytes,
+        "mime_type": f"application/{dataset.type}"
+    }
+

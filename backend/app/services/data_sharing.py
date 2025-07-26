@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from app.models.user import User
 from app.models.dataset import Dataset, DatasetAccessLog, DatasetChatSession, ChatMessage, DatasetShareAccess
-from app.models.organization import Organization, Department, DataSharingLevel, UserRole
+from app.models.organization import Organization, DataSharingLevel, UserRole
 from datetime import datetime, timedelta
 import logging
 import secrets
@@ -44,11 +44,6 @@ class DataSharingService:
         elif dataset.sharing_level == DataSharingLevel.ORGANIZATION:
             # All organization members can access
             return True
-        
-        elif dataset.sharing_level == DataSharingLevel.DEPARTMENT:
-            # Only department members can access
-            return (user.department_id and 
-                   user.department_id == dataset.department_id)
         
         return False
     
@@ -92,11 +87,6 @@ class DataSharingService:
             # Check role-based restrictions
             if "allowed_roles" in restrictions:
                 if user.role not in restrictions["allowed_roles"]:
-                    return False
-            
-            # Check department-based restrictions
-            if "allowed_departments" in restrictions:
-                if not user.department_id or user.department_id not in restrictions["allowed_departments"]:
                     return False
         
         # Special handling for connector-based datasets
@@ -440,11 +430,6 @@ class DataSharingService:
             "organization_id": organization_id
         }
     
-    def check_department_access(self, user: User, department_id: int) -> bool:
-        """Check if user can access department-level data"""
-        return (user.department_id == department_id and 
-               user.organization_id is not None)
-    
     def validate_dataset_creation(self, user: User, organization_id: int) -> bool:
         """
         Validate if user can create dataset in the organization.
@@ -516,25 +501,6 @@ class DataSharingService:
         stats["unique_users_accessed"] = len(set(log.user_id for log in access_logs))
         
         return stats
-    
-    def get_department_datasets(
-        self, 
-        department_id: int, 
-        user: User
-    ) -> List[Dataset]:
-        """
-        Get datasets shared within a specific department
-        """
-        # Check if user has access to this department
-        if (not user.organization_id or 
-            user.department_id != department_id and
-            user.role not in ["owner", "admin"]):
-            return []
-        
-        return self.db.query(Dataset).filter(
-            Dataset.department_id == department_id,
-            Dataset.sharing_level == DataSharingLevel.DEPARTMENT
-        ).all()
     
     def get_organization_shared_datasets(
         self, 

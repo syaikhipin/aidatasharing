@@ -130,7 +130,6 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
         full_name=user.full_name,
         is_active=True,
         organization_id=organization.id if organization else None,
-        department_id=user.department_id,
         role="owner" if user.create_organization else "member"
     )
     db.add(db_user)
@@ -145,7 +144,6 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
         is_active=db_user.is_active,
         is_superuser=db_user.is_superuser,
         organization_id=db_user.organization_id,
-        department_id=db_user.department_id,
         role=db_user.role,
         organization_name=organization.name if organization else None,
         created_at=db_user.created_at,
@@ -291,18 +289,11 @@ async def read_users_me(
     - **Navigation**: Determine available features based on user role
     """
     organization_name = None
-    department_name = None
     
     if current_user.organization_id:
         organization = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
         if organization:
             organization_name = organization.name
-    
-    if current_user.department_id:
-        from app.models.organization import Department
-        department = db.query(Department).filter(Department.id == current_user.department_id).first()
-        if department:
-            department_name = department.name
     
     return UserWithOrganization(
         id=current_user.id,
@@ -311,10 +302,8 @@ async def read_users_me(
         is_active=current_user.is_active,
         is_superuser=current_user.is_superuser,
         organization_id=current_user.organization_id,
-        department_id=current_user.department_id,
         role=current_user.role,
         organization_name=organization_name,
-        department_name=department_name,
         created_at=current_user.created_at,
         updated_at=current_user.updated_at
     )
@@ -357,7 +346,6 @@ async def update_user_profile(
         is_active=current_user.is_active,
         is_superuser=current_user.is_superuser,
         organization_id=current_user.organization_id,
-        department_id=current_user.department_id,
         role=current_user.role,
         organization_name=organization_name,
         created_at=current_user.created_at,

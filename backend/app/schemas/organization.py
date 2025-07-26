@@ -4,31 +4,6 @@ from datetime import datetime
 from app.models.organization import OrganizationType, DataSharingLevel, UserRole as UserRoleEnum
 
 
-class DepartmentBase(BaseModel):
-    name: str
-    description: Optional[str] = None
-    is_active: bool = True
-
-
-class DepartmentCreate(DepartmentBase):
-    pass  # organization_id is set automatically from URL parameter
-
-
-class DepartmentUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    is_active: Optional[bool] = None
-
-
-class Department(DepartmentBase):
-    id: int
-    organization_id: int
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
 class OrganizationBase(BaseModel):
     name: str
     description: Optional[str] = None
@@ -76,17 +51,10 @@ class Organization(OrganizationBase):
     model_config = {"from_attributes": True}
 
 
-class OrganizationWithDepartments(Organization):
-    departments: List[Department] = []
-    
-    model_config = {"from_attributes": True}
-
-
 # User-Organization relationship schemas
 class UserRoleAssignment(BaseModel):
     user_id: int
     organization_id: int
-    department_id: Optional[int] = None
     role: UserRoleEnum
 
 
@@ -95,8 +63,6 @@ class OrganizationMember(BaseModel):
     email: str
     full_name: Optional[str]
     role: str
-    department_id: Optional[int] = None
-    department_name: Optional[str] = None
     is_active: bool
     created_at: datetime
 
@@ -106,7 +72,6 @@ class OrganizationMember(BaseModel):
 class OrganizationInvite(BaseModel):
     email: str
     role: UserRoleEnum = UserRoleEnum.MEMBER
-    department_id: Optional[int] = None
 
 
 # Organization selection for registration
@@ -114,4 +79,4 @@ class OrganizationOption(BaseModel):
     id: int
     name: str
     type: OrganizationType
-    description: Optional[str] = None 
+    description: Optional[str] = None

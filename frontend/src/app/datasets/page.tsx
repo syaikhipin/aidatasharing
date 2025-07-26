@@ -7,6 +7,8 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { datasetsAPI } from '@/lib/api';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 function formatFileSize(bytes: number): string {
   if (bytes === 0) return '0 Bytes';
@@ -31,9 +33,12 @@ function DatasetsContent() {
   const [datasets, setDatasets] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showDatasets, setShowDatasets] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterType, setFilterType] = useState('all');
 
-  // Remove automatic fetching on component mount
+  useEffect(() => {
+    fetchDatasets();
+  }, []);
 
   const fetchDatasets = async () => {
     try {
@@ -44,7 +49,7 @@ function DatasetsContent() {
     } catch (error: any) {
       console.error('Failed to fetch datasets:', error);
       setError(error.response?.data?.detail || 'Failed to fetch datasets');
-      setDatasets([]); // Set empty array on error
+      setDatasets([]);
     } finally {
       setIsLoading(false);
     }
@@ -57,7 +62,6 @@ function DatasetsContent() {
 
     try {
       await datasetsAPI.deleteDataset(datasetId);
-      // Remove the deleted dataset from the local state
       setDatasets(datasets.filter(dataset => dataset.id !== datasetId));
     } catch (error: any) {
       console.error('Failed to delete dataset:', error);
@@ -68,7 +72,6 @@ function DatasetsContent() {
   const handleSharingLevelChange = async (datasetId: number, newLevel: 'private' | 'organization' | 'public') => {
     try {
       await datasetsAPI.updateDataset(datasetId, { sharing_level: newLevel });
-      // Update the dataset in local state
       setDatasets(datasets.map(dataset => 
         dataset.id === datasetId 
           ? { ...dataset, sharing_level: newLevel }
@@ -80,97 +83,170 @@ function DatasetsContent() {
     }
   };
 
-  if (isLoading) {
+  // Filter datasets based on search and type
+  const filteredDatasets = datasets.filter(dataset => {
+    const matchesSearch = dataset.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         (dataset.description && dataset.description.toLowerCase().includes(searchTerm.toLowerCase()));
+    const matchesType = filterType === 'all' || dataset.type === filterType;
+    return matchesSearch && matchesType;
+  });
+
+  const datasetTypes = ['all', ...Array.from(new Set(datasets.map(d => d.type).filter(Boolean)))];
+
+  if (isLoading && datasets.length === 0) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <div className="flex flex-col items-center space-y-4">
+          <div className="h-12 w-12 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600"></div>
+          <p className="text-gray-600">Loading your datasets...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="py-6">
+    <div className="py-6 animate-fade-in">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8">
+        {/* Header Section */}
         <div className="mb-8">
-          <div className="text-center">
-            <h1 className="text-3xl font-bold text-gray-900 mb-4">Data Sharing Platform</h1>
-            <p className="text-lg text-gray-600 mb-8">
-              Choose how you want to share your data
-            </p>
-            
-            {/* Two Mode Selection */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto mb-8">
-              {/* File Upload Mode */}
-              <Link href="/datasets/upload" className="group">
-                <div className="bg-white border-2 border-gray-200 rounded-lg p-8 hover:border-blue-500 hover:shadow-lg transition-all duration-200">
-                  <div className="text-center">
-                    <div className="mx-auto h-16 w-16 bg-blue-100 rounded-full flex items-center justify-center mb-4 group-hover:bg-blue-200">
-                      <svg className="h-8 w-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                      </svg>
-                    </div>
-                    <h3 className="text-xl font-semibold text-gray-900 mb-2">File Upload</h3>
-                    <p className="text-gray-600">
-                      Upload CSV, Excel, or other data files directly from your computer
-                    </p>
-                  </div>
-                </div>
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between">
+            <div className="mb-6 lg:mb-0">
+              <h1 className="text-3xl font-bold text-gray-900">Data Management Hub</h1>
+              <p className="text-gray-600 mt-2">
+                Upload, connect, and manage your data sources with ease
+              </p>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Link href="/datasets/upload">
+                <Button variant="gradient" size="lg" className="w-full sm:w-auto">
+                  <span className="mr-2">📤</span>
+                  Upload Dataset
+                </Button>
               </Link>
-              
-              {/* Connector Mode */}
-              <Link href="/connections" className="group">
-                <div className="bg-white border-2 border-gray-200 rounded-lg p-8 hover:border-green-500 hover:shadow-lg transition-all duration-200">
-                  <div className="text-center">
-                    <div className="mx-auto h-16 w-16 bg-green-100 rounded-full flex items-center justify-center mb-4 group-hover:bg-green-200">
-                      <svg className="h-8 w-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                      </svg>
-                    </div>
-                    <h3 className="text-xl font-semibold text-gray-900 mb-2">Data Connector</h3>
-                    <p className="text-gray-600">
-                      Connect to databases, APIs, and other data sources
-                    </p>
-                  </div>
-                </div>
+              <Link href="/connections">
+                <Button variant="outline" size="lg" className="w-full sm:w-auto">
+                  <span className="mr-2">🔗</span>
+                  Connect Data Source
+                </Button>
               </Link>
             </div>
-            
-            <div className="flex justify-center space-x-3">
-               <Link
-                 href="/datasets/sharing"
-                 className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium"
-               >
-                 Manage Sharing
-               </Link>
-               <Link
-                 href="/datasets/shared"
-                 className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm font-medium"
-               >
-                 Shared Datasets
-               </Link>
-               <button
-                 onClick={() => {
-                   if (!showDatasets) {
-                     setShowDatasets(true);
-                     fetchDatasets();
-                   } else {
-                     setShowDatasets(false);
-                   }
-                 }}
-                 className="bg-gray-600 hover:bg-gray-700 text-white px-6 py-2 rounded-md text-sm font-medium"
-               >
-                 {showDatasets ? 'Hide Datasets' : 'View Existing Datasets'}
-               </button>
-             </div>
           </div>
         </div>
 
-        {showDatasets && (
-          <div className="mt-8">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">Your Datasets</h2>
-            
+        {/* Quick Actions Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <Card variant="elevated" interactive className="hover-lift">
+            <CardHeader className="pb-4">
+              <div className="flex items-center">
+                <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg flex items-center justify-center mr-4">
+                  <span className="text-2xl">📊</span>
+                </div>
+                <div>
+                  <CardTitle className="text-lg">File Upload</CardTitle>
+                  <CardDescription>CSV, Excel, JSON files</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <Link href="/datasets/upload">
+                <Button variant="outline" className="w-full">
+                  Upload Files
+                </Button>
+              </Link>
+            </CardContent>
+          </Card>
+
+          <Card variant="elevated" interactive className="hover-lift">
+            <CardHeader className="pb-4">
+              <div className="flex items-center">
+                <div className="w-12 h-12 bg-gradient-to-r from-green-500 to-green-600 rounded-lg flex items-center justify-center mr-4">
+                  <span className="text-2xl">🗄️</span>
+                </div>
+                <div>
+                  <CardTitle className="text-lg">Database Connector</CardTitle>
+                  <CardDescription>MySQL, PostgreSQL, MongoDB</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <Link href="/connections">
+                <Button variant="outline" className="w-full">
+                  Connect Database
+                </Button>
+              </Link>
+            </CardContent>
+          </Card>
+
+          <Card variant="elevated" interactive className="hover-lift">
+            <CardHeader className="pb-4">
+              <div className="flex items-center">
+                <div className="w-12 h-12 bg-gradient-to-r from-purple-500 to-purple-600 rounded-lg flex items-center justify-center mr-4">
+                  <span className="text-2xl">🤝</span>
+                </div>
+                <div>
+                  <CardTitle className="text-lg">Shared Data</CardTitle>
+                  <CardDescription>Access shared datasets</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <Link href="/datasets/shared">
+                <Button variant="outline" className="w-full">
+                  View Shared
+                </Button>
+              </Link>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Datasets Section */}
+        <Card variant="elevated">
+          <CardHeader>
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <CardTitle className="text-xl">Your Datasets</CardTitle>
+                <CardDescription>
+                  Manage and organize your data collections
+                </CardDescription>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-3 mt-4 lg:mt-0">
+                <Link href="/datasets/sharing">
+                  <Button variant="secondary" size="sm" className="w-full sm:w-auto">
+                    <span className="mr-2">⚙️</span>
+                    Manage Sharing
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          </CardHeader>
+          
+          <CardContent>
+            {/* Search and Filter */}
+            <div className="flex flex-col sm:flex-row gap-4 mb-6">
+              <div className="flex-1">
+                <input
+                  type="text"
+                  placeholder="Search datasets..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              <select
+                value={filterType}
+                onChange={(e) => setFilterType(e.target.value)}
+                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                {datasetTypes.map(type => (
+                  <option key={type} value={type}>
+                    {type === 'all' ? 'All Types' : type.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             {error && (
-              <div className="mb-6 bg-red-50 border border-red-200 rounded-md p-4">
+              <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4">
                 <div className="flex">
                   <div className="flex-shrink-0">
                     <svg className="h-5 w-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -183,102 +259,123 @@ function DatasetsContent() {
                       <p>{error}</p>
                     </div>
                     <div className="mt-3">
-                      <button
+                      <Button
                         onClick={fetchDatasets}
-                        className="text-sm font-medium text-red-800 hover:text-red-600"
+                        variant="outline"
+                        size="sm"
                       >
                         Try again
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 </div>
               </div>
             )}
 
-            {datasets.length === 0 && !error && !isLoading ? (
-              <div className="bg-white shadow rounded-lg">
-                <div className="text-center py-12">
-                  <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
-                  </svg>
-                  <h3 className="mt-2 text-sm font-medium text-gray-900">No datasets found</h3>
-                  <p className="mt-1 text-sm text-gray-500">
-                    Get started by uploading your first dataset.
-                  </p>
-                  <div className="mt-6">
-                    <Link
-                      href="/datasets/upload"
-                      className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
-                    >
-                      Upload Dataset
-                    </Link>
-                  </div>
+            {filteredDatasets.length === 0 && !error && !isLoading ? (
+              <div className="text-center py-12">
+                <div className="w-24 h-24 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
+                  <span className="text-4xl">📊</span>
                 </div>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  {searchTerm || filterType !== 'all' ? 'No matching datasets' : 'No datasets found'}
+                </h3>
+                <p className="text-gray-600 mb-6">
+                  {searchTerm || filterType !== 'all' 
+                    ? 'Try adjusting your search or filter criteria.'
+                    : 'Get started by uploading your first dataset.'
+                  }
+                </p>
+                {!searchTerm && filterType === 'all' && (
+                  <Link href="/datasets/upload">
+                    <Button variant="gradient">
+                      <span className="mr-2">📤</span>
+                      Upload Your First Dataset
+                    </Button>
+                  </Link>
+                )}
               </div>
-            ) : datasets.length > 0 ? (
-              <div className="bg-white shadow overflow-hidden sm:rounded-md">
-                <ul className="divide-y divide-gray-200">
-                  {datasets.map((dataset) => (
-                    <li key={dataset.id}>
-                      <div className="px-6 py-4 hover:bg-gray-50">
-                        <div className="flex items-center justify-between">
-                          <div className="flex-1 min-w-0">
-                            <h3 className="text-lg font-medium text-gray-900">
+            ) : filteredDatasets.length > 0 ? (
+              <div className="grid gap-4">
+                {filteredDatasets.map((dataset) => (
+                  <Card key={dataset.id} variant="outlined" interactive className="hover-lift">
+                    <CardContent className="p-6">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center mb-2">
+                            <h3 className="text-lg font-semibold text-gray-900 mr-3">
                               {dataset.name}
                             </h3>
-                            <p className="mt-1 text-sm text-gray-600">
-                              {dataset.description || 'No description provided'}
-                            </p>
-                            <div className="mt-2 flex items-center justify-between">
-                              <div className="flex items-center space-x-4 text-xs text-gray-500">
-                                <span>Type: {dataset.type?.toUpperCase() || 'Unknown'}</span>
-                                {dataset.size_bytes && (
-                                  <span>Size: {formatFileSize(dataset.size_bytes)}</span>
-                                )}
-                                <span>Created: {new Date(dataset.created_at).toLocaleDateString()}</span>
-                              </div>
-                              <div className="flex items-center space-x-2">
-                                <span className="text-xs text-gray-500">Sharing:</span>
-                                <SharingLevelSelector
-                                  currentLevel={dataset.sharing_level || 'private'}
-                                  onLevelChange={(level) => handleSharingLevelChange(dataset.id, level)}
-                                  size="sm"
-                                />
-                              </div>
-                            </div>
+                            <SharingLevelBadge level={dataset.sharing_level || 'private'} />
                           </div>
+                          <p className="text-gray-600 mb-3">
+                            {dataset.description || 'No description provided'}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500">
+                            <span className="flex items-center">
+                              <span className="mr-1">📁</span>
+                              {dataset.type?.toUpperCase() || 'Unknown'}
+                            </span>
+                            {dataset.size_bytes && (
+                              <span className="flex items-center">
+                                <span className="mr-1">💾</span>
+                                {formatFileSize(dataset.size_bytes)}
+                              </span>
+                            )}
+                            <span className="flex items-center">
+                              <span className="mr-1">📅</span>
+                              {new Date(dataset.created_at).toLocaleDateString()}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end space-y-3 ml-4">
+                          <SharingLevelSelector
+                            currentLevel={dataset.sharing_level || 'private'}
+                            onLevelChange={(level) => handleSharingLevelChange(dataset.id, level)}
+                            size="sm"
+                          />
                           <div className="flex items-center space-x-2">
-                            <Link
-                              href={`/datasets/${dataset.id}`}
-                              className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                            >
-                              View
+                            <Link href={`/datasets/${dataset.id}`}>
+                              <Button variant="outline" size="sm">
+                                <span className="mr-1">👁️</span>
+                                View
+                              </Button>
                             </Link>
-                            <button 
+                            <Button 
                               onClick={() => window.open(`/datasets/${dataset.id}/chat`, '_blank')}
-                              className="text-purple-600 hover:text-purple-800 text-sm font-medium"
+                              variant="secondary"
+                              size="sm"
                             >
+                              <span className="mr-1">💬</span>
                               Chat
-                            </button>
-                            <button className="text-green-600 hover:text-green-800 text-sm font-medium">
-                              Download
-                            </button>
-                            <button 
+                            </Button>
+                            <Button 
                               onClick={() => handleDeleteDataset(dataset.id, dataset.name)}
-                              className="text-red-600 hover:text-red-800 text-sm font-medium"
+                              variant="destructive"
+                              size="sm"
                             >
+                              <span className="mr-1">🗑️</span>
                               Delete
-                            </button>
+                            </Button>
                           </div>
                         </div>
                       </div>
-                    </li>
-                  ))}
-                </ul>
+                    </CardContent>
+                  </Card>
+                ))}
               </div>
             ) : null}
-          </div>
-        )}
+
+            {isLoading && datasets.length > 0 && (
+              <div className="text-center py-4">
+                <div className="inline-flex items-center">
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600 mr-2"></div>
+                  <span className="text-gray-600">Updating datasets...</span>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

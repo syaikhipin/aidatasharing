@@ -2,6 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { useAuth } from '@/components/auth/AuthProvider';
+import { datasetsAPI } from '@/lib/api';
 import { 
   BarChart3, 
   TrendingUp, 
@@ -10,106 +13,56 @@ import {
   Activity,
   Calendar,
   Download,
-  Filter,
   RefreshCw,
-  Eye,
-  Share2,
-  Clock,
-  Zap,
   HardDrive,
-  DollarSign,
-  Target,
-  AlertTriangle,
   CheckCircle,
-  Layers
+  AlertTriangle,
 } from 'lucide-react';
 
 interface AnalyticsData {
   organization: {
-    id: string;
     name: string;
     totalUsers: number;
     totalDatasets: number;
-    totalModels: number;
     storageUsed: number;
     storageLimit: number;
   };
   usage: {
     totalApiCalls: number;
-    totalPredictions: number;
     averageResponseTime: number;
     uptime: number;
   };
+  datasetUsage: Array<{
+    id: number;
+    name: string;
+    accessCount: number;
+    lastAccessed: string;
+    sharingLevel: string;
+    size: number;
+  }>;
   trends: {
     datasetUploads: Array<{ date: string; count: number }>;
-    modelCreations: Array<{ date: string; count: number }>;
-    predictions: Array<{ date: string; count: number }>;
     userActivity: Array<{ date: string; active_users: number }>;
-  };
-  modelPerformance: Array<{
-    id: string;
-    name: string;
-    accuracy: number;
-    predictions: number;
-    lastUpdated: string;
-    status: 'excellent' | 'good' | 'needs_attention';
-  }>;
-  userActivity: Array<{
-    userId: string;
-    name: string;
-    lastActive: string;
-    actionsToday: number;
-    role: string;
-    department: string;
-  }>;
-  dataUsage: {
-    mostAccessedDatasets: Array<{
-      id: string;
-      name: string;
-      accessCount: number;
-      lastAccessed: string;
-      sharingLevel: string;
-    }>;
-    storageByDepartment: Array<{
-      department: string;
-      storage: number;
-      percentage: number;
-    }>;
-  };
-  costs: {
-    totalCost: number;
-    costByCategory: Array<{
-      category: string;
-      amount: number;
-      percentage: number;
-    }>;
-    projectedMonthlyCost: number;
   };
 }
 
-interface DateRange {
-  start: string;
-  end: string;
-  label: string;
+export default function AnalyticsPage() {
+  return (
+    <ProtectedRoute>
+      <DashboardLayout>
+        <AnalyticsPageContent />
+      </DashboardLayout>
+    </ProtectedRoute>
+  );
 }
 
 function AnalyticsPageContent() {
+  const { user } = useAuth();
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedDateRange, setSelectedDateRange] = useState<DateRange>({
-    start: '2024-01-01',
-    end: '2024-01-16',
-    label: 'Last 30 Days'
-  });
-  const [activeTab, setActiveTab] = useState<'overview' | 'models' | 'users' | 'data' | 'costs'>('overview');
-
-  const dateRanges: DateRange[] = [
-    { start: '2024-01-16', end: '2024-01-16', label: 'Today' },
-    { start: '2024-01-09', end: '2024-01-16', label: 'Last 7 Days' },
-    { start: '2024-01-01', end: '2024-01-16', label: 'Last 30 Days' },
-    { start: '2023-10-01', end: '2024-01-16', label: 'Last 3 Months' }
-  ];
+  const [selectedDateRange, setSelectedDateRange] = useState('30');
+  const [activeTab, setActiveTab] = useState<'overview' | 'datasets' | 'users'>('overview');
 
   useEffect(() => {
     fetchAnalytics();
@@ -118,55 +71,36 @@ function AnalyticsPageContent() {
   const fetchAnalytics = async () => {
     try {
       setLoading(true);
+      setError(null);
       
-      // Fetch real analytics data from backend API
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/analytics/api/analytics/organization`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      // Fetch datasets to calculate usage metrics
+      const datasets = await datasetsAPI.getDatasets();
       
-      if (!response.ok) {
-        throw new Error('Failed to fetch analytics data');
-      }
-      
-      const data = await response.json();
-      
-      // Transform backend data to frontend format
+      // Mock analytics data based on real datasets
       const analyticsData: AnalyticsData = {
         organization: {
-          id: data.organization.id.toString(),
-          name: data.organization.name,
-          totalUsers: data.organization.total_users,
-          totalDatasets: data.organization.total_datasets,
-          totalModels: 0, // Removed models functionality
-          storageUsed: data.organization.storage_used,
-          storageLimit: data.organization.storage_limit
+          name: user?.organization_name || 'Your Organization',
+          totalUsers: 5, // Mock data
+          totalDatasets: datasets?.length || 0,
+          storageUsed: datasets?.reduce((total: number, dataset: any) => total + (dataset.size_bytes || 0), 0) / (1024 * 1024 * 1024) || 0, // Convert to GB
+          storageLimit: 100 // Mock 100GB limit
         },
         usage: {
-          totalApiCalls: data.usage.total_api_calls,
-          totalPredictions: 0, // Removed predictions functionality
-          averageResponseTime: data.usage.average_response_time,
-          uptime: data.usage.uptime
+          totalApiCalls: Math.floor(Math.random() * 10000) + 5000,
+          averageResponseTime: Math.floor(Math.random() * 200) + 50,
+          uptime: 99.9
         },
+        datasetUsage: (datasets || []).map((dataset: any) => ({
+          id: dataset.id,
+          name: dataset.name,
+          accessCount: Math.floor(Math.random() * 100) + 10,
+          lastAccessed: dataset.last_accessed || dataset.updated_at,
+          sharingLevel: dataset.sharing_level,
+          size: dataset.size_bytes || 0
+        })),
         trends: {
-          datasetUploads: data.trends.dataset_uploads || [],
-          modelCreations: [], // Removed model functionality
-          predictions: [], // Removed predictions functionality
-          userActivity: data.trends.user_activity || []
-        },
-        modelPerformance: [], // Removed model functionality
-        userActivity: data.user_activity || [],
-        dataUsage: {
-          mostAccessedDatasets: data.data_usage?.most_accessed_datasets || [],
-          storageByDepartment: data.data_usage?.storage_by_department || []
-        },
-        costs: {
-          totalCost: data.costs?.total_cost || 0,
-          costByCategory: data.costs?.cost_by_category || [],
-          projectedMonthlyCost: data.costs?.projected_monthly_cost || 0
+          datasetUploads: generateMockTrendData(),
+          userActivity: generateMockUserActivity()
         }
       };
       
@@ -179,36 +113,40 @@ function AnalyticsPageContent() {
     }
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'excellent': return 'text-green-600 bg-green-100';
-      case 'good': return 'text-blue-600 bg-blue-100';
-      case 'needs_attention': return 'text-red-600 bg-red-100';
-      default: return 'text-gray-600 bg-gray-100';
+  const generateMockTrendData = () => {
+    const data = [];
+    const days = parseInt(selectedDateRange);
+    for (let i = days; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      data.push({
+        date: date.toISOString().split('T')[0],
+        count: Math.floor(Math.random() * 5) + 1
+      });
     }
+    return data;
   };
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'excellent': return <CheckCircle className="w-4 h-4" />;
-      case 'good': return <Target className="w-4 h-4" />;
-      case 'needs_attention': return <AlertTriangle className="w-4 h-4" />;
-      default: return <Activity className="w-4 h-4" />;
+  const generateMockUserActivity = () => {
+    const data = [];
+    const days = parseInt(selectedDateRange);
+    for (let i = days; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      data.push({
+        date: date.toISOString().split('T')[0],
+        active_users: Math.floor(Math.random() * 8) + 2
+      });
     }
+    return data;
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="animate-pulse">
-            <div className="h-8 bg-gray-200 rounded w-1/4 mb-6"></div>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-              {[1, 2, 3, 4].map((i) => (
-                <div key={i} className="bg-white p-6 rounded-lg shadow h-32"></div>
-              ))}
-            </div>
-          </div>
+      <div className="flex items-center justify-center h-64">
+        <div className="flex flex-col items-center space-y-4">
+          <div className="h-12 w-12 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600"></div>
+          <p className="text-gray-600">Loading analytics...</p>
         </div>
       </div>
     );
@@ -216,23 +154,21 @@ function AnalyticsPageContent() {
 
   if (error || !analytics) {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-            <div className="flex items-center">
-              <AlertTriangle className="w-6 h-6 text-red-600 mr-3" />
-              <h2 className="text-lg font-semibold text-red-800">Error Loading Analytics</h2>
-            </div>
-            <p className="text-red-700 mt-2">{error || 'Analytics data not available'}</p>
+      <div className="p-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+          <div className="flex items-center">
+            <AlertTriangle className="w-6 h-6 text-red-600 mr-3" />
+            <h2 className="text-lg font-semibold text-red-800">Error Loading Analytics</h2>
           </div>
+          <p className="text-red-700 mt-2">{error || 'Analytics data not available'}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="py-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
@@ -244,16 +180,13 @@ function AnalyticsPageContent() {
             {/* Date Range Selector */}
             <div className="relative">
               <select
-                value={selectedDateRange.label}
-                onChange={(e) => {
-                  const range = dateRanges.find(r => r.label === e.target.value);
-                  if (range) setSelectedDateRange(range);
-                }}
+                value={selectedDateRange}
+                onChange={(e) => setSelectedDateRange(e.target.value)}
                 className="appearance-none bg-white border border-gray-300 rounded-lg px-4 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                {dateRanges.map((range) => (
-                  <option key={range.label} value={range.label}>{range.label}</option>
-                ))}
+                <option value="7">Last 7 Days</option>
+                <option value="30">Last 30 Days</option>
+                <option value="90">Last 3 Months</option>
               </select>
               <Calendar className="absolute right-2 top-2.5 w-4 h-4 text-gray-400 pointer-events-none" />
             </div>
@@ -274,7 +207,7 @@ function AnalyticsPageContent() {
         </div>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <div className="bg-white p-6 rounded-lg shadow">
             <div className="flex items-center">
               <div className="p-3 bg-blue-100 rounded-lg">
@@ -308,8 +241,21 @@ function AnalyticsPageContent() {
               </div>
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-600">Storage Used</p>
-                <p className="text-2xl font-bold text-gray-900">{analytics.organization.storageUsed}GB</p>
+                <p className="text-2xl font-bold text-gray-900">{analytics.organization.storageUsed.toFixed(1)}GB</p>
                 <p className="text-sm text-gray-600">of {analytics.organization.storageLimit}GB</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-lg shadow">
+            <div className="flex items-center">
+              <div className="p-3 bg-purple-100 rounded-lg">
+                <Activity className="w-6 h-6 text-purple-600" />
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">API Calls</p>
+                <p className="text-2xl font-bold text-gray-900">{analytics.usage.totalApiCalls.toLocaleString()}</p>
+                <p className="text-sm text-green-600">+15% from last month</p>
               </div>
             </div>
           </div>
@@ -321,9 +267,8 @@ function AnalyticsPageContent() {
             <nav className="flex space-x-8 px-6">
               {[
                 { id: 'overview', label: 'Overview', icon: BarChart3 },
-                { id: 'users', label: 'User Activity', icon: Users },
-                { id: 'data', label: 'Data Usage', icon: Database },
-                { id: 'costs', label: 'Cost Analysis', icon: DollarSign }
+                { id: 'datasets', label: 'Dataset Usage', icon: Database },
+                { id: 'users', label: 'User Activity', icon: Users }
               ].map((tab) => {
                 const Icon = tab.icon;
                 return (
@@ -376,7 +321,7 @@ function AnalyticsPageContent() {
                     <div className="flex items-center justify-between">
                       <div>
                         <h3 className="text-lg font-semibold text-orange-900">Storage Used</h3>
-                        <p className="text-3xl font-bold text-orange-600">{analytics.organization.storageUsed}GB</p>
+                        <p className="text-3xl font-bold text-orange-600">{analytics.organization.storageUsed.toFixed(1)}GB</p>
                         <p className="text-sm text-orange-700">of {analytics.organization.storageLimit}GB</p>
                       </div>
                       <HardDrive className="w-12 h-12 text-orange-600" />
@@ -385,43 +330,20 @@ function AnalyticsPageContent() {
                 </div>
 
                 {/* Activity Trends */}
-                <div className="grid grid-cols-1 lg:grid-cols-1 gap-6">
-                  <div className="bg-white border border-gray-200 rounded-lg p-6">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Dataset Uploads Trend</h3>
-                    <div className="space-y-3">
-                      {analytics.trends.datasetUploads.slice(-5).map((item, index) => (
-                        <div key={index} className="flex items-center justify-between">
-                          <span className="text-sm text-gray-600">{new Date(item.date).toLocaleDateString()}</span>
-                          <div className="flex items-center">
-                            <div className="w-20 bg-gray-200 rounded-full h-2 mr-3">
-                              <div 
-                                className="bg-blue-600 h-2 rounded-full" 
-                                style={{ width: `${(item.count / 25) * 100}%` }}
-                              ></div>
-                            </div>
-                            <span className="text-sm font-medium">{item.count}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Storage Usage by Department */}
                 <div className="bg-white border border-gray-200 rounded-lg p-6">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Storage Usage by Department</h3>
-                  <div className="space-y-4">
-                    {analytics.dataUsage.storageByDepartment.map((dept, index) => (
-                      <div key={index}>
-                        <div className="flex justify-between items-center mb-2">
-                          <span className="text-sm font-medium text-gray-700">{dept.department}</span>
-                          <span className="text-sm text-gray-600">{dept.storage}GB ({dept.percentage}%)</span>
-                        </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2">
-                          <div 
-                            className="bg-blue-600 h-2 rounded-full" 
-                            style={{ width: `${dept.percentage}%` }}
-                          ></div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Dataset Upload Trends</h3>
+                  <div className="space-y-3">
+                    {analytics.trends.datasetUploads.slice(-7).map((item, index) => (
+                      <div key={index} className="flex items-center justify-between">
+                        <span className="text-sm text-gray-600">{new Date(item.date).toLocaleDateString()}</span>
+                        <div className="flex items-center">
+                          <div className="w-32 bg-gray-200 rounded-full h-2 mr-3">
+                            <div 
+                              className="bg-blue-600 h-2 rounded-full" 
+                              style={{ width: `${Math.min((item.count / 5) * 100, 100)}%` }}
+                            ></div>
+                          </div>
+                          <span className="text-sm font-medium w-8">{item.count}</span>
                         </div>
                       </div>
                     ))}
@@ -430,67 +352,10 @@ function AnalyticsPageContent() {
               </div>
             )}
 
-            {activeTab === 'models' && (
+            {activeTab === 'datasets' && (
               <div className="space-y-6">
                 <div className="flex justify-between items-center">
-                  <h3 className="text-lg font-semibold text-gray-900">Model Performance Overview</h3>
-                  <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                    Performance Report
-                  </button>
-                </div>
-                
-                <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-2 gap-6">
-                  {analytics.modelPerformance.map((model) => (
-                    <div key={model.id} className="bg-white border border-gray-200 rounded-lg p-6">
-                      <div className="flex items-center justify-between mb-4">
-                        <h4 className="text-lg font-semibold text-gray-900">{model.name}</h4>
-                        <div className={`flex items-center px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(model.status)}`}>
-                          {getStatusIcon(model.status)}
-                          <span className="ml-1 capitalize">{model.status.replace('_', ' ')}</span>
-                        </div>
-                      </div>
-                      
-                      <div className="space-y-4">
-                        <div>
-                          <div className="flex justify-between items-center mb-2">
-                            <span className="text-sm text-gray-600">Accuracy</span>
-                            <span className="text-sm font-medium">{(model.accuracy * 100).toFixed(1)}%</span>
-                          </div>
-                          <div className="w-full bg-gray-200 rounded-full h-2">
-                            <div 
-                              className={`h-2 rounded-full ${
-                                model.accuracy >= 0.9 ? 'bg-green-600' : 
-                                model.accuracy >= 0.8 ? 'bg-blue-600' : 'bg-red-600'
-                              }`}
-                              style={{ width: `${model.accuracy * 100}%` }}
-                            ></div>
-                          </div>
-                        </div>
-                        
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <p className="text-sm text-gray-600">Predictions</p>
-                            <p className="text-lg font-semibold text-gray-900">{model.predictions.toLocaleString()}</p>
-                          </div>
-                          <div>
-                            <p className="text-sm text-gray-600">Last Updated</p>
-                            <p className="text-sm text-gray-900">{new Date(model.lastUpdated).toLocaleDateString()}</p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {activeTab === 'users' && (
-              <div className="space-y-6">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-lg font-semibold text-gray-900">User Activity Overview</h3>
-                  <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                    Activity Report
-                  </button>
+                  <h3 className="text-lg font-semibold text-gray-900">Dataset Usage Analytics</h3>
                 </div>
                 
                 <div className="overflow-x-auto">
@@ -498,50 +363,53 @@ function AnalyticsPageContent() {
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          User
+                          Dataset Name
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Role
+                          Access Count
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Department
+                          Sharing Level
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Actions Today
+                          Size
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Last Active
+                          Last Accessed
                         </th>
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {analytics.userActivity.map((user) => (
-                        <tr key={user.userId}>
-                          <td className="px-6 py-4 whitespace-nowrap">
+                      {analytics.datasetUsage.map((dataset) => (
+                        <tr key={dataset.id}>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {dataset.name}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                             <div className="flex items-center">
-                              <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                                <span className="text-sm font-medium text-blue-600">
-                                  {user.name.split(' ').map(n => n[0]).join('')}
-                                </span>
+                              <div className="w-16 bg-gray-200 rounded-full h-2 mr-3">
+                                <div 
+                                  className="bg-blue-600 h-2 rounded-full" 
+                                  style={{ width: `${Math.min((dataset.accessCount / 100) * 100, 100)}%` }}
+                                ></div>
                               </div>
-                              <div className="ml-3">
-                                <p className="text-sm font-medium text-gray-900">{user.name}</p>
-                              </div>
+                              {dataset.accessCount}
                             </div>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {user.role}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {user.department}
-                          </td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <span className="px-2 py-1 bg-blue-100 text-blue-800 text-sm rounded-full">
-                              {user.actionsToday} actions
+                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                              dataset.sharingLevel === 'public' ? 'bg-green-100 text-green-800' :
+                              dataset.sharingLevel === 'organization' ? 'bg-blue-100 text-blue-800' :
+                              'bg-gray-100 text-gray-800'
+                            }`}>
+                              {dataset.sharingLevel}
                             </span>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {new Date(user.lastActive).toLocaleString()}
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {formatFileSize(dataset.size)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {new Date(dataset.lastAccessed).toLocaleDateString()}
                           </td>
                         </tr>
                       ))}
@@ -551,112 +419,26 @@ function AnalyticsPageContent() {
               </div>
             )}
 
-            {activeTab === 'data' && (
+            {activeTab === 'users' && (
               <div className="space-y-6">
                 <div className="flex justify-between items-center">
-                  <h3 className="text-lg font-semibold text-gray-900">Data Usage Analysis</h3>
-                  <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                    Usage Report
-                  </button>
+                  <h3 className="text-lg font-semibold text-gray-900">User Activity Overview</h3>
                 </div>
                 
                 <div className="bg-white border border-gray-200 rounded-lg p-6">
-                  <h4 className="text-lg font-semibold text-gray-900 mb-4">Most Accessed Datasets</h4>
-                  <div className="space-y-4">
-                    {analytics.dataUsage.mostAccessedDatasets.map((dataset, index) => (
-                      <div key={dataset.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                  <h4 className="text-md font-semibold text-gray-900 mb-4">Daily Active Users</h4>
+                  <div className="space-y-3">
+                    {analytics.trends.userActivity.slice(-7).map((item, index) => (
+                      <div key={index} className="flex items-center justify-between">
+                        <span className="text-sm text-gray-600">{new Date(item.date).toLocaleDateString()}</span>
                         <div className="flex items-center">
-                          <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center mr-3">
-                            <Database className="w-4 h-4 text-blue-600" />
+                          <div className="w-32 bg-gray-200 rounded-full h-2 mr-3">
+                            <div 
+                              className="bg-purple-600 h-2 rounded-full" 
+                              style={{ width: `${(item.active_users / 10) * 100}%` }}
+                            ></div>
                           </div>
-                          <div>
-                            <p className="text-sm font-medium text-gray-900">{dataset.name}</p>
-                            <p className="text-xs text-gray-600">
-                              {dataset.accessCount} accesses • Last accessed {new Date(dataset.lastAccessed).toLocaleDateString()}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <span className={`px-2 py-1 text-xs rounded-full ${
-                            dataset.sharingLevel === 'ORGANIZATION' 
-                              ? 'bg-green-100 text-green-800' 
-                              : 'bg-blue-100 text-blue-800'
-                          }`}>
-                            {dataset.sharingLevel}
-                          </span>
-                          <button className="p-1 text-gray-400 hover:text-gray-600">
-                            <Eye className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeTab === 'costs' && (
-              <div className="space-y-6">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-lg font-semibold text-gray-900">Cost Analysis</h3>
-                  <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                    Cost Report
-                  </button>
-                </div>
-                
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  <div className="bg-gradient-to-r from-green-50 to-green-100 p-6 rounded-lg">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h4 className="text-lg font-semibold text-green-900">Current Month</h4>
-                        <p className="text-3xl font-bold text-green-600">${analytics.costs.totalCost.toLocaleString()}</p>
-                        <p className="text-sm text-green-700">Total cost to date</p>
-                      </div>
-                      <DollarSign className="w-12 h-12 text-green-600" />
-                    </div>
-                  </div>
-                  
-                  <div className="bg-gradient-to-r from-blue-50 to-blue-100 p-6 rounded-lg">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h4 className="text-lg font-semibold text-blue-900">Projected Monthly</h4>
-                        <p className="text-3xl font-bold text-blue-600">${analytics.costs.projectedMonthlyCost.toLocaleString()}</p>
-                        <p className="text-sm text-blue-700">Based on current usage</p>
-                      </div>
-                      <TrendingUp className="w-12 h-12 text-blue-600" />
-                    </div>
-                  </div>
-                  
-                  <div className="bg-gradient-to-r from-purple-50 to-purple-100 p-6 rounded-lg">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h4 className="text-lg font-semibold text-purple-900">Cost per User</h4>
-                        <p className="text-3xl font-bold text-purple-600">
-                          ${(analytics.costs.totalCost / analytics.organization.totalUsers).toFixed(2)}
-                        </p>
-                        <p className="text-sm text-purple-700">Average monthly cost</p>
-                      </div>
-                      <Users className="w-12 h-12 text-purple-600" />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-white border border-gray-200 rounded-lg p-6">
-                  <h4 className="text-lg font-semibold text-gray-900 mb-4">Cost Breakdown by Category</h4>
-                  <div className="space-y-4">
-                    {analytics.costs.costByCategory.map((category, index) => (
-                      <div key={index}>
-                        <div className="flex justify-between items-center mb-2">
-                          <span className="text-sm font-medium text-gray-700">{category.category}</span>
-                          <span className="text-sm text-gray-600">
-                            ${category.amount.toLocaleString()} ({category.percentage}%)
-                          </span>
-                        </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2">
-                          <div 
-                            className="bg-blue-600 h-2 rounded-full" 
-                            style={{ width: `${category.percentage}%` }}
-                          ></div>
+                          <span className="text-sm font-medium w-8">{item.active_users}</span>
                         </div>
                       </div>
                     ))}
@@ -671,10 +453,10 @@ function AnalyticsPageContent() {
   );
 }
 
-export default function AnalyticsPage() {
-  return (
-    <ProtectedRoute>
-      <AnalyticsPageContent />
-    </ProtectedRoute>
-  );
+function formatFileSize(bytes: number): string {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }

@@ -16,7 +16,6 @@ class User(Base):
     
     # Organization relationships
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
-    department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
     role = Column(String, default="member")  # Keep as string to avoid circular imports
     
     # Timestamps
@@ -25,5 +24,4 @@ class User(Base):
 
     # Relationships
     organization = relationship("Organization", back_populates="users")
-    department = relationship("Department", back_populates="users")
     owned_datasets = relationship("Dataset", back_populates="owner", foreign_keys="Dataset.owner_id") 

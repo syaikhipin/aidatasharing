@@ -5,7 +5,7 @@ from app.core.auth import get_password_hash
 from app.models.user import User
 from app.core.database import Base
 from app.models.config import Configuration
-from app.models.organization import Organization, Department, OrganizationType
+from app.models.organization import Organization, OrganizationType
 from app.models.dataset import (
     Dataset, DatasetAccessLog, DatasetModel, DatasetDownload,
     DatasetChatSession, ChatMessage, DatasetShareAccess,
