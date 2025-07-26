@@ -321,23 +321,63 @@ class ConnectorService:
         """Get schema information from connector source"""
         try:
             if connector.connector_type in ['mysql', 'postgresql']:
-                # Get table schema
-                schema_query = f"""
-                SELECT * FROM {connector.mindsdb_database_name}.{table_name} LIMIT 0
-                """
+                # Get table schema using DESCRIBE or INFORMATION_SCHEMA
+                if connector.connector_type == 'mysql':
+                    schema_query = f"DESCRIBE {connector.mindsdb_database_name}.{table_name}"
+                else:  # postgresql
+                    schema_query = f"""
+                    SELECT column_name, data_type 
+                    FROM {connector.mindsdb_database_name}.information_schema.columns 
+                    WHERE table_name = '{table_name}'
+                    """
+                
+                logger.info(f"🔍 Getting schema for {table_name}: {schema_query}")
                 result = self.mindsdb_service.execute_query(schema_query)
                 
-                if not result.get("error"):
+                if result.get("status") == "success" and result.get("rows"):
                     # Extract column information
                     columns = []
-                    if result.get("columns"):
-                        columns = [{"name": col, "type": "unknown"} for col in result["columns"]]
+                    rows = result["rows"]
+                    
+                    if connector.connector_type == 'mysql':
+                        # MySQL DESCRIBE format: Field, Type, Null, Key, Default, Extra
+                        for row in rows:
+                            if isinstance(row, dict) and 'Field' in row:
+                                columns.append({
+                                    "name": row.get('Field', 'unknown'),
+                                    "type": row.get('Type', 'unknown'),
+                                    "nullable": row.get('Null', 'YES') == 'YES',
+                                    "key": row.get('Key', ''),
+                                    "default": row.get('Default')
+                                })
+                    else:  # postgresql
+                        # PostgreSQL information_schema format
+                        for row in rows:
+                            if isinstance(row, dict) and 'column_name' in row:
+                                columns.append({
+                                    "name": row.get('column_name', 'unknown'),
+                                    "type": row.get('data_type', 'unknown')
+                                })
+                    
+                    # Try to get row count
+                    count_query = f"SELECT COUNT(*) as row_count FROM {connector.mindsdb_database_name}.{table_name}"
+                    count_result = self.mindsdb_service.execute_query(count_query)
+                    estimated_rows = 0
+                    
+                    if count_result.get("status") == "success" and count_result.get("rows"):
+                        count_row = count_result["rows"][0]
+                        if isinstance(count_row, dict):
+                            estimated_rows = count_row.get('row_count', 0)
                     
                     return {
                         "columns": columns,
                         "table_name": table_name,
-                        "connector_type": connector.connector_type
+                        "connector_type": connector.connector_type,
+                        "estimated_rows": estimated_rows,
+                        "database_name": connector.mindsdb_database_name
                     }
+                else:
+                    logger.warning(f"Schema query returned no results for {table_name}")
             
             return None
             

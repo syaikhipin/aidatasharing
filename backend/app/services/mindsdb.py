@@ -676,12 +676,14 @@ class MindsDBService:
             return {"success": False, "error": f"CSV processing failed: {str(e)}"}
 
     def chat_with_dataset(self, dataset_id: str, message: str, user_id: Optional[int] = None, session_id: Optional[str] = None, organization_id: Optional[int] = None) -> Dict[str, Any]:
-        """Chat with dataset using MindsDB with enhanced dataset context."""
+        """Chat with dataset using MindsDB connectors and native AI models."""
         try:
             import time
             start_time = time.time()
             
-            # Try to get dataset information from database, but handle errors gracefully
+            logger.info(f"🔍 Starting chat_with_dataset for dataset_id={dataset_id}, message='{message[:50]}...'")
+            
+            # Get dataset information from database
             dataset = None
             dataset_context = ""
             
@@ -693,237 +695,126 @@ class MindsDBService:
                 db = next(get_db())
                 dataset = db.query(Dataset).filter(Dataset.id == int(dataset_id)).first()
                 
-                if dataset:
-                    dataset_context = f"""
-                Dataset Information:
-                - Name: {dataset.name}
-                - Type: {dataset.type}
-                - Description: {dataset.description or 'No description available'}
-                - Rows: {dataset.row_count or 'Unknown'}
-                - Columns: {dataset.column_count or 'Unknown'}
-                - Size: {dataset.size_bytes or 'Unknown'} bytes
-                - Created: {dataset.created_at}
-                """
-                    
-                    # Try to load actual file content from MindsDB files
-                    try:
-                        if self._ensure_connection() and self.connection:
-                            # Try to query the file from MindsDB files database
-                            file_query = f"SELECT * FROM files.dataset_{dataset_id} LIMIT 5"
-                            logger.info(f"🔍 Trying to load dataset content from MindsDB: {file_query}")
-                            
-                            result = self.connection.query(file_query)
-                            if result and hasattr(result, 'fetch_all'):
-                                rows = result.fetch_all()
-                                if rows and len(rows) > 0:
-                                    # Convert rows to readable format
-                                    sample_data = []
-                                    for row in rows[:3]:  # Show first 3 rows
-                                        if isinstance(row, dict):
-                                            sample_data.append(str(row))
-                                        else:
-                                            sample_data.append(str(row))
-                                    
-                                    dataset_context += f"\n\nDataset Sample Data (from MindsDB):\n"
-                                    for i, row in enumerate(sample_data, 1):
-                                        dataset_context += f"Row {i}: {row}\n"
-                                    
-                                    logger.info(f"✅ Successfully loaded dataset sample from MindsDB")
-                    except Exception as file_error:
-                        logger.info(f"ℹ️ Could not load dataset from MindsDB files (this is normal): {file_error}")
-                        
-                    # Add file content context for small files using original method
-                    if dataset.source_url and dataset.type.upper() in ["CSV", "JSON", "PDF"]:
-                        try:
-                            content_result = self.process_file_content(dataset.source_url, dataset.type)
-                            if content_result.get("success"):
-                                # Include a sample of the content for context
-                                content = content_result["content"]
-                                if len(content) > 2000:  # Limit content size
-                                    content = content[:2000] + "... [content truncated]"
-                                dataset_context += f"\n\nDataset Content Sample:\n{content}"
-                                
-                                # Add metadata
-                                if content_result.get("metadata"):
-                                    metadata = content_result["metadata"]
-                                    dataset_context += f"\n\nFile Metadata: {metadata}"
-                        except Exception as e:
-                            logger.info(f"ℹ️ Could not load dataset content from source: {e}")
-                            
+                if not dataset:
+                    logger.error(f"❌ Dataset with ID {dataset_id} not found")
+                    return {
+                        "error": f"Dataset with ID {dataset_id} not found",
+                        "answer": "I couldn't find the dataset you're referring to. Please check the dataset ID.",
+                        "dataset_id": dataset_id,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+                
+                logger.info(f"🔍 Processing chat for dataset: {dataset.name} (ID: {dataset_id})")
+                
             except Exception as db_error:
-                logger.warning(f"⚠️ Could not load dataset from database: {db_error}")
-                
-            # If no dataset context was loaded, try to get sample data from MindsDB files directly
-            if not dataset_context.strip():
-                try:
-                    if self._ensure_connection() and self.connection:
-                        # Try common dataset file names
-                        possible_names = [f"dataset_{dataset_id}", f"file_{dataset_id}", f"data_{dataset_id}"]
-                        
-                        for file_name in possible_names:
-                            try:
-                                file_query = f"SELECT * FROM files.{file_name} LIMIT 3"
-                                logger.info(f"🔍 Trying MindsDB file: {file_name}")
-                                
-                                result = self.connection.query(file_query)
-                                if result and hasattr(result, 'fetch_all'):
-                                    rows = result.fetch_all()
-                                    if rows and len(rows) > 0:
-                                        dataset_context = f"""
-                Dataset Information (from MindsDB files.{file_name}):
-                - Dataset ID: {dataset_id}
-                - Organization ID: {organization_id}
-                - Rows found: {len(rows)}
-                
-                Sample Data:
-                """
-                                        for i, row in enumerate(rows, 1):
-                                            dataset_context += f"Row {i}: {str(row)}\n"
-                                        
-                                        logger.info(f"✅ Successfully loaded dataset from MindsDB file: {file_name}")
-                                        break
-                            except Exception as file_error:
-                                logger.debug(f"File {file_name} not found: {file_error}")
-                                continue
-                                
-                except Exception as e:
-                    logger.info(f"ℹ️ Could not load dataset from MindsDB files: {e}")
+                logger.error(f"❌ Could not load dataset from database: {db_error}")
+                return {
+                    "error": f"Database error: {str(db_error)}",
+                    "answer": "I encountered a database error while trying to access the dataset.",
+                    "dataset_id": dataset_id,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
             
-            # Final fallback - create basic context
-            if not dataset_context.strip():
-                dataset_context = f"""
-                Dataset Information:
-                - Dataset ID: {dataset_id}
-                - Organization ID: {organization_id}
-                - Note: Dataset details could not be loaded, but I'm ready to help with analysis
-                - Suggestion: Please provide dataset information or upload the file to MindsDB for better analysis
-                """
+            # Ensure MindsDB connection
+            logger.info("🔗 Checking MindsDB connection...")
+            if not self._ensure_connection():
+                logger.error("❌ MindsDB connection failed")
+                return {
+                    "error": "MindsDB connection failed",
+                    "answer": "I couldn't connect to MindsDB to process your request. Please try again later.",
+                    "dataset_id": dataset_id,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
             
-            # Enhanced prompt with actual dataset context
+            logger.info("✅ MindsDB connection established")
+            
+            # For now, use a simpler approach - just use the general chat with dataset context
+            # Build dataset context
+            dataset_context = f"""
+            Dataset Information:
+            - Name: {dataset.name}
+            - Type: {dataset.type}
+            - Description: {dataset.description or 'No description available'}
+            - Rows: {dataset.row_count or 'Unknown'}
+            - Columns: {dataset.column_count or 'Unknown'}
+            - Created: {dataset.created_at}
+            """
+            
+            # Try to get sample data if available
+            try:
+                if dataset.connector_id and dataset.mindsdb_database and dataset.mindsdb_table_name:
+                    # Query database connector
+                    sample_query = f"SELECT * FROM {dataset.mindsdb_database}.{dataset.mindsdb_table_name} LIMIT 3"
+                    logger.info(f"📊 Querying database connector: {sample_query}")
+                    result = self.connection.query(sample_query)
+                    if result and hasattr(result, 'fetch'):
+                        df = result.fetch()
+                        if not df.empty:
+                            dataset_context += f"\n\nSample Data:\nColumns: {list(df.columns)}\n"
+                            for i, (idx, row) in enumerate(df.iterrows(), 1):
+                                dataset_context += f"Row {i}: {dict(row)}\n"
+                            logger.info(f"✅ Successfully loaded {len(df)} sample rows from database connector")
+                else:
+                    # Try file dataset
+                    sample_query = f"SELECT * FROM files.dataset_{dataset_id} LIMIT 3"
+                    logger.info(f"📁 Querying file dataset: {sample_query}")
+                    result = self.connection.query(sample_query)
+                    if result and hasattr(result, 'fetch'):
+                        df = result.fetch()
+                        if not df.empty:
+                            dataset_context += f"\n\nSample Data:\nColumns: {list(df.columns)}\n"
+                            for i, (idx, row) in enumerate(df.iterrows(), 1):
+                                dataset_context += f"Row {i}: {dict(row)}\n"
+                            logger.info(f"✅ Successfully loaded {len(df)} sample rows from file dataset")
+            except Exception as data_error:
+                logger.warning(f"ℹ️ Could not load sample data: {data_error}")
+            
+            # Use general chat with enhanced context
             enhanced_message = f"""
-            You are analyzing a specific dataset. Here is the detailed information about this dataset:
+            You are analyzing a specific dataset. Here is the information about this dataset:
             
             {dataset_context}
             
             User Question: {message}
             
-            Instructions:
-            1. Use the actual dataset information provided above to answer questions
-            2. Reference specific data points, column names, and values when available
-            3. If the user asks about data that isn't visible in the sample, explain what you can see and suggest what analysis might be helpful
-            4. Be specific and analytical, using the actual dataset structure and content
-            5. If performing calculations, use the actual data shown
-            6. Mention specific values, patterns, or insights from the actual dataset content
-            
-            Please provide a detailed, data-driven response based on this specific dataset.
+            Please provide a detailed, data-driven response based on this dataset information. Be specific about what you can see in the dataset and provide insights based on the actual data structure and content shown above.
             """
             
-            logger.info(f"💬 Enhanced dataset chat for dataset {dataset_id} with content context using MindsDB")
+            logger.info(f"💬 Using general chat model: {self.chat_model_name}")
             
-            # Use the working gemini_chat_assistant model instead of creating dataset-specific models
-            dataset_model_name = "gemini_chat_assistant"
-            logger.info(f"💬 Using existing working model: {dataset_model_name}")
+            # Use existing general chat model
+            result = self.ai_chat(enhanced_message, model_name=self.chat_model_name)
             
-            # Default response in case of errors
-            default_response = {
-                "answer": "I'm sorry, but I couldn't process your question due to a technical issue with MindsDB.",
-                "dataset_id": dataset_id,
-                "dataset_name": dataset.name if dataset else "Unknown",
-                "model": "Dataset Content Analyzer (MindsDB)",
-                "source": "mindsdb_dataset_chat",
-                "has_content_context": bool(dataset_context),
-                "response_time_seconds": 0,
-                "timestamp": datetime.utcnow().isoformat(),
-                "user_id": user_id,
-                "session_id": session_id,
-                "organization_id": organization_id or (dataset.organization_id if dataset else None)
-            }
-            
-            # Use MindsDB for dataset chat
-            try:
-                # Query the model directly using the working ai_chat method
-                result = self.ai_chat(enhanced_message, model_name=dataset_model_name)
-                
-                # Calculate response time
+            if result and isinstance(result, dict) and result.get("answer"):
                 response_time = time.time() - start_time
+                result.update({
+                    "dataset_id": dataset_id,
+                    "dataset_name": dataset.name,
+                    "model": f"enhanced_{self.chat_model_name}",
+                    "source": "mindsdb_enhanced_chat",
+                    "response_time_seconds": response_time,
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "organization_id": organization_id or dataset.organization_id
+                })
                 
-                # Check if result is None or not a dictionary
-                if result is None or not isinstance(result, dict):
-                    logger.error("❌ Enhanced dataset chat failed: result is None or not a dictionary")
-                    default_response["error"] = "Chat failed: Invalid response from MindsDB"
-                    return default_response
-                
-                # Create a safe copy of the result to avoid modifying None
-                safe_result = dict(result) if result else {}
-                
-                # Add dataset context to the response
-                safe_result["dataset_id"] = dataset_id
-                safe_result["dataset_name"] = dataset.name if dataset else "Unknown"
-                safe_result["model"] = f"Dataset Content Analyzer (MindsDB)"
-                safe_result["source"] = "mindsdb_dataset_chat"
-                safe_result["has_content_context"] = bool(dataset_context)
-                safe_result["response_time_seconds"] = response_time
-                safe_result["user_id"] = user_id
-                safe_result["session_id"] = session_id
-                safe_result["organization_id"] = organization_id or (dataset.organization_id if dataset else None)
-                
-                # Use the safe result from now on
-                result = safe_result
-                
-                # Ensure there's always an answer field
-                if "error" in result and not "answer" in result:
-                    result["answer"] = f"I'm sorry, but I encountered an error: {result['error']}"
-                
-                # Log chat interaction synchronously to avoid async issues
-                try:
-                    from app.services.analytics import analytics_service
-                    
-                    # Ensure all parameters are properly set
-                    log_params = {
-                        "dataset_id": int(dataset_id) if dataset_id else 0,
-                        "user_message": str(message) if message else "",
-                        "ai_response": str(result.get("answer", "")) if result.get("answer") else "",
-                        "user_id": int(user_id) if user_id else None,
-                        "session_id": str(session_id) if session_id else None,
-                        "llm_provider": "gemini",
-                        "llm_model": str(self.chat_model_name) if self.chat_model_name else "unknown",
-                        "response_time_seconds": float(response_time) if response_time else 0.0,
-                        "organization_id": int(organization_id or (dataset.organization_id if dataset else 0)),
-                        "success": bool(result.get("answer")) if result else False
-                    }
-                    
-                    # Try to log synchronously first, if that fails, skip logging
-                    try:
-                        # Check if we're in an async context
-                        import asyncio
-                        loop = asyncio.get_running_loop()
-                        if loop and loop.is_running():
-                            # We're in an async context, schedule the task
-                            asyncio.create_task(analytics_service.log_chat_interaction(**log_params))
-                        else:
-                            # Not in async context, log synchronously if possible
-                            logger.info(f"📊 Chat interaction logged: dataset_id={dataset_id}, success={log_params['success']}")
-                    except RuntimeError:
-                        # No event loop running, log basic info instead
-                        logger.info(f"📊 Chat interaction: dataset_id={dataset_id}, response_time={response_time:.2f}s, success={bool(result.get('answer'))}")
-                        
-                except Exception as e:
-                    logger.debug(f"Could not log chat interaction: {e}")
-                
+                logger.info(f"✅ Successfully processed dataset chat in {response_time:.2f}s")
                 return result
-                
-            except Exception as e:
-                logger.error(f"❌ Enhanced dataset chat failed: {e}")
-                default_response["error"] = f"Chat failed: {str(e)}"
-                return default_response
+            else:
+                logger.error("❌ AI chat returned no valid response")
+                return {
+                    "error": "AI chat failed",
+                    "answer": "I'm sorry, but I couldn't process your question at this time. Please try again.",
+                    "dataset_id": dataset_id,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
                 
         except Exception as e:
-            logger.error(f"❌ Enhanced dataset chat failed: {e}")
+            logger.error(f"❌ Dataset chat failed: {e}")
             return {
                 "error": f"Dataset chat failed: {str(e)}",
-                "answer": "I'm sorry, but I couldn't process your question due to a technical issue.",
+                "answer": "I'm sorry, but I encountered an error while processing your question.",
                 "dataset_id": dataset_id,
-                "message": message,
                 "timestamp": datetime.utcnow().isoformat()
             }
 
@@ -1112,6 +1003,10 @@ class MindsDBService:
                 "database_name": db_name
             }
     
+    def execute_query(self, query: str, connection_params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Execute a query - alias for execute_sql for compatibility."""
+        return self.execute_sql(query)
+
     def execute_sql(self, query: str) -> Dict[str, Any]:
         """Execute a custom SQL query."""
         try:

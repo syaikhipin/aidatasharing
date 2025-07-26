@@ -1,4 +1,16 @@
 {
+  "permanent_storage": {
+    "location": "local"
+  },
+  "paths": {
+    "root": "/Users/syaikhipin/Documents/program/simpleaisharing/storage/mindsdb",
+    "content": "/Users/syaikhipin/Documents/program/simpleaisharing/storage/mindsdb/content",
+    "storage": "/Users/syaikhipin/Documents/program/simpleaisharing/storage/mindsdb/storage",
+    "static": "/Users/syaikhipin/Documents/program/simpleaisharing/storage/mindsdb/static",
+    "tmp": "/Users/syaikhipin/Documents/program/simpleaisharing/storage/mindsdb/tmp",
+    "cache": "/Users/syaikhipin/Documents/program/simpleaisharing/storage/mindsdb/cache",
+    "locks": "/Users/syaikhipin/Documents/program/simpleaisharing/storage/mindsdb/locks"
+  },
   "api": {
     "http": {
       "host": "127.0.0.1",
@@ -9,6 +21,14 @@
     "level": {
       "console": "INFO"
     }
+  },
+  "cache": {
+    "type": "local"
+  },
+  "url_file_upload": {
+    "enabled": true,
+    "allowed_origins": [],
+    "disallowed_origins": []
   },
   "storage_dir": "/Users/syaikhipin/Documents/program/simpleaisharing/storage/mindsdb"
 }

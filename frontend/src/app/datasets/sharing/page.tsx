@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { 
   Share2, 
-  Eye, 
   Users, 
   Globe, 
   Lock, 
@@ -16,11 +15,9 @@ import {
   Database,
   Shield,
   Link as LinkIcon,
-  BarChart3,
   TestTube,
   Zap,
-  RefreshCw,
-  Clock
+  RefreshCw
 } from 'lucide-react';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
@@ -448,6 +445,41 @@ function UnifiedSharingContent() {
     }
   };
 
+  const handleCreateDatasetFromConnector = async (connectorId: number) => {
+    const connector = simplifiedConnectors.find(c => c.id === connectorId);
+    if (!connector) return;
+
+    const datasetName = prompt(`Create dataset from ${connector.name}:`, `${connector.name} Dataset`);
+    if (!datasetName) return;
+
+    let tableName = "default_table";
+    if (connector.connector_type === 'mysql' || connector.connector_type === 'postgresql') {
+      tableName = prompt(`Enter table name for ${connector.connector_type} database:`, "");
+      if (!tableName) {
+        showToast("Error", "Table name is required for database connections");
+        return;
+      }
+    }
+
+    try {
+      setCreating(true);
+      const result = await dataConnectorsAPI.createDatasetFromConnector(connectorId, {
+        dataset_name: datasetName,
+        description: `Dataset created from ${connector.name} connector`,
+        table_or_endpoint: tableName,
+        sharing_level: 'private'
+      });
+      
+      showToast("Success", `Dataset "${datasetName}" created successfully! You can now chat with this data.`);
+      fetchAllData(); // Refresh to show new dataset
+    } catch (error: any) {
+      console.error('Dataset creation failed:', error);
+      showToast("Error", `Failed to create dataset: ${error.response?.data?.detail || error.message}`);
+    } finally {
+      setCreating(false);
+    }
+  };
+
   const handleSyncWithMindsDB = async (connectorId: number) => {
     setSyncing(prev => ({ ...prev, [connectorId]: true }));
     
@@ -512,21 +544,23 @@ function UnifiedSharingContent() {
     if (!proxyConnector) return '';
     
     const baseUrl = window.location.origin;
-    const proxyHost = `${baseUrl}/proxy/${proxyConnector.proxy_id}`;
+    const proxyHost = baseUrl.replace(/:\d+$/, ':8000'); // Use backend port 8000
+    const proxyEndpoint = `${proxyHost}/proxy/${proxyConnector.proxy_id}`;
+    const encodedDatasetName = encodeURIComponent(dataset.name);
     
     switch (dataset.type.toLowerCase()) {
       case 'mysql':
-        return `mysql://proxy_user:${dataset.share_token}@${proxyHost}:3306/${dataset.name}`;
+        return `mysql://proxy_user:${dataset.share_token}@${proxyHost.replace(/^https?:\/\//, '')}:8000/${encodedDatasetName}`;
       case 'postgresql':
-        return `postgresql://proxy_user:${dataset.share_token}@${proxyHost}:5432/${dataset.name}`;
+        return `postgresql://proxy_user:${dataset.share_token}@${proxyHost.replace(/^https?:\/\//, '')}:8000/${encodedDatasetName}`;
       case 'clickhouse':
-        return `clickhouse://proxy_user:${dataset.share_token}@${proxyHost}:8123/${dataset.name}`;
+        return `clickhouse://proxy_user:${dataset.share_token}@${proxyHost.replace(/^https?:\/\//, '')}:8000/${encodedDatasetName}`;
       case 's3':
-        return `s3://${proxyHost}/${dataset.name}?access_key=proxy_user&secret_key=${dataset.share_token}`;
+        return `s3://${proxyEndpoint}/${encodedDatasetName}?access_key=proxy_user&secret_key=${dataset.share_token}`;
       case 'mongodb':
-        return `mongodb://proxy_user:${dataset.share_token}@${proxyHost}:27017/${dataset.name}`;
+        return `mongodb://proxy_user:${dataset.share_token}@${proxyHost.replace(/^https?:\/\//, '')}:8000/${encodedDatasetName}`;
       default:
-        return `${proxyHost}?token=${dataset.share_token}`;
+        return `${proxyEndpoint}?token=${dataset.share_token}`;
     }
   };
 
@@ -625,7 +659,7 @@ function UnifiedSharingContent() {
 
         {/* Stats Overview */}
         <div className="bg-white rounded-lg shadow p-4 mb-6">
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="text-center">
               <div className="flex items-center justify-center mb-1">
                 <Lock className="h-5 w-5 text-gray-600 mr-1" />
@@ -646,20 +680,6 @@ function UnifiedSharingContent() {
                 <span className="text-sm font-medium text-gray-500">Public</span>
               </div>
               <div className="text-xl font-bold text-gray-900">{getStatsForLevel('public')}</div>
-            </div>
-            <div className="text-center">
-              <div className="flex items-center justify-center mb-1">
-                <Share2 className="h-5 w-5 text-purple-600 mr-1" />
-                <span className="text-sm font-medium text-gray-500">Active Shares</span>
-              </div>
-              <div className="text-xl font-bold text-gray-900">{getSharedDatasets().length}</div>
-            </div>
-            <div className="text-center">
-              <div className="flex items-center justify-center mb-1">
-                <Shield className="h-5 w-5 text-orange-600 mr-1" />
-                <span className="text-sm font-medium text-gray-500">Proxies</span>
-              </div>
-              <div className="text-xl font-bold text-gray-900">{proxyConnectors.length}</div>
             </div>
             <div className="text-center">
               <div className="flex items-center justify-center mb-1">
@@ -684,28 +704,6 @@ function UnifiedSharingContent() {
             >
               <Share2 className="w-4 h-4 inline mr-1" />
               Dataset Sharing ({datasets.length})
-            </button>
-            <button
-              onClick={() => handleTabChange('proxies')}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'proxies'
-                  ? 'border-orange-500 text-orange-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              <Shield className="w-4 h-4 inline mr-1" />
-              Secure Proxies ({proxyConnectors.length})
-            </button>
-            <button
-              onClick={() => handleTabChange('links')}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'links'
-                  ? 'border-green-500 text-green-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              <LinkIcon className="w-4 h-4 inline mr-1" />
-              Shared Links ({sharedLinks.length})
             </button>
             <button
               onClick={() => handleTabChange('connectors')}
@@ -877,237 +875,6 @@ function UnifiedSharingContent() {
           </div>
         )}
 
-        {activeTab === 'proxies' && (
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <div>
-                <h3 className="text-lg font-medium text-gray-900">Secure Proxy Connectors</h3>
-                <p className="text-sm text-gray-600 mt-1">Create secure proxies that hide real URLs and credentials from users</p>
-              </div>
-              <button
-                onClick={() => setShowCreateProxy(true)}
-                className="inline-flex items-center px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                Create Proxy
-              </button>
-            </div>
-
-            {proxyConnectors.length === 0 ? (
-              <div className="bg-white rounded-lg p-12 text-center">
-                <Shield className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No proxy connectors yet</h3>
-                <p className="text-gray-600 mb-6">
-                  Create your first secure proxy to hide connection details from users
-                </p>
-                <button
-                  onClick={() => setShowCreateProxy(true)}
-                  className="inline-flex items-center px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
-                >
-                  <Plus className="w-4 h-4 mr-2" />
-                  Create Your First Proxy
-                </button>
-              </div>
-            ) : (
-              <div className="grid gap-4">
-                {proxyConnectors.map((proxy) => (
-                  <div key={proxy.id} className="bg-white border border-gray-200 rounded-lg p-6">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-start space-x-4">
-                        <div className="flex-shrink-0 text-orange-600">
-                          {getConnectorIcon(proxy.connector_type)}
-                        </div>
-                        <div className="flex-1">
-                          <h3 className="text-lg font-medium text-gray-900">{proxy.name}</h3>
-                          <p className="text-sm text-gray-600 mt-1">{proxy.description}</p>
-                          
-                          <div className="flex items-center space-x-4 mt-3">
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800 capitalize">
-                              {proxy.connector_type}
-                            </span>
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                              proxy.is_public 
-                                ? 'bg-green-100 text-green-800' 
-                                : 'bg-gray-100 text-gray-800'
-                            }`}>
-                              {proxy.is_public ? 'Public' : 'Private'}
-                            </span>
-                            <span className="text-xs text-gray-500">
-                              {proxy.total_requests} requests
-                            </span>
-                            <span className="text-xs text-gray-500">
-                              Created {formatDate(proxy.created_at)}
-                            </span>
-                          </div>
-
-                          <div className="mt-3">
-                            <div className="flex items-center space-x-2">
-                              <code className="text-sm bg-gray-100 px-2 py-1 rounded">
-                                {proxy.proxy_url}
-                              </code>
-                              <button
-                                onClick={() => copyToClipboard(proxy.proxy_url)}
-                                className="text-gray-400 hover:text-gray-600"
-                              >
-                                <Copy className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </div>
-
-                          <div className="mt-2">
-                            <span className="text-xs text-gray-500">Allowed operations: </span>
-                            <span className="text-xs text-gray-700">
-                              {proxy.allowed_operations.join(', ')}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center space-x-2">
-                        <button
-                          onClick={() => {
-                            setSelectedProxyForLink(proxy);
-                            setShowCreateLink(true);
-                          }}
-                          className="inline-flex items-center px-3 py-2 border border-green-300 rounded-md text-sm font-medium text-green-700 bg-green-50 hover:bg-green-100"
-                        >
-                          <Share2 className="w-4 h-4 mr-1" />
-                          Share
-                        </button>
-                        
-                        <button className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">
-                          <BarChart3 className="w-4 h-4 mr-1" />
-                          Analytics
-                        </button>
-                        
-                        <button className="inline-flex items-center px-3 py-2 border border-red-300 rounded-md text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {activeTab === 'links' && (
-          <div className="space-y-4">
-            <div>
-              <h3 className="text-lg font-medium text-gray-900">Shared Links</h3>
-              <p className="text-sm text-gray-600 mt-1">Manage shared links for secure access to your proxy connectors</p>
-            </div>
-
-            {sharedLinks.length === 0 ? (
-              <div className="bg-white rounded-lg p-12 text-center">
-                <Share2 className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No shared links yet</h3>
-                <p className="text-gray-600 mb-6">
-                  Create shared links to give others secure access to your proxy connectors
-                </p>
-                {proxyConnectors.length > 0 ? (
-                  <p className="text-sm text-gray-500">
-                    Go to the Secure Proxies tab and click "Share" on a proxy connector to create a shared link
-                  </p>
-                ) : (
-                  <p className="text-sm text-gray-500">
-                    Create a proxy connector first, then you can share it
-                  </p>
-                )}
-              </div>
-            ) : (
-              <div className="grid gap-4">
-                {sharedLinks.map((link) => (
-                  <div key={link.id} className="bg-white border border-gray-200 rounded-lg p-6">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-2">
-                          <h3 className="text-lg font-medium text-gray-900">{link.name}</h3>
-                          {isExpired(link.expires_at) && (
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                              Expired
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-sm text-gray-600 mt-1">{link.description}</p>
-                        
-                        <div className="flex items-center space-x-4 mt-3">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            link.is_public 
-                              ? 'bg-green-100 text-green-800' 
-                              : 'bg-blue-100 text-blue-800'
-                          }`}>
-                            {link.is_public ? (
-                              <>
-                                <Globe className="w-3 h-3 mr-1" />
-                                Public
-                              </>
-                            ) : (
-                              <>
-                                <Users className="w-3 h-3 mr-1" />
-                                Private
-                              </>
-                            )}
-                          </span>
-                          
-                          {link.requires_authentication && (
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                              Auth Required
-                            </span>
-                          )}
-                          
-                          <span className="text-xs text-gray-500">
-                            {link.current_uses} / {link.max_uses || '∞'} uses
-                          </span>
-                          
-                          {link.expires_at && (
-                            <span className="text-xs text-gray-500 flex items-center">
-                              <Clock className="w-3 h-3 mr-1" />
-                              Expires {formatDate(link.expires_at)}
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="mt-3">
-                          <div className="flex items-center space-x-2">
-                            <code className="text-sm bg-gray-100 px-2 py-1 rounded">
-                              {typeof window !== 'undefined' ? window.location.origin : ''}{link.public_url}
-                            </code>
-                            <button
-                              onClick={() => copyToClipboard(`${typeof window !== 'undefined' ? window.location.origin : ''}${link.public_url}`)}
-                              className="text-gray-400 hover:text-gray-600"
-                            >
-                              <Copy className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => window.open(`${typeof window !== 'undefined' ? window.location.origin : ''}${link.public_url}`, '_blank')}
-                              className="text-gray-400 hover:text-gray-600"
-                            >
-                              <ExternalLink className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center space-x-2">
-                        <button className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">
-                          <Eye className="w-4 h-4 mr-1" />
-                          View
-                        </button>
-                        
-                        <button className="inline-flex items-center px-3 py-2 border border-red-300 rounded-md text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
         {activeTab === 'connectors' && (
           <div className="space-y-4">
             <div className="flex justify-between items-center">
@@ -1172,6 +939,21 @@ function UnifiedSharingContent() {
                       </div>
                       
                       <div className="flex items-center space-x-2">
+                        {connector.test_status === 'success' && (
+                          <button
+                            onClick={() => handleCreateDatasetFromConnector(connector.id)}
+                            disabled={creating}
+                            className="inline-flex items-center px-3 py-2 border border-green-300 rounded-md text-sm font-medium text-green-700 bg-green-50 hover:bg-green-100 disabled:opacity-50"
+                          >
+                            {creating ? (
+                              <RefreshCw className="w-4 h-4 animate-spin mr-1" />
+                            ) : (
+                              <Plus className="w-4 h-4 mr-1" />
+                            )}
+                            Add to Dataset
+                          </button>
+                        )}
+                        
                         <button
                           onClick={() => handleSyncWithMindsDB(connector.id)}
                           disabled={syncing[connector.id]}

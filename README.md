@@ -58,11 +58,17 @@ python setup_fresh_install.py
 - **Data Quality**: Automated data quality assessment
 - **User Activity**: Detailed user activity logs
 
+### ⚙️ Environment Management
+- **Unified Configuration**: Single .env file managed from admin panel
+- **Category-based Settings**: Organized environment variables
+- **Real-time Updates**: Update configuration without restart
+- **Security**: Masked sensitive values
+
 ## 🏗️ Architecture
 
 ### Backend (FastAPI)
 - **FastAPI**: Modern, fast web framework
-- **SQLAlchemy**: Advanced ORM with SQLite/PostgreSQL support
+- **SQLAlchemy**: Advanced ORM with SQLite support
 - **Pydantic**: Data validation and serialization
 - **JWT Authentication**: Secure token-based authentication
 - **Background Tasks**: Async processing for large operations
@@ -75,10 +81,10 @@ python setup_fresh_install.py
 - **Real-time Updates**: Live data synchronization
 
 ### Database
-- **Development**: SQLite for fast local development
-- **Production**: PostgreSQL for scalable production
-- **Unified Schema**: Single database for all data
+- **Unified Database**: Single SQLite database for all data
+- **Future Flexibility**: Easily switchable to PostgreSQL or other databases
 - **Migration System**: Automated schema updates
+- **Data Isolation**: Organization-scoped data security
 
 ## 📁 Project Structure
 
@@ -99,14 +105,11 @@ simpleaisharing/
 │   │   └── lib/          # Utilities
 │   └── package.json      # Node.js dependencies
 ├── storage/               # Data storage
-│   ├── aishare_platform.db # Unified database
+│   ├── aishare_platform.db # Unified SQLite database
 │   ├── uploads/          # File uploads
-│   ├── documents/        # Document processing
-│   └── logs/            # Application logs
-├── tests/                # Test files
-├── docs/                 # Documentation
+│   └── documents/        # Document processing
 ├── migrations/           # Database migrations
-├── .env                 # Environment configuration
+├── .env                 # Unified environment configuration
 └── README.md           # This file
 ```
 
@@ -138,9 +141,6 @@ python setup_fresh_install.py
 # Stop development environment
 ./stop-dev.sh
 
-# Run tests
-cd tests && python run_all_tests.py
-
 # Backend only
 cd backend && python start.py
 
@@ -149,42 +149,41 @@ cd frontend && npm run dev
 ```
 
 ### Environment Configuration
-Copy `.env.example` to `.env` and update with your configuration:
 
-```bash
-# Database
-DATABASE_URL=sqlite:///./storage/aishare_platform.db
+The platform uses a unified `.env` file for all configuration. You can manage environment variables through:
 
-# Google AI API Key
-GOOGLE_API_KEY=your-google-api-key-here
+1. **Admin Panel**: Use the Environment Settings in the admin panel (recommended)
+2. **Direct Edit**: Edit the `.env` file directly
 
-# MindsDB Configuration
-MINDSDB_URL=http://127.0.0.1:47334
+Key configuration categories:
+- **Database**: SQLite database configuration
+- **Security**: JWT and authentication settings
+- **API**: Google AI and external API keys
+- **AI Models**: Gemini and MindsDB configuration
+- **Data Sharing**: Sharing and collaboration settings
+- **File Upload**: Upload limits and file types
+- **Connectors**: Data connector settings
+- **AWS**: S3 and cloud service configuration
 
-# Security
-SECRET_KEY=your-secret-key-here
-```
+## 🔧 Configuration
 
-## 📚 Documentation
+### Environment Variables
+All environment variables are managed through the unified `.env` file and can be configured via the admin panel:
 
-- **[Project Structure](docs/PROJECT_STRUCTURE.md)** - Detailed project organization
-- **[Enhanced Dataset Management](docs/ENHANCED_DATASET_MANAGEMENT.md)** - Feature documentation
-- **[Implementation Summary](docs/IMPLEMENTATION_SUMMARY.md)** - Technical implementation details
-- **[Migration Summary](docs/MIGRATION_SUMMARY.md)** - Database migration information
+- **DATABASE_URL**: SQLite database path (unified storage)
+- **GOOGLE_API_KEY**: Google AI API key for Gemini integration
+- **MINDSDB_URL**: MindsDB server URL
+- **SECRET_KEY**: JWT signing secret
+- **MAX_FILE_SIZE_MB**: Maximum file upload size
+- **ALLOWED_FILE_TYPES**: Supported file formats
 
-## 🧪 Testing
-
-### Run All Tests
-```bash
-cd tests
-python run_all_tests.py
-```
-
-### Test Categories
-- **Backend Tests**: API endpoint testing
-- **Frontend Tests**: Component and integration testing
-- **Document Processing**: Document upload and processing tests
-- **Integration Tests**: End-to-end workflow testing
+### Admin Panel Management
+Access environment settings through:
+1. Login as admin (admin@aishare.com / admin123)
+2. Go to Admin Panel
+3. Click "Environment Settings"
+4. Edit variables by category
+5. Changes take effect immediately
 
 ## 🚀 Deployment
 
@@ -195,10 +194,10 @@ python run_all_tests.py
 ```
 
 ### Production Deployment
-1. Update `.env` with production configuration
+1. Update `.env` with production configuration via admin panel
 2. Set `NODE_ENV=production`
-3. Configure PostgreSQL database
-4. Set up cloud storage (S3)
+3. Configure external database if needed (PostgreSQL)
+4. Set up cloud storage (S3) if required
 5. Configure reverse proxy (nginx)
 6. Set up SSL certificates
 
@@ -207,22 +206,6 @@ python run_all_tests.py
 # Build and run with Docker
 docker-compose up -d
 ```
-
-## 🔧 Configuration
-
-### Environment Variables
-- **DATABASE_URL**: Database connection string
-- **GOOGLE_API_KEY**: Google AI API key for Gemini integration
-- **MINDSDB_URL**: MindsDB server URL
-- **SECRET_KEY**: JWT signing secret
-- **AWS_ACCESS_KEY_ID**: AWS credentials for S3
-- **MAX_FILE_SIZE_MB**: Maximum file upload size
-
-### Feature Flags
-- **ENABLE_DATA_SHARING**: Enable/disable data sharing features
-- **ENABLE_AI_CHAT**: Enable/disable AI chat functionality
-- **ENABLE_S3_CONNECTOR**: Enable/disable S3 integration
-- **ENABLE_DATABASE_CONNECTORS**: Enable/disable database connectors
 
 ## 🤝 Contributing
 
@@ -246,7 +229,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🆘 Support
 
 ### Getting Help
-- **Documentation**: Check the `docs/` directory
 - **Issues**: Create an issue on GitHub
 - **Discussions**: Use GitHub Discussions for questions
 
@@ -254,7 +236,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Database Connection**: Ensure SQLite file permissions are correct
 - **Port Conflicts**: Check if ports 3000/8000 are available
 - **Dependencies**: Run `pip install -r backend/requirements.txt`
-- **Environment**: Verify `.env` file configuration
+- **Environment**: Use admin panel to configure environment variables
 
 ## 🎯 Roadmap
 
@@ -264,6 +246,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - ✅ Data connectors
 - ✅ AI chat integration
 - ✅ Secure sharing
+- ✅ Unified environment management
 
 ### Upcoming Features (v1.1)
 - 🔄 Advanced document analysis (OCR, table extraction)
@@ -283,4 +266,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 **AI Share Platform** - Empowering organizations with intelligent data sharing and AI-driven insights.
 
-*Built with ❤️ using FastAPI, Next.js, and modern AI technologies.*
+*Built with ❤️ using FastAPI, Next.js, SQLite, and modern AI technologies.*

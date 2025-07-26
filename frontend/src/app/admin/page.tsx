@@ -35,6 +35,8 @@ function AdminContent() {
   const [loading, setLoading] = useState(true);
   const [configurations, setConfigurations] = useState<any[]>([]);
   const [googleApiKeyStatus, setGoogleApiKeyStatus] = useState<any>(null);
+  const [environmentVariables, setEnvironmentVariables] = useState<any>(null);
+  const [showEnvironmentModal, setShowEnvironmentModal] = useState(false);
 
   useEffect(() => {
     fetchAdminData();
@@ -63,6 +65,15 @@ function AdminContent() {
       } catch (error) {
         console.error('Failed to fetch Google API key status:', error);
         setGoogleApiKeyStatus({ configured: false });
+      }
+
+      // Fetch environment variables
+      try {
+        const envVars = await adminAPI.getEnvironmentVariables();
+        setEnvironmentVariables(envVars);
+      } catch (error) {
+        console.error('Failed to fetch environment variables:', error);
+        setEnvironmentVariables(null);
       }
 
       // Fetch admin stats
@@ -282,14 +293,14 @@ function AdminContent() {
             </CardContent>
           </Card>
 
-          {/* System Configuration */}
+          {/* System Configuration - Unified */}
           <Card variant="elevated">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle>System Configuration</CardTitle>
                   <CardDescription>
-                    Manage system settings and API keys
+                    Manage system settings, API keys, and environment variables
                   </CardDescription>
                 </div>
                 <Button variant="outline" size="sm" onClick={handleCreateConfiguration}>
@@ -299,7 +310,7 @@ function AdminContent() {
               </div>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
+              <div className="space-y-6">
                 {/* Google API Key Status */}
                 <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div>
@@ -317,11 +328,23 @@ function AdminContent() {
                   </Button>
                 </div>
 
+                {/* Environment Variables Toggle */}
+                <div className="border-t pt-4">
+                  <Button
+                    variant="outline"
+                    className="w-full justify-start"
+                    onClick={() => setShowEnvironmentModal(!showEnvironmentModal)}
+                  >
+                    <span className="mr-2">⚙️</span>
+                    {showEnvironmentModal ? 'Hide' : 'Show'} Environment Variables
+                  </Button>
+                </div>
+
                 {/* Configuration List */}
                 {configurations.length > 0 ? (
-                  <div className="space-y-2">
-                    <h4 className="font-medium text-gray-900">Configurations</h4>
-                    {configurations.slice(0, 5).map((config, index) => (
+                  <div className="space-y-2 border-t pt-4">
+                    <h4 className="font-medium text-gray-900">System Configurations</h4>
+                    {configurations.slice(0, 4).map((config, index) => (
                       <div key={index} className="flex items-center justify-between p-2 border border-gray-200 rounded">
                         <div>
                           <p className="text-sm font-medium text-gray-900">{config.key}</p>
@@ -332,14 +355,14 @@ function AdminContent() {
                         </span>
                       </div>
                     ))}
-                    {configurations.length > 5 && (
+                    {configurations.length > 4 && (
                       <p className="text-xs text-gray-500">
-                        +{configurations.length - 5} more configurations
+                        +{configurations.length - 4} more configurations
                       </p>
                     )}
                   </div>
                 ) : (
-                  <div className="text-center py-4">
+                  <div className="text-center py-4 border-t">
                     <p className="text-sm text-gray-600">No configurations found</p>
                     <Button variant="outline" size="sm" className="mt-2" onClick={handleCreateConfiguration}>
                       Create First Configuration
@@ -350,6 +373,32 @@ function AdminContent() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Environment Variables Section - Expandable */}
+        {showEnvironmentModal && environmentVariables && (
+          <Card variant="elevated" className="mt-8">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Environment Variables</CardTitle>
+                  <CardDescription>
+                    Manage system environment variables by category
+                  </CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => setShowEnvironmentModal(false)}>
+                  <span className="mr-1">✕</span>
+                  Hide
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <EnvironmentVariablesSection 
+                environmentVariables={environmentVariables}
+                onUpdate={fetchAdminData}
+              />
+            </CardContent>
+          </Card>
+        )}
 
         {/* System Status */}
         <Card variant="elevated" className="mt-8">
@@ -412,6 +461,147 @@ function AdminContent() {
             </div>
           </CardContent>
         </Card>
+      </div>
+
+      {/* Environment Management Modal */}
+      {showEnvironmentModal && (
+        <EnvironmentModal 
+          environmentVariables={environmentVariables}
+          onClose={() => setShowEnvironmentModal(false)}
+          onUpdate={fetchAdminData}
+        />
+      )}
+    </div>
+  );
+}
+
+// Environment Variables Section Component
+function EnvironmentVariablesSection({ 
+  environmentVariables, 
+  onUpdate 
+}: { 
+  environmentVariables: any; 
+  onUpdate: () => void; 
+}) {
+  const [activeCategory, setActiveCategory] = useState('api');
+  const [editingVar, setEditingVar] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleSaveVariable = async (key: string, value: string) => {
+    try {
+      setSaving(true);
+      await adminAPI.updateEnvironmentVariables([{ key, value }]);
+      setEditingVar(null);
+      setEditValue('');
+      onUpdate();
+      alert('Environment variable updated successfully!');
+    } catch (error) {
+      console.error('Failed to update environment variable:', error);
+      alert('Failed to update environment variable. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const categories = environmentVariables.categories || {};
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      {/* Category Sidebar */}
+      <div className="space-y-2">
+        <h3 className="font-semibold text-gray-700 mb-3">Categories</h3>
+        {Object.entries(categories).map(([key, category]: [string, any]) => (
+          <button
+            key={key}
+            onClick={() => setActiveCategory(key)}
+            className={`w-full text-left p-2 rounded-md text-sm transition-colors ${
+              activeCategory === key 
+                ? 'bg-blue-100 text-blue-700 border border-blue-300' 
+                : 'hover:bg-gray-100'
+            }`}
+          >
+            {category.name}
+          </button>
+        ))}
+      </div>
+
+      {/* Variables Content */}
+      <div className="md:col-span-3">
+        {categories[activeCategory] && (
+          <div>
+            <h3 className="text-lg font-semibold mb-2">
+              {categories[activeCategory].name}
+            </h3>
+            <p className="text-gray-600 text-sm mb-4">
+              {categories[activeCategory].description}
+            </p>
+
+            <div className="space-y-3">
+              {categories[activeCategory].variables.map((variable: any) => (
+                <div key={variable.key} className="border border-gray-200 rounded-lg p-4">
+                  <div className="flex justify-between items-start mb-2">
+                    <div>
+                      <h4 className="font-medium text-gray-900">{variable.key}</h4>
+                      <p className="text-xs text-gray-500">{variable.description}</p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setEditingVar(variable.key);
+                        setEditValue(variable.value);
+                      }}
+                      disabled={editingVar === variable.key}
+                    >
+                      {editingVar === variable.key ? 'Editing...' : 'Edit'}
+                    </Button>
+                  </div>
+
+                  {editingVar === variable.key ? (
+                    <div className="mt-3 space-y-2">
+                      <input
+                        type={variable.key.toLowerCase().includes('password') || variable.key.toLowerCase().includes('secret') ? 'password' : 'text'}
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        className="w-full p-2 border border-gray-300 rounded-md text-sm"
+                        placeholder="Enter value..."
+                      />
+                      <div className="flex space-x-2">
+                        <Button
+                          size="sm"
+                          onClick={() => handleSaveVariable(variable.key, editValue)}
+                          disabled={saving}
+                        >
+                          {saving ? 'Saving...' : 'Save'}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setEditingVar(null);
+                            setEditValue('');
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-2">
+                      <code className="text-xs bg-gray-100 px-2 py-1 rounded">
+                        {variable.key.toLowerCase().includes('password') || variable.key.toLowerCase().includes('secret') || variable.key.toLowerCase().includes('key')
+                          ? variable.value ? '••••••••' : 'Not set'
+                          : variable.value || 'Not set'
+                        }
+                      </code>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

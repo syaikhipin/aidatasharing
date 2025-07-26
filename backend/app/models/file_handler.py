@@ -54,6 +54,7 @@ class FileUpload(Base):
     # Processing status
     upload_status = Column(String(50), default=UploadStatus.PENDING)
     mindsdb_file_id = Column(String(255), nullable=True)
+    mindsdb_storage_path = Column(String(500), nullable=True)  # For permanent storage path
     processing_started_at = Column(DateTime, nullable=True)
     processing_completed_at = Column(DateTime, nullable=True)
     error_message = Column(Text, nullable=True)

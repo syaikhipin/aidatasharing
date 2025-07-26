@@ -69,11 +69,23 @@ export default function LoginPage() {
     }
   };
 
-  const fillDemoCredentials = () => {
-    setFormData({
-      email: 'admin@example.com',
-      password: 'admin123'
-    });
+  const fillDemoCredentials = (userType: 'admin' | 'user' | 'test') => {
+    if (userType === 'admin') {
+      setFormData({
+        email: 'admin@example.com',
+        password: 'admin123'
+      });
+    } else if (userType === 'user') {
+      setFormData({
+        email: 'testuser@demo.com',
+        password: 'testpassword123'
+      });
+    } else {
+      setFormData({
+        email: 'test@mailinator.com',
+        password: 'test123'
+      });
+    }
     setErrors({});
   };
 
@@ -179,16 +191,40 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              <Button
-                type="button"
-                variant="outline"
-                size="lg"
-                onClick={fillDemoCredentials}
-                className="w-full"
-              >
-                <span className="mr-2">🎯</span>
-                Use Demo Credentials
-              </Button>
+              <div className="space-y-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="lg"
+                  onClick={() => fillDemoCredentials('admin')}
+                  className="w-full"
+                >
+                  <span className="mr-2">👑</span>
+                  Login as Admin
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="lg"
+                  onClick={() => fillDemoCredentials('user')}
+                  className="w-full"
+                >
+                  <span className="mr-2">👤</span>
+                  Login as Demo User
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="lg"
+                  onClick={() => fillDemoCredentials('test')}
+                  className="w-full"
+                >
+                  <span className="mr-2">🧪</span>
+                  Login as Test User
+                </Button>
+              </div>
             </form>
 
             <div className="mt-8 text-center">
@@ -207,12 +243,25 @@ export default function LoginPage() {
             <Card variant="outlined" className="mt-6 bg-blue-50 border-blue-200">
               <CardContent className="p-4">
                 <div className="text-center">
-                  <h4 className="text-sm font-medium text-blue-900 mb-2">
-                    🚀 Demo Account
+                  <h4 className="text-sm font-medium text-blue-900 mb-3">
+                    🚀 Demo Accounts
                   </h4>
-                  <div className="text-xs text-blue-700 space-y-1">
-                    <p><strong>Email:</strong> admin@example.com</p>
-                    <p><strong>Password:</strong> admin123</p>
+                  <div className="grid grid-cols-1 gap-3 text-xs text-blue-700">
+                    <div className="bg-white rounded-lg p-3 border border-blue-200">
+                      <p className="font-medium text-blue-900 mb-1">👑 Admin Account</p>
+                      <p><strong>Email:</strong> admin@example.com</p>
+                      <p><strong>Password:</strong> admin123</p>
+                    </div>
+                    <div className="bg-white rounded-lg p-3 border border-blue-200">
+                      <p className="font-medium text-blue-900 mb-1">👤 Demo User</p>
+                      <p><strong>Email:</strong> testuser@demo.com</p>
+                      <p><strong>Password:</strong> testpassword123</p>
+                    </div>
+                    <div className="bg-white rounded-lg p-3 border border-blue-200">
+                      <p className="font-medium text-blue-900 mb-1">🧪 Test User</p>
+                      <p><strong>Email:</strong> test@mailinator.com</p>
+                      <p><strong>Password:</strong> test123</p>
+                    </div>
                   </div>
                 </div>
               </CardContent>

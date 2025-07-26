@@ -78,7 +78,7 @@ class Settings(BaseSettings):
     FIRST_SUPERUSER_PASSWORD: str = "admin123"
     
     class Config:
-        env_file = ".env"
+        env_file = "../.env"  # Use unified .env file from project root
         env_file_encoding = "utf-8"
         extra = "allow"
 

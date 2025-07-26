@@ -158,22 +158,23 @@ export default function SharedDatasetPage() {
   const generateConnectionString = (dataset: SharedDataset, token: string): string => {
     const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
     const proxyHost = `${host}:${getPortForType(dataset.file_type)}`;
+    const encodedDatasetName = encodeURIComponent(dataset.dataset_name);
     
     switch (dataset.file_type?.toLowerCase()) {
       case 'mysql':
-        return `mysql://proxy_user:${token}@${proxyHost}/${dataset.dataset_name}`;
+        return `mysql://proxy_user:${token}@${proxyHost}/${encodedDatasetName}`;
       case 'postgresql':
-        return `postgresql://proxy_user:${token}@${proxyHost}/${dataset.dataset_name}`;
+        return `postgresql://proxy_user:${token}@${proxyHost}/${encodedDatasetName}`;
       case 'clickhouse':
-        return `clickhouse://proxy_user:${token}@${proxyHost}/${dataset.dataset_name}`;
+        return `clickhouse://proxy_user:${token}@${proxyHost}/${encodedDatasetName}`;
       case 's3':
-        return `s3://${proxyHost}/${dataset.dataset_name}?access_key=proxy_user&secret_key=${token}`;
+        return `s3://${proxyHost}/${encodedDatasetName}?access_key=proxy_user&secret_key=${token}`;
       case 'mongodb':
-        return `mongodb://proxy_user:${token}@${proxyHost}/${dataset.dataset_name}`;
+        return `mongodb://proxy_user:${token}@${proxyHost}/${encodedDatasetName}`;
       case 'api':
-        return `https://${proxyHost}/api/${dataset.dataset_name}?token=${token}`;
+        return `https://${proxyHost}/api/${encodedDatasetName}?token=${token}`;
       default:
-        return `${proxyHost}/${dataset.dataset_name}?token=${token}`;
+        return `${proxyHost}/${encodedDatasetName}?token=${token}`;
     }
   };
 

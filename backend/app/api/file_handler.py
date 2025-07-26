@@ -288,24 +288,150 @@ async def delete_file_upload(
         )
     
     try:
-        # Delete physical file
-        import os
-        if os.path.exists(file_upload.file_path):
-            os.remove(file_upload.file_path)
+        file_service = FileHandlerService(db)
+        result = file_service.delete_file_upload(file_upload_id)
         
-        # Delete database record (cascade will handle logs)
-        db.delete(file_upload)
-        db.commit()
-        
-        return {
-            "success": True,
-            "message": "File upload deleted successfully"
-        }
+        if result["success"]:
+            return {
+                "success": True,
+                "message": result["message"]
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=result["error"]
+            )
         
     except Exception as e:
         logger.error(f"Failed to delete file upload {file_upload_id}: {str(e)}")
-        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete file upload: {str(e)}"
+        )
+@router.post("/migrate/{file_upload_id}")
+async def migrate_file_to_permanent_storage(
+    file_upload_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Migrate existing local file to permanent storage"""
+    file_upload = db.query(FileUpload).filter(
+        FileUpload.id == file_upload_id,
+        FileUpload.organization_id == current_user.organization_id
+    ).first()
+    
+    if not file_upload:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File upload not found"
+        )
+    
+    # Only allow migration by file owner or admin
+    if file_upload.user_id != current_user.id and not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Can only migrate your own file uploads"
+        )
+    
+    try:
+        file_service = FileHandlerService(db)
+        result = file_service.migrate_to_permanent_storage(file_upload_id)
+        
+        if result["success"]:
+            return {
+                "success": True,
+                "message": result["message"],
+                "file_upload_id": file_upload_id,
+                "new_file_id": result.get("new_file_id"),
+                "handler_name": result.get("handler_name")
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=result["error"]
+            )
+            
+    except Exception as e:
+        logger.error(f"Migration failed for file {file_upload_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Migration failed: {str(e)}"
+        )
+
+
+@router.get("/uploads/{file_upload_id}/query")
+async def query_file_data(
+    file_upload_id: int,
+    query: str = "",
+    limit: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Query data from uploaded file"""
+    file_upload = db.query(FileUpload).filter(
+        FileUpload.id == file_upload_id,
+        FileUpload.organization_id == current_user.organization_id
+    ).first()
+    
+    if not file_upload:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File upload not found"
+        )
+    
+    try:
+        file_service = FileHandlerService(db)
+        result = file_service.query_file_data(file_upload_id, query, limit)
+        
+        if result["success"]:
+            return result
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=result["error"]
+            )
+            
+    except Exception as e:
+        logger.error(f"Query failed for file {file_upload_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Query failed: {str(e)}"
+        )
+
+
+@router.get("/uploads/{file_upload_id}/metadata")
+async def get_file_metadata(
+    file_upload_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get comprehensive file metadata"""
+    file_upload = db.query(FileUpload).filter(
+        FileUpload.id == file_upload_id,
+        FileUpload.organization_id == current_user.organization_id
+    ).first()
+    
+    if not file_upload:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File upload not found"
+        )
+    
+    try:
+        file_service = FileHandlerService(db)
+        result = file_service.get_file_metadata(file_upload_id)
+        
+        if result["success"]:
+            return result
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=result["error"]
+            )
+            
+    except Exception as e:
+        logger.error(f"Metadata retrieval failed for file {file_upload_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Metadata retrieval failed: {str(e)}"
         ) 

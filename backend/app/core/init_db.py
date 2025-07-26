@@ -139,6 +139,26 @@ def init_db():
         else:
             print(f"Test user already exists: {test_user_email}")
         
+        # Create additional test user
+        test_user2_email = "test@mailinator.com"
+        test_user2 = db.query(User).filter(User.email == test_user2_email).first()
+        if not test_user2:
+            # Get demo organization for test user
+            demo_org = db.query(Organization).filter(Organization.slug == "demo-org").first()
+            test_user2 = User(
+                email=test_user2_email,
+                hashed_password=get_password_hash("test123"),
+                full_name="Test User 2",
+                is_active=True,
+                is_superuser=False,
+                organization_id=demo_org.id if demo_org else None,
+                role="member"
+            )
+            db.add(test_user2)
+            print(f"Test user 2 created: {test_user2_email}")
+        else:
+            print(f"Test user 2 already exists: {test_user2_email}")
+        
         # Create default configurations
         default_configs = [
             {
