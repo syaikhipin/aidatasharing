@@ -139,27 +139,12 @@ export const adminAPI = {
 
   // Environment management
   getEnvironmentVariables: async () => {
-    const response = await apiClient.get('/api/admin/environment/');
+    const response = await apiClient.get('/api/admin/environment-variables');
     return response.data;
   },
 
-  updateEnvironmentVariables: async (variables: Array<{ key: string; value: string; description?: string; category?: string }>) => {
-    const response = await apiClient.put('/api/admin/environment/', { variables });
-    return response.data;
-  },
-
-  createEnvironmentVariable: async (variable: { key: string; value: string; description?: string; category?: string }) => {
-    const response = await apiClient.post('/api/admin/environment/variable', variable);
-    return response.data;
-  },
-
-  deleteEnvironmentVariable: async (key: string) => {
-    const response = await apiClient.delete(`/api/admin/environment/variable/${key}`);
-    return response.data;
-  },
-
-  reloadEnvironment: async () => {
-    const response = await apiClient.post('/api/admin/environment/reload');
+  updateEnvironmentVariable: async (name: string, value: string) => {
+    const response = await apiClient.put(`/api/admin/unified-config/environment/${name}`, { value });
     return response.data;
   },
 };

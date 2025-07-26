@@ -3,7 +3,7 @@
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useState, useEffect } from 'react';
-import { datasetsAPI, organizationsAPI, adminAPI } from '@/lib/api';
+import { datasetsAPI, adminAPI } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import Link from 'next/link';
@@ -465,7 +465,7 @@ function AdminContent() {
 
       {/* Environment Management Modal */}
       {showEnvironmentModal && (
-        <EnvironmentModal 
+        <EnvironmentVariablesModal 
           environmentVariables={environmentVariables}
           onClose={() => setShowEnvironmentModal(false)}
           onUpdate={fetchAdminData}
@@ -491,7 +491,7 @@ function EnvironmentVariablesSection({
   const handleSaveVariable = async (key: string, value: string) => {
     try {
       setSaving(true);
-      await adminAPI.updateEnvironmentVariables([{ key, value }]);
+      await adminAPI.updateEnvironmentVariable(key, value);
       setEditingVar(null);
       setEditValue('');
       onUpdate();
@@ -602,6 +602,213 @@ function EnvironmentVariablesSection({
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Environment Variables Modal Component
+function EnvironmentVariablesModal({ 
+  environmentVariables, 
+  onClose, 
+  onUpdate 
+}: { 
+  environmentVariables: any; 
+  onClose: () => void; 
+  onUpdate: () => void; 
+}) {
+  const [activeCategory, setActiveCategory] = useState<string>('');
+  const [editingVar, setEditingVar] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  // Initialize active category when modal opens
+  useEffect(() => {
+    if (environmentVariables?.variables && environmentVariables.variables.length > 0) {
+      const categories = [...new Set(environmentVariables.variables.map((v: any) => v.category || 'GENERAL'))];
+      setActiveCategory(categories[0]);
+    }
+  }, [environmentVariables]);
+
+  const handleSaveVariable = async (name: string, value: string) => {
+    try {
+      setSaving(true);
+      // Call the API to update environment variable
+      await adminAPI.updateEnvironmentVariable(name, value);
+      setEditingVar(null);
+      setEditValue('');
+      onUpdate();
+      alert('Environment variable updated successfully!');
+    } catch (error) {
+      console.error('Failed to update environment variable:', error);
+      alert('Failed to update environment variable. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Group variables by category
+  const groupedVariables = environmentVariables?.variables?.reduce((acc: any, variable: any) => {
+    const category = variable.category || 'GENERAL';
+    if (!acc[category]) {
+      acc[category] = [];
+    }
+    acc[category].push(variable);
+    return acc;
+  }, {}) || {};
+
+  const categories = Object.keys(groupedVariables);
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-6xl h-5/6 flex flex-col">
+        {/* Modal Header */}
+        <div className="flex items-center justify-between p-6 border-b">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">Environment Variables</h2>
+            <p className="text-gray-600 text-sm mt-1">
+              Manage system environment variables by category
+            </p>
+          </div>
+          <Button variant="outline" size="sm" onClick={onClose}>
+            <span className="mr-1">✕</span>
+            Close
+          </Button>
+        </div>
+
+        {/* Modal Content */}
+        <div className="flex flex-1 overflow-hidden">
+          {/* Category Sidebar */}
+          <div className="w-64 border-r bg-gray-50 p-4 overflow-y-auto">
+            <h3 className="font-semibold text-gray-700 mb-3">Categories</h3>
+            <div className="space-y-2">
+              {categories.map((category) => (
+                <button
+                  key={category}
+                  onClick={() => setActiveCategory(category)}
+                  className={`w-full text-left p-3 rounded-md text-sm transition-colors ${
+                    activeCategory === category 
+                      ? 'bg-blue-100 text-blue-700 border border-blue-300' 
+                      : 'hover:bg-gray-100'
+                  }`}
+                >
+                  <div className="font-medium">{category}</div>
+                  <div className="text-xs text-gray-500">
+                    {groupedVariables[category]?.length || 0} variables
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Variables Content */}
+          <div className="flex-1 p-6 overflow-y-auto">
+            {activeCategory && groupedVariables[activeCategory] && (
+              <div>
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold mb-2">{activeCategory}</h3>
+                  <p className="text-gray-600 text-sm">
+                    Manage environment variables for the {activeCategory.toLowerCase()} category
+                  </p>
+                </div>
+
+                <div className="space-y-4">
+                  {groupedVariables[activeCategory].map((variable: any) => (
+                    <div key={variable.name} className="border border-gray-200 rounded-lg p-4 bg-white">
+                      <div className="flex justify-between items-start mb-3">
+                        <div className="flex-1">
+                          <h4 className="font-medium text-gray-900 mb-1">{variable.name}</h4>
+                          <p className="text-xs text-gray-500 mb-2">{variable.description || 'No description available'}</p>
+                          <div className="flex items-center space-x-4 text-xs">
+                            <span className={`px-2 py-1 rounded-full ${
+                              variable.is_set ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                            }`}>
+                              {variable.is_set ? 'Set' : 'Not Set'}
+                            </span>
+                            <span className={`px-2 py-1 rounded-full ${
+                              variable.is_managed ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
+                            }`}>
+                              {variable.is_managed ? 'Managed' : 'Unmanaged'}
+                            </span>
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setEditingVar(variable.name);
+                            setEditValue(variable.value || '');
+                          }}
+                          disabled={editingVar === variable.name}
+                        >
+                          {editingVar === variable.name ? 'Editing...' : 'Edit'}
+                        </Button>
+                      </div>
+
+                      {editingVar === variable.name ? (
+                        <div className="space-y-3">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Value
+                            </label>
+                            <input
+                              type={variable.name.toLowerCase().includes('password') || 
+                                    variable.name.toLowerCase().includes('secret') ||
+                                    variable.name.toLowerCase().includes('key') ? 'password' : 'text'}
+                              value={editValue}
+                              onChange={(e) => setEditValue(e.target.value)}
+                              className="w-full p-3 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              placeholder="Enter value..."
+                            />
+                          </div>
+                          <div className="flex space-x-2">
+                            <Button
+                              size="sm"
+                              onClick={() => handleSaveVariable(variable.name, editValue)}
+                              disabled={saving}
+                            >
+                              {saving ? 'Saving...' : 'Save'}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setEditingVar(null);
+                                setEditValue('');
+                              }}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-3">
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Current Value
+                          </label>
+                          <code className="block text-sm bg-gray-100 px-3 py-2 rounded border">
+                            {variable.name.toLowerCase().includes('password') || 
+                             variable.name.toLowerCase().includes('secret') || 
+                             variable.name.toLowerCase().includes('key')
+                              ? (variable.value ? '••••••••' : 'Not set')
+                              : (variable.value || 'Not set')
+                            }
+                          </code>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {!activeCategory && (
+              <div className="text-center py-12">
+                <p className="text-gray-500">Select a category to view environment variables</p>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

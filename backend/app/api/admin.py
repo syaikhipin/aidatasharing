@@ -1026,3 +1026,713 @@ async def check_restart_required(
     except Exception as e:
         logger.error(f"Error checking restart requirement: {e}")
         raise HTTPException(status_code=500, detail=f"Error checking restart requirement: {str(e)}")
+@router.get("/unified-config", response_model=Dict[str, Any])
+async def get_unified_configuration(
+    current_user: User = Depends(get_current_superuser),
+    db: Session = Depends(get_db)
+):
+    """Get unified system configuration including all necessary configs and environment variables"""
+    try:
+        config_service = AdminConfigService(db)
+        
+        # Initialize default configurations if not exists
+        config_service.initialize_default_configurations()
+        
+        # Get all configurations grouped by category
+        all_configs = config_service.get_all_configurations()
+        
+        # Get environment variables
+        env_vars = config_service.get_environment_variables()
+        
+        # Get MindsDB configurations
+        mindsdb_configs = config_service.get_mindsdb_configurations()
+        active_mindsdb = next((c for c in mindsdb_configs if c.is_active), None)
+        
+        # Get Google API key status
+        google_api_key = os.getenv("GOOGLE_API_KEY")
+        
+        # Organize configurations by category for unified display
+        unified_config = {
+            "categories": {},
+            "environment_variables": env_vars,
+            "mindsdb_configurations": [
+                {
+                    "id": config.id,
+                    "config_name": config.config_name,
+                    "is_active": config.is_active,
+                    "mindsdb_url": config.mindsdb_url,
+                    "storage_type": config.permanent_storage_config.get("location", "local") if config.permanent_storage_config else "local",
+                    "is_healthy": config.is_healthy,
+                    "last_health_check": config.last_health_check.isoformat() if config.last_health_check else None
+                }
+                for config in mindsdb_configs
+            ],
+            "active_mindsdb_config": {
+                "id": active_mindsdb.id,
+                "config_name": active_mindsdb.config_name,
+                "storage_type": active_mindsdb.permanent_storage_config.get("location", "local") if active_mindsdb.permanent_storage_config else "local"
+            } if active_mindsdb else None,
+            "google_api_key_status": {
+                "configured": bool(google_api_key),
+                "masked_value": "••••••••" if google_api_key else None
+            },
+            "system_health": {
+                "status": "healthy" if google_api_key else "warning",
+                "checks": {
+                    "google_api_key": bool(google_api_key),
+                    "mindsdb_connection": active_mindsdb.is_healthy if active_mindsdb else False
+                }
+            }
+        }
+        
+        # Organize configurations by category
+        for category, configs in all_configs.items():
+            unified_config["categories"][category] = {
+                "name": category.replace("_", " ").title(),
+                "description": f"Configuration settings for {category.replace('_', ' ').lower()}",
+                "configs": configs
+            }
+        
+        return unified_config
+        
+    except Exception as e:
+        logger.error(f"Error getting unified configuration: {e}")
+        raise HTTPException(status_code=500, detail=f"Error retrieving unified configuration: {str(e)}")
+
+
+@router.put("/unified-config/environment/{key}")
+async def update_environment_variable(
+    key: str,
+    update_data: Dict[str, str],
+    current_user: User = Depends(get_current_superuser),
+    db: Session = Depends(get_db)
+):
+    """Update an environment variable"""
+    try:
+        config_service = AdminConfigService(db)
+        value = update_data.get("value")
+        
+        if not value:
+            raise HTTPException(status_code=400, detail="Value is required")
+        
+        # Find the configuration override for this environment variable
+        config = db.query(ConfigurationOverrideModel).filter(
+            ConfigurationOverrideModel.env_var_name == key
+        ).first()
+        
+        if config:
+            # Update through the config service
+            update_data_obj = ConfigurationOverrideUpdate(value=value)
+            result = config_service.update_configuration(
+                config.id, 
+                update_data_obj, 
+                current_user.id, 
+                current_user.email
+            )
+            
+            if result.success:
+                return {"message": f"Environment variable '{key}' updated successfully"}
+            else:
+                raise HTTPException(status_code=400, detail=f"Failed to update: {', '.join(result.errors)}")
+        else:
+            # Direct environment variable update (not managed)
+            os.environ[key] = value
+            return {"message": f"Environment variable '{key}' updated successfully"}
+            
+    except Exception as e:
+        logger.error(f"Error updating environment variable: {e}")
+        raise HTTPException(status_code=500, detail=f"Error updating environment variable: {str(e)}")
+
+
+@router.post("/unified-config/mindsdb")
+async def create_mindsdb_configuration(
+    config: Dict[str, Any],
+    current_user: User = Depends(get_current_superuser),
+    db: Session = Depends(get_db)
+):
+    """Create a new MindsDB configuration with storage options"""
+    try:
+        config_service = AdminConfigService(db)
+        
+        # Build permanent storage config based on storage type
+        storage_type = config.get("storage_type", "local")
+        permanent_storage_config = {"location": storage_type}
+        
+        if storage_type == "s3":
+            permanent_storage_config.update({
+                "aws_access_key_id": config.get("aws_access_key_id"),
+                "aws_secret_access_key": config.get("aws_secret_access_key"),
+                "aws_default_region": config.get("aws_default_region", "us-east-1"),
+                "bucket": config.get("s3_bucket_name")
+            })
+        
+        mindsdb_config = MindsDBConfigurationCreate(
+            config_name=config["config_name"],
+            mindsdb_url=config.get("mindsdb_url", "http://127.0.0.1:47334"),
+            mindsdb_database=config.get("mindsdb_database", "mindsdb"),
+            mindsdb_username=config.get("mindsdb_username"),
+            mindsdb_password=config.get("mindsdb_password"),
+            permanent_storage_config=permanent_storage_config,
+            is_active=config.get("is_active", True)
+        )
+        
+        new_config = config_service.create_mindsdb_configuration(
+            mindsdb_config,
+            current_user.id,
+            current_user.email
+        )
+        
+        return {
+            "id": new_config.id,
+            "message": "MindsDB configuration created successfully",
+            "config_name": new_config.config_name
+        }
+        
+    except Exception as e:
+        logger.error(f"Error creating MindsDB configuration: {e}")
+        raise HTTPException(status_code=500, detail=f"Error creating MindsDB configuration: {str(e)}")
+
+
+@router.put("/unified-config/mindsdb/{config_id}")
+async def update_mindsdb_configuration(
+    config_id: int,
+    config: Dict[str, Any],
+    current_user: User = Depends(get_current_superuser),
+    db: Session = Depends(get_db)
+):
+    """Update a MindsDB configuration including storage options"""
+    try:
+        config_service = AdminConfigService(db)
+        
+        # Build permanent storage config based on storage type
+        storage_type = config.get("storage_type", "local")
+        permanent_storage_config = {"location": storage_type}
+        
+        if storage_type == "s3":
+            permanent_storage_config.update({
+                "aws_access_key_id": config.get("aws_access_key_id"),
+                "aws_secret_access_key": config.get("aws_secret_access_key"),
+                "aws_default_region": config.get("aws_default_region", "us-east-1"),
+                "bucket": config.get("s3_bucket_name")
+            })
+        
+        update_data = MindsDBConfigurationUpdate(
+            config_name=config.get("config_name"),
+            mindsdb_url=config.get("mindsdb_url"),
+            mindsdb_database=config.get("mindsdb_database"),
+            mindsdb_username=config.get("mindsdb_username"),
+            mindsdb_password=config.get("mindsdb_password"),
+            permanent_storage_config=permanent_storage_config,
+            is_active=config.get("is_active")
+        )
+        
+        updated_config = config_service.update_mindsdb_configuration(
+            config_id,
+            update_data,
+            current_user.id,
+            current_user.email
+        )
+        
+        return {
+            "id": updated_config.id,
+            "message": "MindsDB configuration updated successfully",
+            "config_name": updated_config.config_name
+        }
+        
+    except Exception as e:
+        logger.error(f"Error updating MindsDB configuration: {e}")
+        raise HTTPException(status_code=500, detail=f"Error updating MindsDB configuration: {str(e)}")
+
+
+@router.post("/restart-required")
+async def check_restart_required(
+    current_user: User = Depends(get_current_superuser),
+    db: Session = Depends(get_db)
+):
+    """Check if system restart is required due to configuration changes"""
+    try:
+        # Check for configurations that require restart and have been modified
+        restart_configs = db.query(ConfigurationOverrideModel).filter(
+            and_(
+                ConfigurationOverrideModel.requires_restart == True,
+                ConfigurationOverrideModel.value != ConfigurationOverrideModel.default_value
+            )
+        ).all()
+        
+        return {
+            "restart_required": len(restart_configs) > 0,
+            "affected_configs": [
+                {
+                    "key": config.key,
+                    "title": config.title,
+                    "category": config.category
+                }
+                for config in restart_configs
+            ],
+            "message": "System restart required for configuration changes to take effect" if restart_configs else "No restart required"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error checking restart status: {e}")
+        raise HTTPException(status_code=500, detail=f"Error checking restart status: {str(e)}")
+
+
+# New Unified Configuration API Endpoints
+
+@router.get("/unified-config")
+async def get_unified_configuration(
+    current_user: User = Depends(get_current_superuser),
+    db: Session = Depends(get_db)
+):
+    """Get unified configuration display with complete config from code and MindsDB S3/local storage options"""
+    try:
+        config_service = AdminConfigurationService(db)
+        
+        # Initialize default configurations if not exists
+        config_service.initialize_default_configurations()
+        
+        # Get all configuration categories
+        env_overrides = config_service.get_all_configurations()
+        env_variables = config_service.get_environment_variables()
+        mindsdb_configs = config_service.get_mindsdb_configurations()
+        
+        # Find active MindsDB config
+        active_mindsdb = next((c for c in mindsdb_configs if c.is_active), None)
+        
+        # Get system health status
+        system_health = await _get_system_health_status(db)
+        
+        # Get MindsDB storage configuration
+        storage_config = _get_mindsdb_storage_config(active_mindsdb)
+        
+        # Organize configurations by category with enhanced metadata
+        categorized_configs = {}
+        for category, configs in env_overrides.items():
+            categorized_configs[category] = {
+                "configs": configs,
+                "count": len(configs),
+                "has_sensitive": any(config.get("is_sensitive", False) for config in configs),
+                "has_required": any(config.get("is_required", False) for config in configs),
+                "has_overrides": any(config.get("is_overridden", False) for config in configs)
+            }
+        
+        # Get configuration statistics
+        total_configs = sum(len(configs) for configs in env_overrides.values())
+        overridden_configs = sum(
+            sum(1 for config in configs if config.get("is_overridden", False))
+            for configs in env_overrides.values()
+        )
+        
+        return {
+            "configurations": {
+                "by_category": categorized_configs,
+                "statistics": {
+                    "total_configurations": total_configs,
+                    "overridden_configurations": overridden_configs,
+                    "environment_variables": env_variables.get("managed_count", 0),
+                    "mindsdb_configurations": len(mindsdb_configs)
+                }
+            },
+            "environment_variables": {
+                "managed": env_variables.get("variables", []),
+                "summary": {
+                    "managed_count": env_variables.get("managed_count", 0),
+                    "unmanaged_count": env_variables.get("unmanaged_count", 0),
+                    "categories": env_variables.get("categories", {})
+                }
+            },
+            "mindsdb": {
+                "configurations": [
+                    {
+                        "id": config.id,
+                        "config_name": config.config_name,
+                        "mindsdb_url": config.mindsdb_url,
+                        "is_active": config.is_active,
+                        "is_healthy": config.is_healthy,
+                        "storage_type": _extract_storage_type(config),
+                        "last_health_check": config.last_health_check.isoformat() if config.last_health_check else None,
+                        "created_at": config.created_at.isoformat() if config.created_at else None
+                    }
+                    for config in mindsdb_configs
+                ],
+                "active_config": {
+                    "id": active_mindsdb.id,
+                    "config_name": active_mindsdb.config_name,
+                    "mindsdb_url": active_mindsdb.mindsdb_url,
+                    "storage_config": storage_config,
+                    "is_healthy": active_mindsdb.is_healthy,
+                    "last_health_check": active_mindsdb.last_health_check.isoformat() if active_mindsdb.last_health_check else None
+                } if active_mindsdb else None,
+                "storage_options": {
+                    "local": {
+                        "type": "local",
+                        "description": "Store data locally on the server filesystem",
+                        "configuration": {
+                            "location": "local",
+                            "path": "./storage/mindsdb"
+                        }
+                    },
+                    "s3": {
+                        "type": "s3",
+                        "description": "Store data in Amazon S3",
+                        "configuration": {
+                            "location": "s3",
+                            "aws_access_key_id": "required",
+                            "aws_secret_access_key": "required",
+                            "bucket": "required",
+                            "region": "optional"
+                        },
+                        "required_env_vars": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "S3_BUCKET_NAME"]
+                    }
+                }
+            },
+            "system_health": system_health,
+            "metadata": {
+                "last_updated": datetime.utcnow().isoformat(),
+                "restart_required": any(
+                    config.get("requires_restart", False) and config.get("is_overridden", False)
+                    for category_configs in env_overrides.values()
+                    for config in category_configs
+                ),
+                "configuration_file_status": {
+                    "mindsdb_config_exists": os.path.exists("./mindsdb_config.json"),
+                    "config_file_path": "./mindsdb_config.json"
+                }
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting unified configuration: {e}")
+        raise HTTPException(status_code=500, detail=f"Error retrieving unified configuration: {str(e)}")
+
+
+@router.post("/unified-config/create")
+async def create_unified_configuration(
+    config_data: Dict[str, Any],
+    current_user: User = Depends(get_current_superuser),
+    db: Session = Depends(get_db)
+):
+    """Create new configuration entries across different categories"""
+    try:
+        config_service = AdminConfigurationService(db)
+        created_configs = []
+        errors = []
+        
+        # Create environment variable overrides
+        if "environment_overrides" in config_data:
+            for override_data in config_data["environment_overrides"]:
+                try:
+                    # Check if configuration already exists
+                    existing = db.query(ConfigurationOverrideModel).filter(
+                        ConfigurationOverrideModel.key == override_data.get("key")
+                    ).first()
+                    
+                    if existing:
+                        errors.append(f"Configuration key '{override_data.get('key')}' already exists")
+                        continue
+                    
+                    config = ConfigurationOverrideModel(**override_data)
+                    db.add(config)
+                    db.commit()
+                    db.refresh(config)
+                    
+                    created_configs.append({
+                        "type": "environment_override",
+                        "id": config.id,
+                        "key": config.key
+                    })
+                    
+                    # Record history
+                    config_service._record_configuration_change(
+                        config.key,
+                        "override",
+                        None,
+                        config.value,
+                        current_user.id,
+                        current_user.email,
+                        "New configuration override created via unified API"
+                    )
+                    
+                except Exception as e:
+                    errors.append(f"Error creating override '{override_data.get('key', 'unknown')}': {str(e)}")
+        
+        # Create MindsDB configuration
+        if "mindsdb_config" in config_data:
+            try:
+                mindsdb_data = config_data["mindsdb_config"]
+                mindsdb_config = MindsDBConfigurationCreate(**mindsdb_data)
+                
+                config = config_service.create_mindsdb_configuration(
+                    mindsdb_config, current_user.id, current_user.email
+                )
+                
+                created_configs.append({
+                    "type": "mindsdb_config",
+                    "id": config.id,
+                    "config_name": config.config_name
+                })
+                
+            except Exception as e:
+                errors.append(f"Error creating MindsDB configuration: {str(e)}")
+        
+        return {
+            "success": len(errors) == 0,
+            "created_configurations": created_configs,
+            "errors": errors,
+            "message": f"Created {len(created_configs)} configurations" + (f" with {len(errors)} errors" if errors else "")
+        }
+        
+    except Exception as e:
+        logger.error(f"Error creating unified configuration: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error creating configuration: {str(e)}")
+
+
+@router.put("/unified-config/update")
+async def update_unified_configuration(
+    updates: Dict[str, Any],
+    current_user: User = Depends(get_current_superuser),
+    db: Session = Depends(get_db)
+):
+    """Update configurations across different categories in a unified manner"""
+    try:
+        config_service = AdminConfigurationService(db)
+        updated_configs = []
+        errors = []
+        restart_required = False
+        
+        # Update environment variable overrides
+        if "environment_overrides" in updates:
+            for update_data in updates["environment_overrides"]:
+                try:
+                    config_id = update_data.get("id")
+                    if not config_id:
+                        errors.append("Configuration ID is required for updates")
+                        continue
+                    
+                    update_obj = ConfigurationOverrideUpdate(**{
+                        k: v for k, v in update_data.items() if k != "id"
+                    })
+                    
+                    result = config_service.update_configuration(
+                        config_id, update_obj, current_user.id, current_user.email
+                    )
+                    
+                    if result.success:
+                        updated_configs.extend(result.applied_configs)
+                        if result.restart_required:
+                            restart_required = True
+                    else:
+                        errors.extend(result.errors)
+                        
+                except Exception as e:
+                    errors.append(f"Error updating configuration {config_id}: {str(e)}")
+        
+        # Update MindsDB configuration
+        if "mindsdb_config" in updates:
+            try:
+                mindsdb_update = updates["mindsdb_config"]
+                config_id = mindsdb_update.get("id")
+                
+                if not config_id:
+                    errors.append("MindsDB configuration ID is required for updates")
+                else:
+                    update_obj = MindsDBConfigurationUpdate(**{
+                        k: v for k, v in mindsdb_update.items() if k != "id"
+                    })
+                    
+                    config = config_service.update_mindsdb_configuration(
+                        config_id, update_obj, current_user.id, current_user.email
+                    )
+                    
+                    updated_configs.append(f"mindsdb.{config.config_name}")
+                    restart_required = True
+                    
+            except Exception as e:
+                errors.append(f"Error updating MindsDB configuration: {str(e)}")
+        
+        # Apply environment variables if requested
+        if updates.get("apply_environment_changes", False):
+            try:
+                for config_key in updated_configs:
+                    if not config_key.startswith("mindsdb."):
+                        config = db.query(ConfigurationOverrideModel).filter(
+                            ConfigurationOverrideModel.key == config_key
+                        ).first()
+                        
+                        if config and config.env_var_name and config.value:
+                            os.environ[config.env_var_name] = str(config.value)
+                            config.last_applied_at = datetime.utcnow()
+                
+                db.commit()
+                
+            except Exception as e:
+                errors.append(f"Error applying environment changes: {str(e)}")
+        
+        return {
+            "success": len(errors) == 0,
+            "updated_configurations": updated_configs,
+            "errors": errors,
+            "restart_required": restart_required,
+            "message": f"Updated {len(updated_configs)} configurations" + (f" with {len(errors)} errors" if errors else "")
+        }
+        
+    except Exception as e:
+        logger.error(f"Error updating unified configuration: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error updating configuration: {str(e)}")
+
+
+@router.get("/unified-config/health")
+async def get_unified_health_status(
+    current_user: User = Depends(get_current_superuser),
+    db: Session = Depends(get_db)
+):
+    """Get comprehensive health status for all system components"""
+    try:
+        health_status = await _get_system_health_status(db)
+        
+        # Add configuration-specific health checks
+        config_service = AdminConfigurationService(db)
+        
+        # Check MindsDB configurations health
+        mindsdb_configs = config_service.get_mindsdb_configurations()
+        mindsdb_health = []
+        
+        for config in mindsdb_configs:
+            if config.is_active:
+                test_result = config_service.test_mindsdb_connection(config.id)
+                mindsdb_health.append({
+                    "config_id": config.id,
+                    "config_name": config.config_name,
+                    "url": config.mindsdb_url,
+                    "is_healthy": test_result.get("success", False),
+                    "last_checked": test_result.get("last_checked"),
+                    "error": test_result.get("error")
+                })
+        
+        # Check required environment variables
+        required_env_vars = []
+        configs = db.query(ConfigurationOverrideModel).filter(
+            ConfigurationOverrideModel.is_required == True
+        ).all()
+        
+        for config in configs:
+            if config.env_var_name:
+                env_value = os.getenv(config.env_var_name)
+                required_env_vars.append({
+                    "name": config.env_var_name,
+                    "is_set": env_value is not None,
+                    "description": config.description,
+                    "category": config.category
+                })
+        
+        health_status.update({
+            "mindsdb_connections": mindsdb_health,
+            "required_environment_variables": required_env_vars,
+            "configuration_status": {
+                "total_configs": len(configs),
+                "missing_required": sum(1 for var in required_env_vars if not var["is_set"]),
+                "mindsdb_healthy": sum(1 for health in mindsdb_health if health["is_healthy"]),
+                "mindsdb_total": len(mindsdb_health)
+            }
+        })
+        
+        return health_status
+        
+    except Exception as e:
+        logger.error(f"Error getting unified health status: {e}")
+        raise HTTPException(status_code=500, detail=f"Error retrieving health status: {str(e)}")
+
+
+# Helper functions for unified configuration
+
+async def _get_system_health_status(db: Session) -> Dict[str, Any]:
+    """Get comprehensive system health status"""
+    try:
+        # Check Google API key
+        google_api_config = db.query(ConfigurationOverrideModel).filter(
+            ConfigurationOverrideModel.env_var_name == "GOOGLE_API_KEY"
+        ).first()
+        
+        google_api_status = {
+            "configured": google_api_config is not None and google_api_config.value is not None,
+            "env_var_set": os.getenv("GOOGLE_API_KEY") is not None,
+            "last_updated": google_api_config.updated_at.isoformat() if google_api_config and google_api_config.updated_at else None
+        }
+        
+        # Check MindsDB connection
+        mindsdb_status = {"connected": False, "error": None}
+        try:
+            from app.services.mindsdb import MindsDBService
+            mindsdb_service = MindsDBService()
+            health_check = mindsdb_service.health_check()
+            mindsdb_status = {
+                "connected": health_check.get("status") == "healthy",
+                "url": mindsdb_service.base_url,
+                "response_time": health_check.get("response_time"),
+                "error": health_check.get("error")
+            }
+        except Exception as e:
+            mindsdb_status["error"] = str(e)
+        
+        # Check database connection
+        database_status = {"connected": True, "error": None}
+        try:
+            db.execute("SELECT 1")
+        except Exception as e:
+            database_status = {"connected": False, "error": str(e)}
+        
+        return {
+            "google_api": google_api_status,
+            "mindsdb": mindsdb_status,
+            "database": database_status,
+            "overall_status": "healthy" if all([
+                google_api_status["configured"],
+                mindsdb_status["connected"],
+                database_status["connected"]
+            ]) else "warning"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting system health status: {e}")
+        return {
+            "google_api": {"configured": False, "env_var_set": False, "error": str(e)},
+            "mindsdb": {"connected": False, "error": str(e)},
+            "database": {"connected": False, "error": str(e)},
+            "overall_status": "error"
+        }
+
+
+def _get_mindsdb_storage_config(active_config) -> Dict[str, Any]:
+    """Extract storage configuration from active MindsDB config"""
+    if not active_config or not active_config.permanent_storage_config:
+        return {"type": "local", "location": "./storage/mindsdb"}
+    
+    storage_config = active_config.permanent_storage_config
+    storage_type = storage_config.get("location", "local")
+    
+    if storage_type == "s3":
+        return {
+            "type": "s3",
+            "bucket": storage_config.get("bucket"),
+            "region": storage_config.get("region"),
+            "prefix": storage_config.get("prefix", ""),
+            "aws_credentials_configured": all([
+                os.getenv("AWS_ACCESS_KEY_ID"),
+                os.getenv("AWS_SECRET_ACCESS_KEY")
+            ])
+        }
+    else:
+        return {
+            "type": "local",
+            "location": storage_config.get("path", "./storage/mindsdb")
+        }
+
+
+def _extract_storage_type(config) -> str:
+    """Extract storage type from MindsDB configuration"""
+    if not config.permanent_storage_config:
+        return "local"
+    
+    return config.permanent_storage_config.get("location", "local")
