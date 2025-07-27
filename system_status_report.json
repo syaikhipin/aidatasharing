@@ -1,0 +1,84 @@
+{
+  "proxy_services": {
+    "10101": {
+      "service": "MySQL",
+      "status": "\u2705 HEALTHY",
+      "health": {
+        "status": "healthy",
+        "proxy_type": "mysql",
+        "port": 10101,
+        "mindsdb_status": "unavailable",
+        "timestamp": "2025-07-28T00:21:00.704771"
+      }
+    },
+    "10102": {
+      "service": "PostgreSQL",
+      "status": "\u2705 HEALTHY",
+      "health": {
+        "status": "healthy",
+        "proxy_type": "postgresql",
+        "port": 10102,
+        "mindsdb_status": "unavailable",
+        "timestamp": "2025-07-28T00:21:00.720172"
+      }
+    },
+    "10103": {
+      "service": "API",
+      "status": "\u2705 HEALTHY",
+      "health": {
+        "status": "healthy",
+        "proxy_type": "api",
+        "port": 10103,
+        "mindsdb_status": "unavailable",
+        "timestamp": "2025-07-28T00:21:00.735445"
+      }
+    },
+    "10104": {
+      "service": "ClickHouse",
+      "status": "\u2705 HEALTHY",
+      "health": {
+        "status": "healthy",
+        "proxy_type": "clickhouse",
+        "port": 10104,
+        "mindsdb_status": "unavailable",
+        "timestamp": "2025-07-28T00:21:00.750490"
+      }
+    },
+    "10105": {
+      "service": "MongoDB",
+      "status": "\u2705 HEALTHY",
+      "health": {
+        "status": "healthy",
+        "proxy_type": "mongodb",
+        "port": 10105,
+        "mindsdb_status": "unavailable",
+        "timestamp": "2025-07-28T00:21:00.767488"
+      }
+    },
+    "10106": {
+      "service": "S3",
+      "status": "\u2705 HEALTHY",
+      "health": {
+        "status": "healthy",
+        "proxy_type": "s3",
+        "port": 10106,
+        "mindsdb_status": "unavailable",
+        "timestamp": "2025-07-28T00:21:00.785707"
+      }
+    },
+    "10107": {
+      "service": "Shared Links",
+      "status": "\u2705 HEALTHY",
+      "health": {
+        "status": "healthy",
+        "proxy_type": "shared_link",
+        "port": 10107,
+        "mindsdb_status": "unavailable",
+        "timestamp": "2025-07-28T00:21:00.801911"
+      }
+    }
+  },
+  "mysql_proxy_working": true,
+  "backend_working": true,
+  "success_rate": 100
+}

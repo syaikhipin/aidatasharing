@@ -181,19 +181,19 @@ export default function SharedDatasetPage() {
   const getPortForType = (fileType?: string): string => {
     switch (fileType?.toLowerCase()) {
       case 'mysql':
-        return '3306';
+        return '10101';  // MindsDB proxy MySQL port
       case 'postgresql':
-        return '5432';
+        return '10102';  // MindsDB proxy PostgreSQL port
       case 'clickhouse':
-        return '8123';
+        return '10104';  // MindsDB proxy ClickHouse port
       case 'mongodb':
-        return '27017';
+        return '10105'; // MindsDB proxy MongoDB port
       case 's3':
-        return '443';
+        return '10106';  // MindsDB proxy S3 port
       case 'api':
-        return '443';
+        return '10103';  // MindsDB proxy API port
       default:
-        return '8080';
+        return '10103';
     }
   };
 

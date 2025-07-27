@@ -72,6 +72,22 @@ def get_current_user(
     return user
 
 
+def get_optional_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+) -> Optional[User]:
+    """Get current user if authenticated, otherwise return None."""
+    if not credentials:
+        return None
+    
+    user_id = verify_token(credentials.credentials)
+    if user_id is None:
+        return None
+    
+    user = db.query(User).filter(User.id == user_id).first()
+    return user
+
+
 def get_current_active_user(current_user: User = Depends(get_current_user)) -> User:
     """Get current active user."""
     if not current_user.is_active:
@@ -85,4 +101,4 @@ def get_current_superuser(current_user: User = Depends(get_current_user)) -> Use
         raise HTTPException(
             status_code=400, detail="The user doesn't have enough privileges"
         )
-    return current_user 
+    return current_user

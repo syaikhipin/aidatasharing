@@ -271,7 +271,11 @@ class MindsDBService:
                                 rows = result.fetch()
                                 logger.info(f"🔍 fetch() returned: {type(rows)}")
                                 if hasattr(rows, 'to_dict'):
-                                    rows = [rows.to_dict()]
+                                    # Fix pandas DataFrame to_dict() call
+                                    if hasattr(rows, 'empty') and not rows.empty:
+                                        rows = rows.to_dict('records')
+                                    else:
+                                        rows = []
                                 elif not isinstance(rows, list):
                                     rows = [rows] if rows is not None else []
                             else:

@@ -1,302 +1,397 @@
 """
-Environment management API endpoints for admin panel
+Environment Configuration Management API
+Manages .env file directly without database dependencies
 """
-import os
-import json
-from typing import Dict, Any, List
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-from pydantic import BaseModel
-from app.core.database import get_db
+
+from fastapi import APIRouter, Depends, HTTPException
+from typing import Dict, Any, List, Optional
 from app.core.auth import get_current_superuser
 from app.models.user import User
+import os
+import re
+import logging
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-class EnvironmentVariable(BaseModel):
-    key: str
-    value: str
-    description: str = ""
-    category: str = "general"
-
-class EnvironmentUpdate(BaseModel):
-    variables: List[EnvironmentVariable]
-
-# Environment variable categories and their descriptions
-ENV_CATEGORIES = {
-    "database": {
-        "name": "Database Configuration",
-        "description": "Database connection and settings",
-        "variables": ["DATABASE_URL"]
-    },
-    "security": {
-        "name": "Security Configuration", 
-        "description": "Authentication and security settings",
-        "variables": ["SECRET_KEY", "ALGORITHM", "ACCESS_TOKEN_EXPIRE_MINUTES"]
-    },
-    "api": {
-        "name": "API Configuration",
-        "description": "External API keys and endpoints",
-        "variables": ["GOOGLE_API_KEY", "MINDSDB_URL", "MINDSDB_DATABASE", "MINDSDB_USERNAME", "MINDSDB_PASSWORD"]
-    },
-    "ai": {
-        "name": "AI Model Configuration",
-        "description": "AI model settings and configurations",
-        "variables": ["DEFAULT_GEMINI_MODEL", "GEMINI_ENGINE_NAME", "GEMINI_CHAT_MODEL_NAME", "GEMINI_VISION_MODEL_NAME", "GEMINI_EMBEDDING_MODEL_NAME"]
-    },
-    "sharing": {
-        "name": "Data Sharing Configuration",
-        "description": "Data sharing and collaboration settings",
-        "variables": ["ENABLE_DATA_SHARING", "ENABLE_AI_CHAT", "SHARE_LINK_EXPIRY_HOURS", "MAX_CHAT_SESSIONS_PER_DATASET"]
-    },
-    "upload": {
-        "name": "File Upload Configuration",
-        "description": "File upload and processing settings",
-        "variables": ["MAX_FILE_SIZE_MB", "ALLOWED_FILE_TYPES", "UPLOAD_PATH", "MAX_DOCUMENT_SIZE_MB", "SUPPORTED_DOCUMENT_TYPES", "DOCUMENT_STORAGE_PATH"]
-    },
-    "connector": {
-        "name": "Data Connector Configuration",
-        "description": "Data connector and integration settings",
-        "variables": ["CONNECTOR_TIMEOUT", "MAX_CONNECTORS_PER_ORG", "ENABLE_S3_CONNECTOR", "ENABLE_DATABASE_CONNECTORS"]
-    },
-    "aws": {
-        "name": "AWS Configuration",
-        "description": "AWS S3 and cloud service settings",
-        "variables": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "S3_BUCKET_NAME"]
-    },
-    "admin": {
-        "name": "Admin Configuration",
-        "description": "Administrator account settings",
-        "variables": ["FIRST_SUPERUSER", "FIRST_SUPERUSER_PASSWORD"]
-    },
-    "system": {
-        "name": "System Configuration",
-        "description": "System-wide settings",
-        "variables": ["NODE_ENV", "BACKEND_CORS_ORIGINS"]
-    }
-}
-
-def get_env_file_path():
-    """Get the path to the unified .env file"""
-    # Go up one directory from backend to project root
-    return os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", ".env")
-
-def read_env_file() -> Dict[str, str]:
-    """Read environment variables from .env file"""
-    env_path = get_env_file_path()
-    env_vars = {}
+class EnvironmentManager:
+    """Manages environment variables in .env file"""
     
-    if os.path.exists(env_path):
-        with open(env_path, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#') and '=' in line:
-                    key, value = line.split('=', 1)
-                    env_vars[key] = value
+    def __init__(self, env_file_path: str = ".env"):
+        self.env_file_path = env_file_path
     
-    return env_vars
-
-def write_env_file(env_vars: Dict[str, str]):
-    """Write environment variables to .env file"""
-    env_path = get_env_file_path()
+    def read_env_file(self) -> Dict[str, str]:
+        """Read all environment variables from .env file"""
+        env_vars = {}
+        
+        if not os.path.exists(self.env_file_path):
+            return env_vars
+        
+        try:
+            with open(self.env_file_path, 'r', encoding='utf-8') as f:
+                for line_num, line in enumerate(f, 1):
+                    line = line.strip()
+                    
+                    # Skip empty lines and comments
+                    if not line or line.startswith('#'):
+                        continue
+                    
+                    # Parse KEY=VALUE format
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+                        env_vars[key.strip()] = value.strip()
+        
+        except Exception as e:
+            logger.error(f"Error reading .env file: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to read environment file: {str(e)}")
+        
+        return env_vars
     
-    # Read existing file to preserve comments and structure
-    lines = []
-    if os.path.exists(env_path):
-        with open(env_path, 'r') as f:
-            lines = f.readlines()
-    
-    # Update existing variables or add new ones
-    updated_lines = []
-    updated_keys = set()
-    
-    for line in lines:
-        stripped = line.strip()
-        if stripped and not stripped.startswith('#') and '=' in stripped:
-            key = stripped.split('=', 1)[0]
-            if key in env_vars:
-                updated_lines.append(f"{key}={env_vars[key]}\n")
-                updated_keys.add(key)
+    def write_env_file(self, env_vars: Dict[str, str]) -> None:
+        """Write environment variables to .env file with proper formatting"""
+        
+        # Read the original file to preserve comments and structure
+        original_lines = []
+        if os.path.exists(self.env_file_path):
+            try:
+                with open(self.env_file_path, 'r', encoding='utf-8') as f:
+                    original_lines = f.readlines()
+            except Exception as e:
+                logger.warning(f"Could not read original .env file: {e}")
+        
+        # Create new content preserving comments and structure
+        new_lines = []
+        processed_keys = set()
+        
+        for line in original_lines:
+            stripped_line = line.strip()
+            
+            # Preserve comments and empty lines
+            if not stripped_line or stripped_line.startswith('#'):
+                new_lines.append(line)
+                continue
+            
+            # Handle environment variables
+            if '=' in stripped_line:
+                key = stripped_line.split('=', 1)[0].strip()
+                if key in env_vars:
+                    # Update with new value
+                    new_lines.append(f"{key}={env_vars[key]}\n")
+                    processed_keys.add(key)
+                else:
+                    # Keep original line if key not in updates
+                    new_lines.append(line)
             else:
-                updated_lines.append(line)
-        else:
-            updated_lines.append(line)
+                # Keep any other lines as-is
+                new_lines.append(line)
+        
+        # Add any new environment variables that weren't in the original file
+        for key, value in env_vars.items():
+            if key not in processed_keys:
+                new_lines.append(f"{key}={value}\n")
+        
+        # Write the updated content
+        try:
+            # Create backup
+            if os.path.exists(self.env_file_path):
+                backup_path = f"{self.env_file_path}.backup.{int(datetime.now().timestamp())}"
+                os.rename(self.env_file_path, backup_path)
+                logger.info(f"Created backup: {backup_path}")
+            
+            with open(self.env_file_path, 'w', encoding='utf-8') as f:
+                f.writelines(new_lines)
+            
+            logger.info(f"Successfully updated .env file with {len(env_vars)} variables")
+            
+        except Exception as e:
+            logger.error(f"Error writing .env file: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to write environment file: {str(e)}")
     
-    # Add new variables that weren't in the file
-    for key, value in env_vars.items():
-        if key not in updated_keys:
-            updated_lines.append(f"{key}={value}\n")
+    def update_env_var(self, key: str, value: str) -> None:
+        """Update a single environment variable"""
+        env_vars = self.read_env_file()
+        env_vars[key] = value
+        self.write_env_file(env_vars)
+        
+        # Update the current process environment
+        os.environ[key] = value
     
-    # Write back to file
-    with open(env_path, 'w') as f:
-        f.writelines(updated_lines)
+    def get_env_var(self, key: str, default: Optional[str] = None) -> Optional[str]:
+        """Get a single environment variable"""
+        env_vars = self.read_env_file()
+        return env_vars.get(key, default)
+    
+    def delete_env_var(self, key: str) -> None:
+        """Delete an environment variable"""
+        env_vars = self.read_env_file()
+        if key in env_vars:
+            del env_vars[key]
+            self.write_env_file(env_vars)
+            
+            # Remove from current process environment
+            if key in os.environ:
+                del os.environ[key]
 
-@router.get("/")
+# Initialize environment manager
+env_manager = EnvironmentManager()
+
+@router.get("/environment-variables")
 async def get_environment_variables(
     current_user: User = Depends(get_current_superuser)
-):
-    """Get all environment variables organized by category"""
+) -> Dict[str, Any]:
+    """Get all environment variables with categorization"""
+    
     try:
-        env_vars = read_env_file()
+        env_vars = env_manager.read_env_file()
         
-        # Organize by category
-        categorized_vars = {}
-        for category_key, category_info in ENV_CATEGORIES.items():
-            categorized_vars[category_key] = {
-                "name": category_info["name"],
-                "description": category_info["description"],
-                "variables": []
-            }
+        # Categorize environment variables
+        categorized_vars = {
+            "database": {},
+            "security": {},
+            "ai_models": {},
+            "data_sharing": {},
+            "file_upload": {},
+            "connectors": {},
+            "admin": {},
+            "other": {}
+        }
+        
+        # Define categories
+        category_mapping = {
+            "database": ["DATABASE_URL", "MINDSDB_URL", "MINDSDB_DATABASE", "MINDSDB_USERNAME", "MINDSDB_PASSWORD"],
+            "security": ["SECRET_KEY", "ALGORITHM", "ACCESS_TOKEN_EXPIRE_MINUTES", "BACKEND_CORS_ORIGINS"],
+            "ai_models": ["GOOGLE_API_KEY", "DEFAULT_GEMINI_MODEL", "GEMINI_ENGINE_NAME", "GEMINI_CHAT_MODEL_NAME", "GEMINI_VISION_MODEL_NAME", "GEMINI_EMBEDDING_MODEL_NAME"],
+            "data_sharing": ["ENABLE_DATA_SHARING", "ENABLE_AI_CHAT", "SHARE_LINK_EXPIRY_HOURS", "MAX_CHAT_SESSIONS_PER_DATASET"],
+            "file_upload": ["MAX_FILE_SIZE_MB", "ALLOWED_FILE_TYPES", "UPLOAD_PATH", "MAX_DOCUMENT_SIZE_MB", "SUPPORTED_DOCUMENT_TYPES", "DOCUMENT_STORAGE_PATH"],
+            "connectors": ["CONNECTOR_TIMEOUT", "MAX_CONNECTORS_PER_ORG", "ENABLE_S3_CONNECTOR", "ENABLE_DATABASE_CONNECTORS", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "S3_BUCKET_NAME"],
+            "admin": ["FIRST_SUPERUSER", "FIRST_SUPERUSER_PASSWORD", "NODE_ENV"]
+        }
+        
+        # Categorize variables
+        for key, value in env_vars.items():
+            categorized = False
+            for category, keys in category_mapping.items():
+                if key in keys:
+                    categorized_vars[category][key] = {
+                        "value": value,
+                        "is_sensitive": key in ["SECRET_KEY", "GOOGLE_API_KEY", "MINDSDB_PASSWORD", "AWS_SECRET_ACCESS_KEY", "FIRST_SUPERUSER_PASSWORD"],
+                        "description": get_env_var_description(key)
+                    }
+                    categorized = True
+                    break
             
-            for var_key in category_info["variables"]:
-                categorized_vars[category_key]["variables"].append({
-                    "key": var_key,
-                    "value": env_vars.get(var_key, ""),
-                    "description": get_variable_description(var_key)
-                })
+            if not categorized:
+                categorized_vars["other"][key] = {
+                    "value": value,
+                    "is_sensitive": "KEY" in key.upper() or "PASSWORD" in key.upper() or "SECRET" in key.upper(),
+                    "description": "Custom environment variable"
+                }
         
         return {
             "categories": categorized_vars,
-            "total_variables": len(env_vars)
+            "total_variables": len(env_vars),
+            "last_updated": datetime.now().isoformat()
         }
+        
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to read environment variables: {str(e)}"
-        )
+        logger.error(f"Error getting environment variables: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@router.put("/")
-async def update_environment_variables(
-    update: EnvironmentUpdate,
+@router.put("/environment-variables/{var_name}")
+async def update_environment_variable(
+    var_name: str,
+    update_data: Dict[str, str],
     current_user: User = Depends(get_current_superuser)
-):
-    """Update environment variables"""
+) -> Dict[str, Any]:
+    """Update a single environment variable"""
+    
     try:
-        # Read current environment
-        current_env = read_env_file()
+        value = update_data.get("value", "")
         
-        # Update with new values
-        for var in update.variables:
-            current_env[var.key] = var.value
+        # Validate critical variables
+        if var_name == "GOOGLE_API_KEY" and value:
+            if not value.startswith("AIza") and len(value) < 30:
+                raise HTTPException(status_code=400, detail="Invalid Google API key format")
         
-        # Write back to file
-        write_env_file(current_env)
+        # Update the environment variable
+        env_manager.update_env_var(var_name, value)
         
         return {
-            "message": "Environment variables updated successfully",
-            "updated_count": len(update.variables)
+            "message": f"Environment variable '{var_name}' updated successfully",
+            "variable": var_name,
+            "updated_at": datetime.now().isoformat()
         }
+        
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update environment variables: {str(e)}"
-        )
+        logger.error(f"Error updating environment variable {var_name}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/variable")
+@router.post("/environment-variables")
 async def create_environment_variable(
-    variable: EnvironmentVariable,
+    var_data: Dict[str, str],
     current_user: User = Depends(get_current_superuser)
-):
+) -> Dict[str, Any]:
     """Create a new environment variable"""
+    
     try:
-        env_vars = read_env_file()
-        env_vars[variable.key] = variable.value
-        write_env_file(env_vars)
+        var_name = var_data.get("name", "").strip().upper()
+        var_value = var_data.get("value", "")
+        
+        if not var_name:
+            raise HTTPException(status_code=400, detail="Variable name is required")
+        
+        # Check if variable already exists
+        existing_value = env_manager.get_env_var(var_name)
+        if existing_value is not None:
+            raise HTTPException(status_code=400, detail=f"Environment variable '{var_name}' already exists")
+        
+        # Create the environment variable
+        env_manager.update_env_var(var_name, var_value)
         
         return {
-            "message": f"Environment variable '{variable.key}' created successfully"
+            "message": f"Environment variable '{var_name}' created successfully",
+            "variable": var_name,
+            "created_at": datetime.now().isoformat()
         }
+        
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create environment variable: {str(e)}"
-        )
+        logger.error(f"Error creating environment variable: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/variable/{key}")
+@router.delete("/environment-variables/{var_name}")
 async def delete_environment_variable(
-    key: str,
+    var_name: str,
     current_user: User = Depends(get_current_superuser)
-):
+) -> Dict[str, Any]:
     """Delete an environment variable"""
+    
     try:
-        env_vars = read_env_file()
-        if key in env_vars:
-            del env_vars[key]
-            write_env_file(env_vars)
-            return {"message": f"Environment variable '{key}' deleted successfully"}
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Environment variable '{key}' not found"
-            )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete environment variable: {str(e)}"
-        )
-
-@router.post("/reload")
-async def reload_environment(
-    current_user: User = Depends(get_current_superuser)
-):
-    """Reload environment variables (requires application restart for full effect)"""
-    try:
-        env_vars = read_env_file()
+        # Check if variable exists
+        existing_value = env_manager.get_env_var(var_name)
+        if existing_value is None:
+            raise HTTPException(status_code=404, detail=f"Environment variable '{var_name}' not found")
         
-        # Update os.environ with new values
-        for key, value in env_vars.items():
-            os.environ[key] = value
+        # Prevent deletion of critical variables
+        critical_vars = ["DATABASE_URL", "SECRET_KEY", "ALGORITHM"]
+        if var_name in critical_vars:
+            raise HTTPException(status_code=400, detail=f"Cannot delete critical environment variable '{var_name}'")
+        
+        # Delete the environment variable
+        env_manager.delete_env_var(var_name)
         
         return {
-            "message": "Environment variables reloaded successfully",
-            "note": "Some changes may require application restart to take full effect"
+            "message": f"Environment variable '{var_name}' deleted successfully",
+            "variable": var_name,
+            "deleted_at": datetime.now().isoformat()
         }
+        
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to reload environment variables: {str(e)}"
-        )
+        logger.error(f"Error deleting environment variable {var_name}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-def get_variable_description(key: str) -> str:
-    """Get description for environment variable"""
+@router.post("/environment-variables/bulk-update")
+async def bulk_update_environment_variables(
+    updates: Dict[str, str],
+    current_user: User = Depends(get_current_superuser)
+) -> Dict[str, Any]:
+    """Bulk update multiple environment variables"""
+    
+    try:
+        if not updates:
+            raise HTTPException(status_code=400, detail="No updates provided")
+        
+        # Read current environment variables
+        current_env = env_manager.read_env_file()
+        
+        # Apply updates
+        updated_vars = []
+        for var_name, var_value in updates.items():
+            current_env[var_name] = var_value
+            updated_vars.append(var_name)
+            # Update current process environment
+            os.environ[var_name] = var_value
+        
+        # Write all variables back to file
+        env_manager.write_env_file(current_env)
+        
+        return {
+            "message": f"Successfully updated {len(updated_vars)} environment variables",
+            "updated_variables": updated_vars,
+            "updated_at": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error bulk updating environment variables: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/environment-variables/{var_name}")
+async def get_environment_variable(
+    var_name: str,
+    current_user: User = Depends(get_current_superuser)
+) -> Dict[str, Any]:
+    """Get a specific environment variable"""
+    
+    try:
+        value = env_manager.get_env_var(var_name)
+        
+        if value is None:
+            raise HTTPException(status_code=404, detail=f"Environment variable '{var_name}' not found")
+        
+        is_sensitive = var_name in ["SECRET_KEY", "GOOGLE_API_KEY", "MINDSDB_PASSWORD", "AWS_SECRET_ACCESS_KEY", "FIRST_SUPERUSER_PASSWORD"]
+        
+        return {
+            "name": var_name,
+            "value": "***HIDDEN***" if is_sensitive else value,
+            "actual_value": value,
+            "is_sensitive": is_sensitive,
+            "description": get_env_var_description(var_name)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting environment variable {var_name}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+def get_env_var_description(var_name: str) -> str:
+    """Get description for environment variables"""
     descriptions = {
-        "DATABASE_URL": "SQLite database connection string",
-        "SECRET_KEY": "JWT signing secret key",
-        "ALGORITHM": "JWT algorithm (HS256)",
+        "DATABASE_URL": "Database connection URL",
+        "SECRET_KEY": "Secret key for JWT token encryption",
+        "ALGORITHM": "Algorithm used for JWT token encryption",
         "ACCESS_TOKEN_EXPIRE_MINUTES": "JWT token expiration time in minutes",
-        "BACKEND_CORS_ORIGINS": "Comma-separated list of allowed CORS origins",
-        "GOOGLE_API_KEY": "Google AI API key for Gemini models",
+        "BACKEND_CORS_ORIGINS": "Allowed CORS origins for backend API",
+        "GOOGLE_API_KEY": "Google API key for Gemini AI integration",
         "MINDSDB_URL": "MindsDB server URL",
         "MINDSDB_DATABASE": "MindsDB database name",
-        "MINDSDB_USERNAME": "MindsDB username (optional)",
-        "MINDSDB_PASSWORD": "MindsDB password (optional)",
+        "MINDSDB_USERNAME": "MindsDB username",
+        "MINDSDB_PASSWORD": "MindsDB password",
         "DEFAULT_GEMINI_MODEL": "Default Gemini model to use",
-        "GEMINI_ENGINE_NAME": "Gemini engine name in MindsDB",
+        "GEMINI_ENGINE_NAME": "MindsDB engine name for Gemini",
         "GEMINI_CHAT_MODEL_NAME": "Gemini chat model name",
         "GEMINI_VISION_MODEL_NAME": "Gemini vision model name",
         "GEMINI_EMBEDDING_MODEL_NAME": "Gemini embedding model name",
-        "ENABLE_DATA_SHARING": "Enable data sharing features",
-        "ENABLE_AI_CHAT": "Enable AI chat functionality",
-        "SHARE_LINK_EXPIRY_HOURS": "Share link expiration time in hours",
+        "ENABLE_DATA_SHARING": "Enable/disable data sharing features",
+        "ENABLE_AI_CHAT": "Enable/disable AI chat functionality",
+        "SHARE_LINK_EXPIRY_HOURS": "Default expiry time for share links in hours",
         "MAX_CHAT_SESSIONS_PER_DATASET": "Maximum chat sessions per dataset",
         "MAX_FILE_SIZE_MB": "Maximum file upload size in MB",
-        "ALLOWED_FILE_TYPES": "Comma-separated list of allowed file types",
-        "UPLOAD_PATH": "File upload storage path",
+        "ALLOWED_FILE_TYPES": "Allowed file types for upload",
+        "UPLOAD_PATH": "Path for file uploads",
         "MAX_DOCUMENT_SIZE_MB": "Maximum document size in MB",
-        "SUPPORTED_DOCUMENT_TYPES": "Comma-separated list of supported document types",
-        "DOCUMENT_STORAGE_PATH": "Document storage path",
-        "CONNECTOR_TIMEOUT": "Data connector timeout in seconds",
+        "SUPPORTED_DOCUMENT_TYPES": "Supported document types",
+        "DOCUMENT_STORAGE_PATH": "Path for document storage",
+        "CONNECTOR_TIMEOUT": "Database connector timeout in seconds",
         "MAX_CONNECTORS_PER_ORG": "Maximum connectors per organization",
-        "ENABLE_S3_CONNECTOR": "Enable S3 connector",
-        "ENABLE_DATABASE_CONNECTORS": "Enable database connectors",
-        "AWS_ACCESS_KEY_ID": "AWS access key ID for S3",
-        "AWS_SECRET_ACCESS_KEY": "AWS secret access key for S3",
+        "ENABLE_S3_CONNECTOR": "Enable/disable S3 connector",
+        "ENABLE_DATABASE_CONNECTORS": "Enable/disable database connectors",
+        "AWS_ACCESS_KEY_ID": "AWS access key ID",
+        "AWS_SECRET_ACCESS_KEY": "AWS secret access key",
         "AWS_DEFAULT_REGION": "AWS default region",
         "S3_BUCKET_NAME": "S3 bucket name",
-        "FIRST_SUPERUSER": "Default admin user email",
-        "FIRST_SUPERUSER_PASSWORD": "Default admin user password",
+        "FIRST_SUPERUSER": "First superuser email",
+        "FIRST_SUPERUSER_PASSWORD": "First superuser password",
         "NODE_ENV": "Node.js environment (development/production)"
     }
-    return descriptions.get(key, "No description available")
+    
+    return descriptions.get(var_name, "Custom environment variable")

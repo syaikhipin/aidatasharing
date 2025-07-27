@@ -1,5 +1,5 @@
 import secrets
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pydantic_settings import BaseSettings
 
 
@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./storage/aishare_platform.db"
     
     # CORS origins - will be parsed from comma-separated string
-    BACKEND_CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8080,http://localhost:3001,http://localhost:3004"
+    BACKEND_CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:10103,http://localhost:3001,http://localhost:3004"
     
     def get_cors_origins(self) -> List[str]:
         """Parse CORS origins from comma-separated string."""
@@ -69,9 +69,58 @@ class Settings(BaseSettings):
     ENABLE_S3_CONNECTOR: bool = True
     ENABLE_DATABASE_CONNECTORS: bool = True
     
+    # SSL Configuration for Development
+    DISABLE_SSL_FOR_LOCALHOST: bool = True
+    FORCE_SSL_IN_PRODUCTION: bool = True
+    SSL_DEVELOPMENT_MODE: bool = True  # Automatically disable SSL for localhost in development
+    
     def get_allowed_file_types(self) -> List[str]:
         """Parse allowed file types from comma-separated string."""
         return [ext.strip() for ext in self.ALLOWED_FILE_TYPES.split(",") if ext.strip()]
+    
+    def should_disable_ssl_for_host(self, host: str, port: Optional[int] = None) -> bool:
+        """
+        Determine if SSL should be disabled for a specific host/port combination
+        
+        Args:
+            host: Hostname or IP address
+            port: Optional port number
+            
+        Returns:
+            bool: True if SSL should be disabled
+        """
+        if not self.SSL_DEVELOPMENT_MODE:
+            return False
+            
+        # Import here to avoid circular imports
+        from app.utils.environment import EnvironmentDetector
+        
+        return EnvironmentDetector.should_disable_ssl(host, port)
+    
+    def get_ssl_config_for_connector(self, connector_type: str, host: str, 
+                                   port: Optional[int] = None, 
+                                   existing_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Get SSL configuration for a connector based on environment and host
+        
+        Args:
+            connector_type: Type of connector (mysql, postgresql, etc.)
+            host: Hostname or IP address  
+            port: Optional port number
+            existing_config: Existing configuration to merge
+            
+        Returns:
+            Dict containing SSL configuration
+        """
+        if not self.SSL_DEVELOPMENT_MODE:
+            return existing_config or {}
+            
+        # Import here to avoid circular imports
+        from app.utils.environment import EnvironmentDetector
+        
+        return EnvironmentDetector.get_ssl_config_for_connection(
+            connector_type, host, port, existing_config
+        )
     
     # Admin user
     FIRST_SUPERUSER: str = "admin@example.com"

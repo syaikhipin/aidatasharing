@@ -144,7 +144,22 @@ export const adminAPI = {
   },
 
   updateEnvironmentVariable: async (name: string, value: string) => {
-    const response = await apiClient.put(`/api/admin/unified-config/environment/${name}`, { value });
+    const response = await apiClient.put(`/api/admin/environment-variables/${name}`, { value });
+    return response.data;
+  },
+
+  createEnvironmentVariable: async (name: string, value: string) => {
+    const response = await apiClient.post('/api/admin/environment-variables', { name, value });
+    return response.data;
+  },
+
+  deleteEnvironmentVariable: async (name: string) => {
+    const response = await apiClient.delete(`/api/admin/environment-variables/${name}`);
+    return response.data;
+  },
+
+  bulkUpdateEnvironmentVariables: async (updates: Record<string, string>) => {
+    const response = await apiClient.post('/api/admin/environment-variables/bulk-update', updates);
     return response.data;
   },
 };

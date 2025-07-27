@@ -642,23 +642,42 @@ async def _test_api_connection(connector: DatabaseConnector) -> Dict[str, Any]:
         import requests
         
         config = connector.connection_config.copy()
+        
+        # Apply SSL configuration for development
+        from app.core.config import settings
+        from urllib.parse import urlparse
+        
         base_url = config.get("base_url", "")
+        parsed_url = urlparse(base_url)
+        host = parsed_url.hostname
+        port = parsed_url.port
+        
+        # Get SSL-aware configuration
+        ssl_config = settings.get_ssl_config_for_connector(
+            'api', host, port, config
+        )
+        config.update(ssl_config)
+        
+        # Use potentially modified base_url
+        base_url = config.get("base_url", base_url)
         endpoint = config.get("endpoint", "")
         method = config.get("method", "GET").upper()
         timeout = config.get("timeout", 30)
         headers = config.get("headers", {})
+        ssl_verify = config.get("ssl_verify", True)
         
         if not base_url or not endpoint:
             return {"success": False, "error": "Base URL and endpoint are required"}
         
         full_url = f"{base_url.rstrip('/')}{endpoint}"
         
-        # Make the API request
+        # Make the API request with SSL configuration
         response = requests.request(
             method=method,
             url=full_url,
             headers=headers,
-            timeout=timeout
+            timeout=timeout,
+            verify=ssl_verify
         )
         
         if response.status_code == 200:
@@ -669,14 +688,16 @@ async def _test_api_connection(connector: DatabaseConnector) -> Dict[str, Any]:
                     "success": True, 
                     "message": f"API connection successful. Retrieved {data_count} items.",
                     "status_code": response.status_code,
-                    "data_preview": str(data)[:200] + "..." if len(str(data)) > 200 else str(data)
+                    "data_preview": str(data)[:200] + "..." if len(str(data)) > 200 else str(data),
+                    "ssl_config": {"ssl_verify": ssl_verify, "protocol": "HTTP" if not ssl_verify else "HTTPS"}
                 }
             except:
                 return {
                     "success": True,
                     "message": f"API connection successful. Response received (non-JSON).",
                     "status_code": response.status_code,
-                    "content_type": response.headers.get("content-type", "unknown")
+                    "content_type": response.headers.get("content-type", "unknown"),
+                    "ssl_config": {"ssl_verify": ssl_verify, "protocol": "HTTP" if not ssl_verify else "HTTPS"}
                 }
         else:
             return {

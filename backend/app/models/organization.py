@@ -46,6 +46,7 @@ class Organization(Base):
 
     # Relationships - using string references to avoid circular imports
     users = relationship("User", back_populates="organization", lazy="dynamic")
+    proxy_connectors = relationship("ProxyConnector", back_populates="organization", lazy="dynamic")
 
 
 class UserRole(str, enum.Enum):

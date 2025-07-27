@@ -280,6 +280,18 @@ class ConnectorService:
         if connector.credentials:
             config.update(connector.credentials)
         
+        # Apply SSL configuration based on environment and host
+        from app.core.config import settings
+        
+        host = config.get("host", "localhost")
+        port = config.get("port")
+        
+        # Get SSL-aware configuration
+        ssl_config = settings.get_ssl_config_for_connector(
+            connector.connector_type, host, port, config
+        )
+        config.update(ssl_config)
+        
         # Connector-specific parameter mapping
         if connector.connector_type == 'mysql':
             return {
