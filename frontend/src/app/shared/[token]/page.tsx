@@ -33,6 +33,10 @@ export default function SharedDatasetPage() {
   const [password, setPassword] = useState('');
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [showChat, setShowChat] = useState(false);
+  const [chatMessage, setChatMessage] = useState('');
+  const [chatHistory, setChatHistory] = useState<any[]>([]);
+  const [isChatting, setIsChatting] = useState(false);
 
   useEffect(() => {
     if (token) {
@@ -153,6 +157,58 @@ export default function SharedDatasetPage() {
     setTimeout(() => {
       document.title = originalTitle;
     }, 2000);
+  };
+
+  const handleChat = async () => {
+    if (!chatMessage.trim() || !token) return;
+    
+    const userMessage = chatMessage.trim();
+    setChatMessage('');
+    
+    // Add user message to history
+    const newUserMessage = {
+      id: Date.now(),
+      type: 'user',
+      message: userMessage,
+      timestamp: new Date().toISOString()
+    };
+    setChatHistory(prev => [...prev, newUserMessage]);
+    
+    try {
+      setIsChatting(true);
+      const response = await dataSharingAPI.chatWithSharedDataset(token, userMessage);
+      
+      // Add AI response to history
+      const aiMessage = {
+        id: Date.now() + 1,
+        type: 'ai',
+        message: response.answer || response.response || 'No response received',
+        timestamp: new Date().toISOString(),
+        model: response.model,
+        tokens_used: response.tokens_used,
+        error: false
+      };
+      setChatHistory(prev => [...prev, aiMessage]);
+      
+    } catch (error: any) {
+      console.error('Chat failed:', error);
+      
+      // Add error message to history
+      const errorMessage = {
+        id: Date.now() + 1,
+        type: 'ai',
+        message: error.response?.data?.detail || 'Failed to connect to chat service. Please try again.',
+        timestamp: new Date().toISOString(),
+        error: true
+      };
+      setChatHistory(prev => [...prev, errorMessage]);
+    } finally {
+      setIsChatting(false);
+    }
+  };
+
+  const clearChat = () => {
+    setChatHistory([]);
   };
 
   const generateConnectionString = (dataset: SharedDataset, token: string): string => {
@@ -326,9 +382,12 @@ export default function SharedDatasetPage() {
                   Download
                 </button>
                 {dataset.enable_chat && (
-                  <button className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                  <button 
+                    onClick={() => setShowChat(!showChat)}
+                    className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                  >
                     <MessageSquare className="h-4 w-4 mr-2" />
-                    Chat with Data
+                    {showChat ? 'Hide Chat' : 'Chat with Data'}
                   </button>
                 )}
               </div>
@@ -537,6 +596,159 @@ export default function SharedDatasetPage() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Chat Interface */}
+        {showChat && dataset.enable_chat && (
+          <div className="bg-white shadow rounded-lg mb-6">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <MessageSquare className="h-5 w-5 text-blue-600 mr-2" />
+                  <h2 className="text-lg font-medium text-gray-900">AI Chat Assistant</h2>
+                </div>
+                {chatHistory.length > 0 && (
+                  <button
+                    onClick={clearChat}
+                    className="text-sm text-gray-500 hover:text-gray-700"
+                  >
+                    Clear Chat
+                  </button>
+                )}
+              </div>
+              <p className="mt-1 text-sm text-gray-600">
+                Ask questions about the shared dataset and get AI-powered insights
+              </p>
+            </div>
+            
+            <div className="px-6 py-4">
+              {/* Chat History */}
+              {chatHistory.length > 0 && (
+                <div className="mb-6 space-y-4 max-h-96 overflow-y-auto">
+                  {chatHistory.map((message) => (
+                    <div key={message.id} className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+                        message.type === 'user' 
+                          ? 'bg-blue-600 text-white' 
+                          : message.error
+                          ? 'bg-red-50 border border-red-200 text-red-700'
+                          : 'bg-gray-100 text-gray-900'
+                      }`}>
+                        <div className="text-sm whitespace-pre-wrap prose prose-sm max-w-none">
+                          {message.type === 'ai' ? (
+                            <div dangerouslySetInnerHTML={{ 
+                              __html: message.message.replace(/\n/g, '<br/>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>') 
+                            }} />
+                          ) : (
+                            message.message
+                          )}
+                        </div>
+                        <p className="text-xs mt-1 opacity-75">
+                          {new Date(message.timestamp).toLocaleTimeString()}
+                          {message.model && !message.error && (
+                            <span className="ml-2">• {message.model}</span>
+                          )}
+                          {message.tokens_used && !message.error && (
+                            <span className="ml-1">• {message.tokens_used} tokens</span>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                  {isChatting && (
+                    <div className="flex justify-start">
+                      <div className="bg-gray-100 text-gray-900 px-4 py-2 rounded-lg">
+                        <div className="flex items-center space-x-2">
+                          <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-blue-600"></div>
+                          <span className="text-sm">AI is thinking...</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Chat Input */}
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Ask a question about the data
+                  </label>
+                  <div className="flex space-x-3">
+                    <input
+                      type="text"
+                      value={chatMessage}
+                      onChange={(e) => setChatMessage(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleChat()}
+                      placeholder="What insights can you provide about this dataset?"
+                      className="flex-1 border border-gray-300 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      disabled={isChatting}
+                    />
+                    <button
+                      onClick={handleChat}
+                      disabled={!chatMessage.trim() || isChatting}
+                      className="px-6 py-3 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isChatting ? (
+                        <div className="flex items-center">
+                          <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>
+                          Asking...
+                        </div>
+                      ) : (
+                        <>
+                          <span className="mr-1">🚀</span>
+                          Ask AI
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Suggestions */}
+                {chatHistory.length === 0 && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h4 className="text-sm font-medium text-blue-800 mb-2">💡 Try asking questions like:</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      {[
+                        "What insights can you provide about this dataset?",
+                        "Analyze the data distribution and patterns",
+                        "What are the key statistics in this data?",
+                        "Can you summarize the main findings?",
+                        "What columns are available in this dataset?",
+                        "Suggest visualizations for this data"
+                      ].map((suggestion, index) => (
+                        <button
+                          key={index}
+                          onClick={() => setChatMessage(suggestion)}
+                          className="text-left text-sm text-blue-700 hover:text-blue-900 p-2 rounded hover:bg-blue-100 transition-colors"
+                        >
+                          "{suggestion}"
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Information */}
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                  <div className="flex">
+                    <div className="flex-shrink-0">
+                      <span className="text-gray-500 text-lg">ℹ️</span>
+                    </div>
+                    <div className="ml-3">
+                      <h4 className="text-sm font-medium text-gray-800">Chat Information</h4>
+                      <div className="mt-1 text-sm text-gray-600">
+                        <p>
+                          This chat feature provides AI-powered analysis of the shared dataset. 
+                          Ask questions to get comprehensive insights, statistical analysis, and visualization recommendations.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

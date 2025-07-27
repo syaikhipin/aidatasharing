@@ -775,13 +775,43 @@ class MindsDBService:
             
             # Use general chat with enhanced context
             enhanced_message = f"""
-            You are analyzing a specific dataset. Here is the information about this dataset:
-            
+            You are an expert data analyst with access to a specific dataset. Your role is to provide comprehensive, actionable insights with detailed analysis and visualization recommendations.
+
+            DATASET INFORMATION:
             {dataset_context}
-            
-            User Question: {message}
-            
-            Please provide a detailed, data-driven response based on this dataset information. Be specific about what you can see in the dataset and provide insights based on the actual data structure and content shown above.
+
+            USER QUESTION: {message}
+
+            INSTRUCTIONS FOR YOUR RESPONSE:
+            1. **Data Understanding**: First, clearly explain what this dataset contains and its structure
+            2. **Direct Answer**: Provide a specific, detailed answer to the user's question based on the actual data
+            3. **Statistical Analysis**: Include relevant statistics, patterns, and trends you can identify
+            4. **Visualization Recommendations**: Suggest specific charts and graphs that would best represent the data for this question
+            5. **Actionable Insights**: Provide practical insights and recommendations based on your analysis
+            6. **Data Quality Notes**: Comment on any data quality issues or limitations you observe
+
+            RESPONSE FORMAT:
+            Please structure your response using clear markdown formatting with the following sections:
+
+            ## 📊 Data Overview
+            [Brief description of the dataset and its key characteristics]
+
+            ## 🎯 Analysis Results
+            [Direct answer to the user's question with specific findings]
+
+            ## 📈 Statistical Insights
+            [Key statistics, patterns, and trends identified]
+
+            ## 📋 Recommended Visualizations
+            [Specific chart types and visualization suggestions with reasoning]
+
+            ## 💡 Key Insights & Recommendations
+            [Actionable insights and practical recommendations]
+
+            ## ⚠️ Data Quality & Limitations
+            [Any limitations or data quality considerations]
+
+            Be specific, use actual data values when available, and ensure your analysis is thorough and professional. Focus on providing value through deep data understanding rather than generic responses.
             """
             
             logger.info(f"💬 Using general chat model: {self.chat_model_name}")
