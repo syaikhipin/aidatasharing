@@ -106,21 +106,47 @@ function AdminDatasetsContent() {
   };
 
   const handleDeleteDataset = async (datasetId: number, datasetName: string, forceDelete: boolean = false) => {
-    const action = forceDelete ? 'permanently delete' : 'delete';
-    const warning = forceDelete 
-      ? 'This will PERMANENTLY delete the dataset and cannot be undone!'
-      : 'This will soft delete the dataset (can be restored later).';
+    let title, message, confirmText;
     
-    if (!confirm(`Are you sure you want to ${action} the dataset "${datasetName}"?\n\n${warning}`)) {
-      return;
+    if (forceDelete) {
+      title = 'Permanently Delete Dataset';
+      message = `⚠️ WARNING: This will PERMANENTLY DELETE the dataset "${datasetName}" and ALL associated data including:\n\n• All access logs and analytics\n• All download records\n• All chat sessions and messages\n• All AI models and predictions\n• All sharing links and accesses\n\nThis action CANNOT be undone and the data will be lost forever!`;
+      confirmText = 'Type "DELETE" to confirm permanent deletion:';
+    } else {
+      title = 'Disable Dataset';
+      message = `This will disable the dataset "${datasetName}" and hide it from users.\n\n✅ The dataset can be restored later\n✅ All data and history will be preserved\n✅ No data will be permanently lost\n\nThe dataset will be marked as deleted but can be restored from the admin panel.`;
+      confirmText = 'Are you sure you want to disable this dataset?';
+    }
+    
+    if (forceDelete) {
+      // For permanent delete, require typing "DELETE"
+      const userInput = prompt(`${title}\n\n${message}\n\n${confirmText}`);
+      if (userInput !== 'DELETE') {
+        if (userInput !== null) {
+          alert('Deletion cancelled. You must type "DELETE" exactly to confirm permanent deletion.');
+        }
+        return;
+      }
+    } else {
+      // For soft delete, just confirm
+      if (!confirm(`${title}\n\n${message}\n\n${confirmText}`)) {
+        return;
+      }
     }
 
     try {
       await adminAPI.deleteAdminDataset(datasetId, forceDelete);
       await fetchData(); // Refresh data
+      
+      if (forceDelete) {
+        alert(`Dataset "${datasetName}" has been permanently deleted.`);
+      } else {
+        alert(`Dataset "${datasetName}" has been disabled and can be restored later.`);
+      }
     } catch (error: any) {
       console.error('Failed to delete dataset:', error);
-      alert(error.response?.data?.detail || 'Failed to delete dataset');
+      const errorMessage = error.response?.data?.detail || 'Failed to delete dataset';
+      alert(`Error: ${errorMessage}`);
     }
   };
 
@@ -438,8 +464,8 @@ function AdminDatasetsContent() {
                                   variant="destructive"
                                   size="sm"
                                 >
-                                  <span className="mr-1">🗑️</span>
-                                  Delete
+                                  <span className="mr-1">⏸️</span>
+                                  Disable
                                 </Button>
                               </>
                             )}

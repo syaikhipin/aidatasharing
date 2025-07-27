@@ -396,9 +396,37 @@ async def admin_delete_dataset(
             logger.warning(f"ML models cleanup failed: {e}")
         
         if force_delete:
-            # Hard delete (permanent removal)
+            # Hard delete (permanent removal) - need to clean up related records first
+            logger.info(f"Performing hard delete of dataset {dataset_id}")
+            
+            # Delete related records that have NOT NULL foreign keys
+            from app.models.dataset import DatasetAccessLog, DatasetDownload, DatasetModel, DatasetChatSession, ChatMessage, DatasetShareAccess
+            
+            # Delete chat messages first (they reference chat sessions)
+            chat_sessions = db.query(DatasetChatSession).filter(DatasetChatSession.dataset_id == dataset_id).all()
+            for session in chat_sessions:
+                db.query(ChatMessage).filter(ChatMessage.session_id == session.id).delete()
+            
+            # Delete chat sessions
+            db.query(DatasetChatSession).filter(DatasetChatSession.dataset_id == dataset_id).delete()
+            
+            # Delete access logs
+            db.query(DatasetAccessLog).filter(DatasetAccessLog.dataset_id == dataset_id).delete()
+            
+            # Delete downloads
+            db.query(DatasetDownload).filter(DatasetDownload.dataset_id == dataset_id).delete()
+            
+            # Delete models
+            db.query(DatasetModel).filter(DatasetModel.dataset_id == dataset_id).delete()
+            
+            # Delete share accesses
+            db.query(DatasetShareAccess).filter(DatasetShareAccess.dataset_id == dataset_id).delete()
+            
+            # Now delete the dataset itself
             db.delete(dataset)
             db.commit()
+            
+            logger.info(f"Successfully hard deleted dataset {dataset_id} and all related records")
             return {
                 "message": "Dataset permanently deleted",
                 "dataset_id": dataset_id,
