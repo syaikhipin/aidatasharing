@@ -39,7 +39,7 @@ venv.bak/
 backend/.env
 backend/config.env
 config.env
-
+forge.yaml
 # Backend specific
 backend/*.log
 backend/app.db
