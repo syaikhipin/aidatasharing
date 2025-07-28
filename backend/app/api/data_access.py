@@ -614,6 +614,51 @@ async def mark_notification_read(
     return {"message": "Notification marked as read"}
 
 
+@router.patch("/notifications/mark-all-read")
+async def mark_all_notifications_read(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Mark all notifications as read for the current user
+    """
+    notifications = db.query(Notification).filter(
+        Notification.recipient_id == current_user.id,
+        Notification.is_read == False
+    ).all()
+    
+    for notification in notifications:
+        notification.is_read = True
+        notification.read_at = datetime.utcnow()
+    
+    db.commit()
+    
+    return {"message": f"Marked {len(notifications)} notifications as read"}
+
+
+@router.delete("/notifications/{notification_id}")
+async def delete_notification(
+    notification_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a notification
+    """
+    notification = db.query(Notification).filter(
+        Notification.id == notification_id,
+        Notification.recipient_id == current_user.id
+    ).first()
+    
+    if not notification:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    
+    db.delete(notification)
+    db.commit()
+    
+    return {"message": "Notification deleted successfully"}
+
+
 @router.get("/audit-logs", response_model=List[AuditLogResponse])
 async def get_audit_logs(
     action: Optional[str] = Query(None, description="Filter by action type"),

@@ -293,10 +293,10 @@ function OverviewTab({ stats, onRefresh }: { stats: AdminStats | null; onRefresh
               </Button>
             </Link>
             
-            <Link href="/data-access">
+            <Link href="/admin/access-requests">
               <Button variant="outline" className="w-full justify-start">
                 <Shield className="mr-2 h-4 w-4" />
-                Data Access Requests
+                Manage Access Requests
               </Button>
             </Link>
             

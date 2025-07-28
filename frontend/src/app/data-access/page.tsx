@@ -8,6 +8,8 @@ import Link from 'next/link';
 import { datasetsAPI, dataAccessAPI } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { AccessRequestModal } from '@/components/datasets/AccessRequestForm';
+import { NotificationCenter } from '@/components/datasets/NotificationCenter';
 
 interface Dataset {
   id: number;
@@ -45,12 +47,21 @@ export default function DataAccessPage() {
 
 function DataAccessContent() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'browse' | 'requests'>('browse');
+  const [activeTab, setActiveTab] = useState<'browse' | 'requests' | 'notifications'>('browse');
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [accessRequests, setAccessRequests] = useState<AccessRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSharingLevel, setSelectedSharingLevel] = useState('all');
+  const [accessRequestModal, setAccessRequestModal] = useState<{
+    isOpen: boolean;
+    datasetId: number;
+    datasetName: string;
+  }>({
+    isOpen: false,
+    datasetId: 0,
+    datasetName: ''
+  });
 
   useEffect(() => {
     fetchData();
@@ -94,33 +105,19 @@ function DataAccessContent() {
     }
   };
 
-  const handleRequestAccess = async (datasetId: number) => {
-    try {
-      const purpose = prompt('Please enter the purpose for accessing this dataset:');
-      if (!purpose) return;
-      
-      const justification = prompt('Please provide justification for this access request:');
-      if (!justification) return;
-      
-      const response = await dataAccessAPI.createAccessRequest({
-        dataset_id: datasetId,
-        request_type: 'access',
-        requested_level: 'read',
-        purpose: purpose,
-        justification: justification,
-        urgency: 'medium',
-        category: 'analysis'
-      });
-      
-      alert('Access request submitted successfully! You will be notified when it is reviewed.');
-      
-      // Refresh the access requests
-      fetchAccessRequests();
-      
-    } catch (error) {
-      console.error('Error requesting access:', error);
-      alert('Failed to submit access request. Please try again.');
-    }
+  const handleRequestAccess = async (datasetId: number, datasetName: string) => {
+    setAccessRequestModal({
+      isOpen: true,
+      datasetId,
+      datasetName
+    });
+  };
+
+  const handleAccessRequestSuccess = () => {
+    // Refresh the access requests
+    fetchAccessRequests();
+    // Optionally refresh datasets to update access status
+    fetchData();
   };
 
   const fetchAccessRequests = async () => {
@@ -215,6 +212,16 @@ function DataAccessContent() {
               }`}
             >
               My Requests
+            </button>
+            <button
+              onClick={() => setActiveTab('notifications')}
+              className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'notifications'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Notifications
             </button>
           </nav>
         </div>
@@ -330,7 +337,7 @@ function DataAccessContent() {
                             variant="gradient" 
                             size="sm" 
                             className="flex-1"
-                            onClick={() => handleRequestAccess(dataset.id)}
+                            onClick={() => handleRequestAccess(dataset.id, dataset.name)}
                           >
                             <span className="mr-1">🔑</span>
                             Request Access
@@ -406,7 +413,20 @@ function DataAccessContent() {
             </CardContent>
           </Card>
         )}
+
+        {activeTab === 'notifications' && (
+          <NotificationCenter />
+        )}
       </div>
+
+      {/* Access Request Modal */}
+      <AccessRequestModal
+        isOpen={accessRequestModal.isOpen}
+        datasetId={accessRequestModal.datasetId}
+        datasetName={accessRequestModal.datasetName}
+        onClose={() => setAccessRequestModal(prev => ({ ...prev, isOpen: false }))}
+        onSuccess={handleAccessRequestSuccess}
+      />
     </div>
   );
 }

@@ -637,6 +637,27 @@ export const dataAccessAPI = {
     return response.data;
   },
 
+  // Notification endpoints
+  getNotifications: async (params?: { unread_only?: boolean; limit?: number }) => {
+    const response = await apiClient.get('/api/data-access/notifications', { params });
+    return response.data;
+  },
+
+  markNotificationAsRead: async (notificationId: number) => {
+    const response = await apiClient.patch(`/api/data-access/notifications/${notificationId}/read`);
+    return response.data;
+  },
+
+  markAllNotificationsAsRead: async () => {
+    const response = await apiClient.patch('/api/data-access/notifications/mark-all-read');
+    return response.data;
+  },
+
+  deleteNotification: async (notificationId: number) => {
+    const response = await apiClient.delete(`/api/data-access/notifications/${notificationId}`);
+    return response.data;
+  },
+
   getAuditTrail: async (params?: {
     start_date?: string;
     end_date?: string;

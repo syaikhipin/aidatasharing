@@ -8,8 +8,8 @@ agents:
   - forge_tool_task_list_list
   - forge_tool_task_list_clear
 variables:
-  mindsdb_env: mindsdb-server
   env: aishare-platform
+  mindsdb_env: mindsdb-server
   operating_agent: forge
 commands:
 - name: fixme

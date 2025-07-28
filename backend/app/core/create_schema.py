@@ -13,7 +13,7 @@ import logging
 # Import all models to ensure they are registered with SQLAlchemy
 from app.models.user import User
 from app.core.database import Base
-from app.models.organization import Organization, Department, OrganizationType, DataSharingLevel
+from app.models.organization import Organization, OrganizationType, DataSharingLevel
 from app.models.config import Configuration
 from app.models.dataset import (
     Dataset, DatasetAccessLog, DatasetModel, DatasetChatSession, 
@@ -23,6 +23,12 @@ from app.models.file_handler import FileUpload, MindsDBHandler, FileProcessingLo
 from app.models.analytics import (
     ActivityLog, UsageMetric, DatashareStats, UserSessionLog, 
     ModelPerformanceLog, ActivityType, UsageMetricType
+)
+from app.models.proxy_connector import (
+    ProxyConnector, SharedProxyLink, ProxyAccessLog, ProxyCredentialVault
+)
+from app.models.admin_config import (
+    ConfigurationOverride, MindsDBConfiguration, ConfigurationHistory
 )
 
 logger = logging.getLogger(__name__)
@@ -102,26 +108,6 @@ def create_default_data(engine):
                 print(f"   ⚠️  Organization already exists: {existing_org.name}")
                 if org_data["slug"] == "system-admin":
                     admin_org = existing_org
-        
-        # Create default departments
-        print("🏛️  Creating default departments...")
-        if admin_org:
-            default_departments = [
-                {"name": "IT Administration", "description": "IT and system administration"},
-                {"name": "Data Science", "description": "Data analysis and machine learning"},
-                {"name": "Analytics", "description": "Business analytics and reporting"},
-            ]
-            
-            for dept_data in default_departments:
-                existing_dept = db.query(Department).filter(
-                    Department.name == dept_data["name"],
-                    Department.organization_id == admin_org.id
-                ).first()
-                
-                if not existing_dept:
-                    dept = Department(**dept_data, organization_id=admin_org.id)
-                    db.add(dept)
-                    print(f"   ✅ Created department: {dept.name}")
         
         # Create superuser
         print("👤 Creating superuser...")
@@ -207,7 +193,6 @@ def main():
         print("📝 Summary:")
         print("   - All tables created")
         print("   - Default organizations created")
-        print("   - Default departments created")
         print("   - Superuser created")
         print("   - Default configurations created")
         print("\n🚀 You can now start the application!")
