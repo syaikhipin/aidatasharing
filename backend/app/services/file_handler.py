@@ -13,11 +13,14 @@ from fastapi import UploadFile
 import logging
 from datetime import datetime
 
-from app.models.file_handler import FileUpload, MindsDBHandler, FileProcessingLog, UploadStatus, ProcessingStatus
+from app.models.file_handler import FileUpload, MindsDBHandler, FileProcessingLog, UploadStatus, ProcessingStatus, FileType
 from app.models.dataset import Dataset
 from app.models.user import User
 from app.services.mindsdb import MindsDBService
 from app.services.file_handler_permanent import PermanentFileHandlerService
+from app.services.image_processing import ImageProcessingService
+from app.services.pdf_processing import PDFProcessingService
+from app.services.universal_file_processor import UniversalFileProcessor
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -31,9 +34,13 @@ class FileHandlerService:
         self.mindsdb_service = MindsDBService()
         self.use_permanent_storage = use_permanent_storage
         
-        # Initialize permanent storage service
+        # Initialize services
         if self.use_permanent_storage:
             self.permanent_service = PermanentFileHandlerService(db)
+        
+        self.image_service = ImageProcessingService(db)
+        self.pdf_service = PDFProcessingService(db)
+        self.universal_processor = UniversalFileProcessor(db)
         
         # Legacy local storage setup (for backward compatibility)
         self.upload_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
@@ -47,10 +54,46 @@ class FileHandlerService:
         """Get MIME type for file"""
         mime_type, _ = mimetypes.guess_type(filename)
         return mime_type
+    def determine_file_type(self, filename: str, mime_type: str = None) -> str:
+        """Determine file type based on filename and MIME type"""
+        # Check for images first
+        if self.image_service.is_supported_image(filename, mime_type):
+            return FileType.IMAGE.value
+        
+        # Check for PDFs
+        if self.pdf_service.is_supported_pdf(filename, mime_type):
+            return FileType.DOCUMENT.value
+        
+        # Check for documents
+        document_extensions = ['.pdf', '.docx', '.doc', '.txt', '.rtf', '.odt']
+        file_ext = os.path.splitext(filename.lower())[1]
+        if file_ext in document_extensions:
+            return FileType.DOCUMENT.value
+        
+        # Check for spreadsheets
+        spreadsheet_extensions = ['.csv', '.xlsx', '.xls', '.ods']
+        if file_ext in spreadsheet_extensions:
+            return FileType.SPREADSHEET.value
+        
+        # Check for archives
+        archive_extensions = ['.zip', '.tar', '.gz', '.rar', '.7z']
+        if file_ext in archive_extensions:
+            return FileType.ARCHIVE.value
+        
+        return FileType.OTHER.value
     
-    def save_uploaded_file(self, file: UploadFile, user: User, dataset: Dataset) -> FileUpload:
+    async def save_uploaded_file(self, file: UploadFile, user: User, dataset: Dataset) -> FileUpload:
         """Save uploaded file using permanent storage or legacy local storage"""
         try:
+            # Determine file type
+            mime_type = self.get_file_mime_type(file.filename)
+            file_type = self.determine_file_type(file.filename, mime_type)
+            
+            # Use universal processor for all file types
+            logger.info(f"Processing file with universal processor: {file.filename}")
+            return await self.universal_processor.process_file(file, user, dataset)
+            
+            # Handle other file types with existing logic
             if self.use_permanent_storage:
                 # Use permanent storage
                 logger.info(f"Using MindsDB permanent storage for file: {file.filename}")
@@ -63,6 +106,9 @@ class FileHandlerService:
                     ).first()
                     
                     if file_upload:
+                        # Update file type
+                        file_upload.file_type = file_type
+                        self.db.commit()
                         logger.info(f"File uploaded to permanent storage successfully: {file.filename}")
                         return file_upload
                     else:
@@ -72,13 +118,13 @@ class FileHandlerService:
             else:
                 # Use legacy local storage
                 logger.info(f"Using legacy local storage for file: {file.filename}")
-                return self._save_uploaded_file_local(file, user, dataset)
+                return self._save_uploaded_file_local(file, user, dataset, file_type)
                 
         except Exception as e:
             logger.error(f"File upload failed: {str(e)}")
             raise
     
-    def _save_uploaded_file_local(self, file: UploadFile, user: User, dataset: Dataset) -> FileUpload:
+    def _save_uploaded_file_local(self, file: UploadFile, user: User, dataset: Dataset, file_type: str) -> FileUpload:
         """Save uploaded file to local storage (legacy method)"""
         # Read file content
         file_content = file.file.read()
@@ -104,6 +150,7 @@ class FileHandlerService:
             file_size=file_size,
             file_hash=file_hash,
             mime_type=self.get_file_mime_type(file.filename),
+            file_type=file_type,
             upload_status=UploadStatus.UPLOADED
         )
         
@@ -137,7 +184,17 @@ class FileHandlerService:
                     "storage_type": "permanent"
                 }
             
-            # Legacy processing for local files
+            # Handle image files specially
+            if file_upload.file_type == FileType.IMAGE.value:
+                logger.info(f"Processing image file with AI: {file_upload.original_filename}")
+                return self.image_service.process_image_with_ai(file_upload)
+            
+            # Handle PDF files specially
+            if file_upload.file_type == FileType.DOCUMENT.value and file_upload.mime_type == "application/pdf":
+                logger.info(f"Processing PDF file with AI: {file_upload.original_filename}")
+                return self.pdf_service.process_pdf_with_ai(file_upload)
+            
+            # Legacy processing for other local files
             logger.info(f"Processing local file with MindsDB: {file_upload.original_filename}")
             
             # Update status to processing
@@ -149,7 +206,7 @@ class FileHandlerService:
                 file_upload.id,
                 "mindsdb_processing",
                 "started",
-                "Starting MindsDB file processing for local file"
+                f"Starting MindsDB file processing for local {file_upload.file_type} file"
             )
             
             # Create file handler in MindsDB
@@ -178,7 +235,8 @@ class FileHandlerService:
                         "message": "File processed successfully",
                         "file_id": upload_result.get("file_id"),
                         "mindsdb_handler": handler_result.get("handler_name"),
-                        "storage_type": "local"
+                        "storage_type": "local",
+                        "file_type": file_upload.file_type
                     }
                 else:
                     # Processing failed

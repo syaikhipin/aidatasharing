@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend'))
 
 from app.core.database import Base
 from app.models.user import User
-from app.models.organization import Organization, Department
+from app.models.organization import Organization
 from app.models.dataset import Dataset, DatabaseConnector, DatasetType, DatasetStatus
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
@@ -159,7 +159,7 @@ class FreshInstallMigration:
             from app.core.auth import get_password_hash
             
             admin_user = User(
-                email="admin@aishare.com",
+                email="admin@example.com",
                 full_name="System Administrator",
                 hashed_password=get_password_hash("admin123"),
                 is_active=True,
@@ -170,7 +170,7 @@ class FreshInstallMigration:
             db.commit()
             
             logger.info("   ✅ Default organization created")
-            logger.info("   ✅ Admin user created (admin@aishare.com / admin123)")
+            logger.info("   ✅ Admin user created (admin@example.com / admin123)")
             
         except Exception as e:
             logger.error(f"   ❌ Failed to create default data: {e}")

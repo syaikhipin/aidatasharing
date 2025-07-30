@@ -13,7 +13,8 @@ const apiClient = axios.create({
 // Add request interceptor to include auth token
 apiClient.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('access_token');
+    // Check for both token names for backward compatibility
+    const token = localStorage.getItem('access_token') || localStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -29,7 +30,9 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
+      // Clear both possible token names
       localStorage.removeItem('access_token');
+      localStorage.removeItem('token');
       window.location.href = '/login';
     }
     return Promise.reject(error);
@@ -139,27 +142,113 @@ export const adminAPI = {
 
   // Environment management
   getEnvironmentVariables: async () => {
-    const response = await apiClient.get('/api/admin/environment-variables');
+    const response = await apiClient.get('/api/admin/environment/environment-variables');
     return response.data;
   },
 
   updateEnvironmentVariable: async (name: string, value: string) => {
-    const response = await apiClient.put(`/api/admin/environment-variables/${name}`, { value });
+    const response = await apiClient.put(`/api/admin/environment/environment-variables/${name}`, { value });
     return response.data;
   },
 
   createEnvironmentVariable: async (name: string, value: string) => {
-    const response = await apiClient.post('/api/admin/environment-variables', { name, value });
+    const response = await apiClient.post('/api/admin/environment/environment-variables', { name, value });
     return response.data;
   },
 
   deleteEnvironmentVariable: async (name: string) => {
-    const response = await apiClient.delete(`/api/admin/environment-variables/${name}`);
+    const response = await apiClient.delete(`/api/admin/environment/environment-variables/${name}`);
     return response.data;
   },
 
   bulkUpdateEnvironmentVariables: async (updates: Record<string, string>) => {
-    const response = await apiClient.post('/api/admin/environment-variables/bulk-update', updates);
+    const response = await apiClient.post('/api/admin/environment/environment-variables/bulk-update', updates);
+    return response.data;
+  },
+
+  reloadEnvironmentVariables: async () => {
+    try {
+      console.log('🔄 Calling reload environment variables API...');
+      const response = await apiClient.post('/api/admin/environment/environment-variables/reload');
+      console.log('✅ Reload API response:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('❌ Reload API error:', error);
+      throw error;
+    }
+  },
+
+  // Organization management
+  getOrganizations: async () => {
+    const response = await apiClient.get('/api/admin/organizations');
+    return response.data;
+  },
+
+  createOrganization: async (orgData: {
+    name: string;
+    description?: string;
+    type?: string;
+    slug?: string;
+    is_active?: boolean;
+  }) => {
+    const response = await apiClient.post('/api/admin/organizations', orgData);
+    return response.data;
+  },
+
+  updateOrganization: async (orgId: number, orgData: {
+    name?: string;
+    description?: string;
+    type?: string;
+    is_active?: boolean;
+  }) => {
+    const response = await apiClient.put(`/api/admin/organizations/${orgId}`, orgData);
+    return response.data;
+  },
+
+  deleteOrganization: async (orgId: number, force: boolean = false) => {
+    const response = await apiClient.delete(`/api/admin/organizations/${orgId}`, {
+      params: { force }
+    });
+    return response.data;
+  },
+
+  // User management
+  getUsers: async (params?: {
+    skip?: number;
+    limit?: number;
+    organization_id?: number;
+  }) => {
+    const response = await apiClient.get('/api/admin/users', { params });
+    return response.data;
+  },
+
+  createUser: async (userData: {
+    email: string;
+    password: string;
+    full_name: string;
+    role?: string;
+    is_active?: boolean;
+    is_superuser?: boolean;
+    organization_id?: number;
+  }) => {
+    const response = await apiClient.post('/api/admin/users', userData);
+    return response.data;
+  },
+
+  updateUser: async (userId: number, userData: {
+    full_name?: string;
+    role?: string;
+    is_active?: boolean;
+    is_superuser?: boolean;
+    organization_id?: number;
+    password?: string;
+  }) => {
+    const response = await apiClient.put(`/api/admin/users/${userId}`, userData);
+    return response.data;
+  },
+
+  deleteUser: async (userId: number) => {
+    const response = await apiClient.delete(`/api/admin/users/${userId}`);
     return response.data;
   },
 };

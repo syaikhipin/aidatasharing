@@ -215,7 +215,7 @@ class DatasetAccess(Base):
     
     # Context
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
-    department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
+    # department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)  # Disabled - departments not implemented
     
     # Success/Error tracking
     success = Column(Boolean, default=True)

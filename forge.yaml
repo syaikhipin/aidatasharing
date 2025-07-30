@@ -8,9 +8,9 @@ agents:
   - forge_tool_task_list_list
   - forge_tool_task_list_clear
 variables:
-  env: aishare-platform
-  mindsdb_env: mindsdb-server
   operating_agent: forge
+  mindsdb_env: mindsdb-server
+  env: aishare-platform
 commands:
 - name: fixme
   description: Looks for all the FIXME comments in the code and attempts to fix them.

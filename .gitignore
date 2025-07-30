@@ -36,7 +36,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-backend/.env
+backend/
 backend/config.env
 config.env
 forge.yaml
@@ -54,7 +54,7 @@ frontend/.next/
 frontend/out/
 frontend/build/
 frontend/.vercel/
-frontend/.env*
+frontend/
 frontend/npm-debug.log*
 frontend/yarn-debug.log*
 frontend/yarn-error.log*

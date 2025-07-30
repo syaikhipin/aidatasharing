@@ -2,20 +2,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
 from app.core.auth import get_password_hash
-from app.models.user import User
+from app.models import *  # Import all models to ensure they are registered
 from app.core.database import Base
-from app.models.config import Configuration
-from app.models.organization import Organization, OrganizationType
-from app.models.dataset import (
-    Dataset, DatasetAccessLog, DatasetModel, DatasetDownload,
-    DatasetChatSession, ChatMessage, DatasetShareAccess,
-    DatabaseConnector, LLMConfiguration, ShareAccessSession
-)
-from app.models.analytics import (
-    DatasetAccess, ChatInteraction, 
-    APIUsage, UsageStats, SystemMetrics
-)
-from app.models.file_handler import FileUpload, MindsDBHandler, FileProcessingLog
 from migrations.migration_manager import MigrationManager
 import logging
 import sys

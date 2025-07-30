@@ -1,6 +1,6 @@
 """
 Storage Service
-Handles file storage operations for datasets
+Handles file storage operations for datasets with multiple backend support
 """
 
 import os
@@ -16,20 +16,328 @@ from fastapi.responses import StreamingResponse, FileResponse
 import aiofiles
 import asyncio
 
+# Optional S3 imports
+try:
+    import boto3
+    from botocore.exceptions import ClientError, NoCredentialsError
+    S3_AVAILABLE = True
+except ImportError:
+    S3_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
+class BaseStorageBackend:
+    """Base class for storage backends"""
+    
+    async def store_file(self, file_content: bytes, file_path: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        raise NotImplementedError
+    
+    async def retrieve_file(self, file_path: str) -> Optional[bytes]:
+        raise NotImplementedError
+    
+    async def delete_file(self, file_path: str) -> bool:
+        raise NotImplementedError
+    
+    async def get_file_stream(self, file_path: str) -> StreamingResponse:
+        raise NotImplementedError
+    
+    def get_file_url(self, file_path: str, expires_in: int = 3600) -> Optional[str]:
+        """Get a temporary URL for file access (if supported)"""
+        return None
+
+class LocalStorageBackend(BaseStorageBackend):
+    """Local file system storage backend"""
+    
+    def __init__(self, storage_dir: str):
+        self.storage_dir = storage_dir
+        os.makedirs(self.storage_dir, exist_ok=True)
+        self.chunk_size = 8 * 1024 * 1024  # 8MB chunks
+    
+    async def store_file(self, file_content: bytes, file_path: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """Store file in local filesystem"""
+        try:
+            full_path = os.path.join(self.storage_dir, file_path)
+            
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+            
+            # Save the file
+            with open(full_path, "wb") as f:
+                f.write(file_content)
+            
+            logger.info(f"File stored locally: {file_path}")
+            
+            return {
+                "success": True,
+                "backend": "local",
+                "file_path": file_path,
+                "full_path": full_path,
+                "file_size": len(file_content)
+            }
+            
+        except Exception as e:
+            logger.error(f"Local storage failed: {str(e)}")
+            raise
+    
+    async def retrieve_file(self, file_path: str) -> Optional[bytes]:
+        """Retrieve file from local filesystem"""
+        try:
+            full_path = os.path.join(self.storage_dir, file_path)
+            
+            if os.path.exists(full_path):
+                with open(full_path, "rb") as f:
+                    return f.read()
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Local file retrieval failed: {str(e)}")
+            return None
+    
+    async def delete_file(self, file_path: str) -> bool:
+        """Delete file from local filesystem"""
+        try:
+            full_path = os.path.join(self.storage_dir, file_path)
+            
+            if os.path.exists(full_path):
+                os.remove(full_path)
+                logger.info(f"File deleted locally: {file_path}")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Local file deletion failed: {str(e)}")
+            return False
+    
+    async def get_file_stream(self, file_path: str) -> StreamingResponse:
+        """Get file as streaming response from local filesystem"""
+        full_path = os.path.join(self.storage_dir, file_path)
+        
+        if not os.path.exists(full_path):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"error_code": "FILE_NOT_FOUND", "message": "File not found"}
+            )
+        
+        # Get file info
+        file_size = os.path.getsize(full_path)
+        filename = os.path.basename(full_path)
+        content_type, _ = mimetypes.guess_type(full_path)
+        if not content_type:
+            content_type = "application/octet-stream"
+        
+        # Stream file
+        async def file_stream():
+            async with aiofiles.open(full_path, "rb") as f:
+                while chunk := await f.read(self.chunk_size):
+                    yield chunk
+        
+        response = StreamingResponse(file_stream(), media_type=content_type)
+        response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+        response.headers["Content-Length"] = str(file_size)
+        
+        return response
+
+class S3StorageBackend(BaseStorageBackend):
+    """S3-compatible storage backend"""
+    
+    def __init__(self, bucket_name: str, access_key: str, secret_key: str, 
+                 endpoint_url: Optional[str] = None, region: str = "us-east-1"):
+        if not S3_AVAILABLE:
+            raise ImportError("boto3 is required for S3 storage backend")
+        
+        self.bucket_name = bucket_name
+        self.region = region
+        
+        # Configure S3 client
+        session = boto3.Session(
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            region_name=region
+        )
+        
+        # Use custom endpoint if provided (for MinIO, Backblaze, etc.)
+        if endpoint_url:
+            self.s3_client = session.client('s3', endpoint_url=endpoint_url)
+        else:
+            self.s3_client = session.client('s3')
+        
+        # Verify bucket access
+        try:
+            self.s3_client.head_bucket(Bucket=bucket_name)
+        except ClientError as e:
+            if e.response['Error']['Code'] == '404':
+                logger.warning(f"Bucket {bucket_name} not found, attempting to create...")
+                try:
+                    self.s3_client.create_bucket(Bucket=bucket_name)
+                    logger.info(f"Created bucket {bucket_name}")
+                except ClientError as create_error:
+                    logger.error(f"Failed to create bucket: {create_error}")
+                    raise
+            else:
+                logger.error(f"S3 bucket access error: {e}")
+                raise
+    
+    async def store_file(self, file_content: bytes, file_path: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """Store file in S3-compatible storage"""
+        try:
+            # Upload to S3
+            self.s3_client.put_object(
+                Bucket=self.bucket_name,
+                Key=file_path,
+                Body=file_content,
+                Metadata={k: str(v) for k, v in metadata.items()}  # S3 metadata must be strings
+            )
+            
+            logger.info(f"File stored in S3: {file_path}")
+            
+            return {
+                "success": True,
+                "backend": "s3",
+                "bucket": self.bucket_name,
+                "file_path": file_path,
+                "file_size": len(file_content)
+            }
+            
+        except Exception as e:
+            logger.error(f"S3 storage failed: {str(e)}")
+            raise
+    
+    async def retrieve_file(self, file_path: str) -> Optional[bytes]:
+        """Retrieve file from S3-compatible storage"""
+        try:
+            response = self.s3_client.get_object(Bucket=self.bucket_name, Key=file_path)
+            return response['Body'].read()
+            
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                return None
+            logger.error(f"S3 file retrieval failed: {str(e)}")
+            return None
+        except Exception as e:
+            logger.error(f"S3 file retrieval failed: {str(e)}")
+            return None
+    
+    async def delete_file(self, file_path: str) -> bool:
+        """Delete file from S3-compatible storage"""
+        try:
+            self.s3_client.delete_object(Bucket=self.bucket_name, Key=file_path)
+            logger.info(f"File deleted from S3: {file_path}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"S3 file deletion failed: {str(e)}")
+            return False
+    
+    async def get_file_stream(self, file_path: str) -> StreamingResponse:
+        """Get file as streaming response from S3-compatible storage"""
+        try:
+            # Get object metadata first
+            head_response = self.s3_client.head_object(Bucket=self.bucket_name, Key=file_path)
+            file_size = head_response['ContentLength']
+            content_type = head_response.get('ContentType', 'application/octet-stream')
+            filename = os.path.basename(file_path)
+            
+            # Stream file from S3
+            async def s3_file_stream():
+                response = self.s3_client.get_object(Bucket=self.bucket_name, Key=file_path)
+                body = response['Body']
+                
+                try:
+                    while True:
+                        chunk = body.read(8192)  # 8KB chunks
+                        if not chunk:
+                            break
+                        yield chunk
+                finally:
+                    body.close()
+            
+            response = StreamingResponse(s3_file_stream(), media_type=content_type)
+            response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+            response.headers["Content-Length"] = str(file_size)
+            
+            return response
+            
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"error_code": "FILE_NOT_FOUND", "message": "File not found"}
+                )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={"error_code": "S3_ERROR", "message": str(e)}
+            )
+    
+    def get_file_url(self, file_path: str, expires_in: int = 3600) -> Optional[str]:
+        """Generate presigned URL for direct file access"""
+        try:
+            url = self.s3_client.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': self.bucket_name, 'Key': file_path},
+                ExpiresIn=expires_in
+            )
+            return url
+        except Exception as e:
+            logger.error(f"Failed to generate presigned URL: {str(e)}")
+            return None
+
 class StorageService:
-    """Service for handling file storage operations"""
+    """Main storage service with multiple backend support"""
     
     def __init__(self):
-        # Define storage directory relative to this file
-        self.storage_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "storage")
+        self.backend = None
+        self._initialize_backend()
+    
+    def _initialize_backend(self):
+        """Initialize storage backend based on environment configuration"""
+        storage_type = os.getenv('STORAGE_TYPE', 'local').lower()
         
-        # Ensure storage directory exists
-        os.makedirs(self.storage_dir, exist_ok=True)
-        
-        # Define chunk size for streaming (8MB)
-        self.chunk_size = 8 * 1024 * 1024
+        if storage_type == 'local':
+            storage_dir = os.getenv('STORAGE_DIR', 
+                os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "storage"))
+            self.backend = LocalStorageBackend(storage_dir)
+            logger.info("Initialized local storage backend")
+            
+        elif storage_type == 's3':
+            # S3 configuration (AWS S3)
+            bucket_name = os.getenv('S3_BUCKET_NAME')
+            access_key = os.getenv('AWS_ACCESS_KEY_ID')
+            secret_key = os.getenv('AWS_SECRET_ACCESS_KEY')
+            endpoint_url = None  # Use default AWS S3
+            region = os.getenv('AWS_DEFAULT_REGION', 'us-east-1')
+            
+        elif storage_type == 's3_compatible':
+            # S3-compatible storage configuration (MinIO, Backblaze, etc.)
+            bucket_name = os.getenv('S3_COMPATIBLE_BUCKET_NAME')
+            access_key = os.getenv('S3_COMPATIBLE_ACCESS_KEY')
+            secret_key = os.getenv('S3_COMPATIBLE_SECRET_KEY')
+            endpoint_url = os.getenv('S3_COMPATIBLE_ENDPOINT')  # For custom S3-compatible services
+            region = os.getenv('S3_COMPATIBLE_REGION', 'us-east-1')
+            
+            if not all([bucket_name, access_key, secret_key]):
+                logger.error("S3 configuration incomplete, falling back to local storage")
+                storage_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "storage")
+                self.backend = LocalStorageBackend(storage_dir)
+            else:
+                try:
+                    self.backend = S3StorageBackend(
+                        bucket_name=bucket_name,
+                        access_key=access_key,
+                        secret_key=secret_key,
+                        endpoint_url=endpoint_url,
+                        region=region
+                    )
+                    logger.info(f"Initialized S3 storage backend (bucket: {bucket_name})")
+                except Exception as e:
+                    logger.error(f"S3 initialization failed: {str(e)}, falling back to local storage")
+                    storage_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "storage")
+                    self.backend = LocalStorageBackend(storage_dir)
+        else:
+            logger.warning(f"Unknown storage type: {storage_type}, using local storage")
+            storage_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "storage")
+            self.backend = LocalStorageBackend(storage_dir)
     
     async def store_dataset_file(
         self,
@@ -38,305 +346,110 @@ class StorageService:
         dataset_id: int,
         organization_id: int
     ) -> Dict[str, Any]:
-        """
-        Store a dataset file in the storage system
-        
-        Args:
-            file_content: The binary content of the file
-            original_filename: The original filename
-            dataset_id: The ID of the dataset
-            organization_id: The ID of the organization
-            
-        Returns:
-            Dict with storage information
-        """
+        """Store a dataset file using the configured backend"""
         try:
-            # Create organization directory if it doesn't exist
-            org_dir = os.path.join(self.storage_dir, f"org_{organization_id}")
-            os.makedirs(org_dir, exist_ok=True)
-            
-            # Generate a unique filename
+            # Generate unique file path
             file_hash = hashlib.sha256(file_content).hexdigest()[:16]
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             extension = original_filename.split('.')[-1] if '.' in original_filename else ''
             
             safe_filename = f"dataset_{dataset_id}_{timestamp}_{file_hash}.{extension}"
-            file_path = os.path.join(org_dir, safe_filename)
+            file_path = f"org_{organization_id}/{safe_filename}"
             
-            # Save the file
-            with open(file_path, "wb") as f:
-                f.write(file_content)
-            
-            # Return storage information
-            relative_path = os.path.join(f"org_{organization_id}", safe_filename)
-            
-            logger.info(f"File stored successfully: {original_filename} -> {safe_filename}")
-            
-            return {
-                "success": True,
-                "filename": safe_filename,
+            # Prepare metadata
+            metadata = {
                 "original_filename": original_filename,
-                "file_path": file_path,
-                "relative_path": relative_path,
-                "file_size": len(file_content),
+                "dataset_id": dataset_id,
+                "organization_id": organization_id,
+                "upload_timestamp": timestamp,
                 "file_hash": file_hash
             }
+            
+            # Store using backend
+            result = await self.backend.store_file(file_content, file_path, metadata)
+            
+            # Add common fields to result
+            result.update({
+                "filename": safe_filename,
+                "original_filename": original_filename,
+                "relative_path": file_path,
+                "file_size": len(file_content),
+                "file_hash": file_hash
+            })
+            
+            logger.info(f"File stored successfully: {original_filename} -> {safe_filename}")
+            return result
             
         except Exception as e:
             logger.error(f"File storage failed: {str(e)}")
             raise
     
-    async def retrieve_dataset_file(self, file_path: str) -> Optional[str]:
-        """
-        Retrieve a dataset file from storage
-        
-        Args:
-            file_path: The path to the file
-            
-        Returns:
-            The full path to the file if it exists, None otherwise
-        """
-        # Check if path is relative or absolute
-        if not os.path.isabs(file_path):
-            full_path = os.path.join(self.storage_dir, file_path)
-        else:
-            full_path = file_path
-        
-        if os.path.exists(full_path):
-            return full_path
-        
-        return None
+    async def retrieve_dataset_file(self, file_path: str) -> Optional[bytes]:
+        """Retrieve a dataset file using the configured backend"""
+        return await self.backend.retrieve_file(file_path)
     
     async def delete_dataset_file(self, file_path: str) -> bool:
-        """
-        Delete a dataset file from storage
-        
-        Args:
-            file_path: The path to the file
-            
-        Returns:
-            True if the file was deleted, False otherwise
-        """
-        try:
-            # Check if path is relative or absolute
-            if not os.path.isabs(file_path):
-                full_path = os.path.join(self.storage_dir, file_path)
-            else:
-                full_path = file_path
-            
-            if os.path.exists(full_path):
-                os.remove(full_path)
-                logger.info(f"File deleted successfully: {file_path}")
-                return True
-            
-            logger.warning(f"File not found for deletion: {file_path}")
-            return False
-            
-        except Exception as e:
-            logger.error(f"File deletion failed: {str(e)}")
-            return False
+        """Delete a dataset file using the configured backend"""
+        return await self.backend.delete_file(file_path)
+    
+    async def get_file_stream(self, file_path: str) -> StreamingResponse:
+        """Get file as streaming response using the configured backend"""
+        return await self.backend.get_file_stream(file_path)
+    
+    def get_file_url(self, file_path: str, expires_in: int = 3600) -> Optional[str]:
+        """Get temporary URL for file access (if supported by backend)"""
+        return self.backend.get_file_url(file_path, expires_in)
     
     def generate_download_token(self, dataset_id: int, user_id: Optional[int] = None, expires_in_hours: int = 24) -> str:
-        """
-        Generate a secure download token for a dataset
-        
-        Args:
-            dataset_id: Dataset ID
-            user_id: User ID (optional)
-            expires_in_hours: Token expiration in hours
-            
-        Returns:
-            Secure download token
-        """
-        # Generate a random token with dataset ID and timestamp
+        """Generate a secure download token for a dataset"""
         random_part = secrets.token_urlsafe(16)
         timestamp = int(datetime.now().timestamp())
         
-        # Combine parts with dataset ID and user ID (if provided)
         token_parts = [random_part, str(dataset_id), str(timestamp)]
         if user_id:
             token_parts.append(str(user_id))
         
-        # Join parts and hash
         token_base = "_".join(token_parts)
         token_hash = hashlib.sha256(token_base.encode()).hexdigest()[:32]
         
-        # Final token combines random part and hash
         return f"{random_part}_{token_hash}"
     
     def validate_download_token(self, token: str) -> bool:
-        """
-        Validate download token format
-        
-        Args:
-            token: Download token to validate
-            
-        Returns:
-            True if token format is valid, False otherwise
-        """
-        # Basic format validation
+        """Validate download token format"""
         if not token or not isinstance(token, str):
             return False
         
-        # Check token parts
         parts = token.split("_")
         if len(parts) != 2:
             return False
         
-        # Check lengths
-        if len(parts[0]) != 22 or len(parts[1]) != 32:  # Base64 URL-safe length and hash length
+        if len(parts[0]) != 22 or len(parts[1]) != 32:
             return False
         
         return True
     
-    async def get_file_stream(self, file_path: str) -> StreamingResponse:
-        """
-        Get a file as a streaming response
+    def get_backend_info(self) -> Dict[str, Any]:
+        """Get information about the current storage backend"""
+        backend_type = type(self.backend).__name__
         
-        Args:
-            file_path: Path to the file
-            
-        Returns:
-            StreamingResponse with the file content
-        """
-        # Check if path is relative or absolute
-        if not os.path.isabs(file_path):
-            full_path = os.path.join(self.storage_dir, file_path)
-        else:
-            full_path = file_path
+        info = {
+            "backend_type": backend_type,
+            "storage_type": os.getenv('STORAGE_TYPE', 'local')
+        }
         
-        if not os.path.exists(full_path):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error_code": "FILE_NOT_FOUND", "message": "File not found"}
-            )
+        if isinstance(self.backend, S3StorageBackend):
+            info.update({
+                "bucket_name": self.backend.bucket_name,
+                "region": self.backend.region,
+                "supports_presigned_urls": True
+            })
+        elif isinstance(self.backend, LocalStorageBackend):
+            info.update({
+                "storage_directory": self.backend.storage_dir,
+                "supports_presigned_urls": False
+            })
         
-        # Get file size and name for headers
-        file_size = os.path.getsize(full_path)
-        filename = os.path.basename(full_path)
-        
-        # Determine content type
-        content_type, _ = mimetypes.guess_type(full_path)
-        if not content_type:
-            content_type = "application/octet-stream"
-        
-        # Define async generator for streaming
-        async def file_stream():
-            async with aiofiles.open(full_path, "rb") as f:
-                while chunk := await f.read(self.chunk_size):
-                    yield chunk
-        
-        # Create streaming response
-        response = StreamingResponse(file_stream(), media_type=content_type)
-        
-        # Add headers
-        response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
-        response.headers["Content-Length"] = str(file_size)
-        
-        return response
-    
-    async def get_file_stream_range(self, file_path: str, start_byte: int = 0) -> StreamingResponse:
-        """
-        Get a file as a streaming response with range support
-        
-        Args:
-            file_path: Path to the file
-            start_byte: Starting byte for range request
-            
-        Returns:
-            StreamingResponse with the file content from the specified range
-        """
-        # Check if path is relative or absolute
-        if not os.path.isabs(file_path):
-            full_path = os.path.join(self.storage_dir, file_path)
-        else:
-            full_path = file_path
-        
-        if not os.path.exists(full_path):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error_code": "FILE_NOT_FOUND", "message": "File not found"}
-            )
-        
-        # Get file size and name for headers
-        file_size = os.path.getsize(full_path)
-        filename = os.path.basename(full_path)
-        
-        # Validate start_byte
-        if start_byte < 0:
-            start_byte = 0
-        elif start_byte >= file_size:
-            raise HTTPException(
-                status_code=status.HTTP_416_REQUESTED_RANGE_NOT_SATISFIABLE,
-                detail={"error_code": "INVALID_RANGE", "message": "Requested range not satisfiable"}
-            )
-        
-        # Determine content type
-        content_type, _ = mimetypes.guess_type(full_path)
-        if not content_type:
-            content_type = "application/octet-stream"
-        
-        # Define async generator for streaming with range
-        async def file_stream_range():
-            async with aiofiles.open(full_path, "rb") as f:
-                # Seek to start position
-                await f.seek(start_byte)
-                
-                # Stream from that position
-                while chunk := await f.read(self.chunk_size):
-                    yield chunk
-        
-        # Create streaming response
-        response = StreamingResponse(
-            file_stream_range(),
-            media_type=content_type,
-            status_code=status.HTTP_206_PARTIAL_CONTENT if start_byte > 0 else status.HTTP_200_OK
-        )
-        
-        # Add headers
-        response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
-        response.headers["Content-Length"] = str(file_size - start_byte)
-        
-        # Add range headers if this is a partial response
-        if start_byte > 0:
-            response.headers["Content-Range"] = f"bytes {start_byte}-{file_size-1}/{file_size}"
-        
-        return response
-    
-    async def get_file_response(self, file_path: str) -> FileResponse:
-        """
-        Get a file as a FileResponse (non-streaming)
-        
-        Args:
-            file_path: Path to the file
-            
-        Returns:
-            FileResponse with the file content
-        """
-        # Check if path is relative or absolute
-        if not os.path.isabs(file_path):
-            full_path = os.path.join(self.storage_dir, file_path)
-        else:
-            full_path = file_path
-        
-        if not os.path.exists(full_path):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error_code": "FILE_NOT_FOUND", "message": "File not found"}
-            )
-        
-        # Get filename for headers
-        filename = os.path.basename(full_path)
-        
-        # Determine content type
-        content_type, _ = mimetypes.guess_type(full_path)
-        
-        # Create file response
-        return FileResponse(
-            path=full_path,
-            filename=filename,
-            media_type=content_type
-        )
+        return info
 
 # Create a singleton instance
 storage_service = StorageService()

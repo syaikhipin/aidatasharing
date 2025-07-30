@@ -153,6 +153,7 @@ async def get_environment_variables(
             "ai_models": {},
             "data_sharing": {},
             "file_upload": {},
+            "storage": {},
             "connectors": {},
             "admin": {},
             "other": {}
@@ -164,8 +165,9 @@ async def get_environment_variables(
             "security": ["SECRET_KEY", "ALGORITHM", "ACCESS_TOKEN_EXPIRE_MINUTES", "BACKEND_CORS_ORIGINS"],
             "ai_models": ["GOOGLE_API_KEY", "DEFAULT_GEMINI_MODEL", "GEMINI_ENGINE_NAME", "GEMINI_CHAT_MODEL_NAME", "GEMINI_VISION_MODEL_NAME", "GEMINI_EMBEDDING_MODEL_NAME"],
             "data_sharing": ["ENABLE_DATA_SHARING", "ENABLE_AI_CHAT", "SHARE_LINK_EXPIRY_HOURS", "MAX_CHAT_SESSIONS_PER_DATASET"],
-            "file_upload": ["MAX_FILE_SIZE_MB", "ALLOWED_FILE_TYPES", "UPLOAD_PATH", "MAX_DOCUMENT_SIZE_MB", "SUPPORTED_DOCUMENT_TYPES", "DOCUMENT_STORAGE_PATH"],
-            "connectors": ["CONNECTOR_TIMEOUT", "MAX_CONNECTORS_PER_ORG", "ENABLE_S3_CONNECTOR", "ENABLE_DATABASE_CONNECTORS", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "S3_BUCKET_NAME"],
+            "file_upload": ["MAX_FILE_SIZE_MB", "ALLOWED_FILE_TYPES", "UPLOAD_PATH", "MAX_DOCUMENT_SIZE_MB", "SUPPORTED_DOCUMENT_TYPES", "DOCUMENT_STORAGE_PATH", "MAX_IMAGE_SIZE_MB", "SUPPORTED_IMAGE_TYPES", "IMAGE_STORAGE_PATH", "ENABLE_IMAGE_PROCESSING", "IMAGE_THUMBNAIL_SIZE"],
+            "storage": ["STORAGE_TYPE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "S3_BUCKET_NAME", "S3_COMPATIBLE_ENDPOINT", "S3_COMPATIBLE_ACCESS_KEY", "S3_COMPATIBLE_SECRET_KEY", "S3_COMPATIBLE_BUCKET_NAME", "S3_COMPATIBLE_REGION", "S3_COMPATIBLE_USE_SSL", "S3_COMPATIBLE_ADDRESSING_STYLE"],
+            "connectors": ["CONNECTOR_TIMEOUT", "MAX_CONNECTORS_PER_ORG", "ENABLE_S3_CONNECTOR", "ENABLE_DATABASE_CONNECTORS"],
             "admin": ["FIRST_SUPERUSER", "FIRST_SUPERUSER_PASSWORD", "NODE_ENV"]
         }
         
@@ -176,7 +178,7 @@ async def get_environment_variables(
                 if key in keys:
                     categorized_vars[category][key] = {
                         "value": value,
-                        "is_sensitive": key in ["SECRET_KEY", "GOOGLE_API_KEY", "MINDSDB_PASSWORD", "AWS_SECRET_ACCESS_KEY", "FIRST_SUPERUSER_PASSWORD"],
+                        "is_sensitive": key in ["SECRET_KEY", "GOOGLE_API_KEY", "MINDSDB_PASSWORD", "AWS_SECRET_ACCESS_KEY", "S3_COMPATIBLE_SECRET_KEY", "FIRST_SUPERUSER_PASSWORD"],
                         "description": get_env_var_description(key)
                     }
                     categorized = True
@@ -353,6 +355,63 @@ async def get_environment_variable(
         logger.error(f"Error getting environment variable {var_name}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/environment-variables/reload")
+async def reload_environment_variables(
+    current_user: User = Depends(get_current_superuser)
+) -> Dict[str, Any]:
+    """Reload environment variables from .env files"""
+    
+    try:
+        # Read environment variables from all .env files
+        env_files = [
+            ".env",
+            "backend/.env", 
+            "frontend/.env"
+        ]
+        
+        reloaded_vars = {}
+        file_results = {}
+        
+        for env_file in env_files:
+            if os.path.exists(env_file):
+                try:
+                    env_manager_file = EnvironmentManager(env_file)
+                    file_vars = env_manager_file.read_env_file()
+                    
+                    # Update process environment with variables from this file
+                    for key, value in file_vars.items():
+                        os.environ[key] = value
+                        reloaded_vars[key] = value
+                    
+                    file_results[env_file] = {
+                        "status": "success",
+                        "variables_count": len(file_vars),
+                        "variables": list(file_vars.keys())
+                    }
+                    
+                except Exception as e:
+                    file_results[env_file] = {
+                        "status": "error",
+                        "error": str(e)
+                    }
+            else:
+                file_results[env_file] = {
+                    "status": "not_found",
+                    "message": "File does not exist"
+                }
+        
+        return {
+            "message": f"Successfully reloaded {len(reloaded_vars)} environment variables",
+            "total_variables_reloaded": len(reloaded_vars),
+            "file_results": file_results,
+            "reloaded_variables": list(reloaded_vars.keys()),
+            "reloaded_at": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error reloading environment variables: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 def get_env_var_description(var_name: str) -> str:
     """Get description for environment variables"""
     descriptions = {
@@ -381,14 +440,27 @@ def get_env_var_description(var_name: str) -> str:
         "MAX_DOCUMENT_SIZE_MB": "Maximum document size in MB",
         "SUPPORTED_DOCUMENT_TYPES": "Supported document types",
         "DOCUMENT_STORAGE_PATH": "Path for document storage",
+        "MAX_IMAGE_SIZE_MB": "Maximum image file size in MB",
+        "SUPPORTED_IMAGE_TYPES": "Supported image file types",
+        "IMAGE_STORAGE_PATH": "Path for image storage",
+        "ENABLE_IMAGE_PROCESSING": "Enable/disable image processing features",
+        "IMAGE_THUMBNAIL_SIZE": "Size for generated image thumbnails in pixels",
+        "STORAGE_TYPE": "Storage backend type (local, s3, s3_compatible)",
+        "AWS_ACCESS_KEY_ID": "AWS access key ID for S3 storage",
+        "AWS_SECRET_ACCESS_KEY": "AWS secret access key for S3 storage",
+        "AWS_DEFAULT_REGION": "AWS default region for S3 storage",
+        "S3_BUCKET_NAME": "AWS S3 bucket name",
+        "S3_COMPATIBLE_ENDPOINT": "S3-compatible storage endpoint URL (MinIO, Backblaze, etc.)",
+        "S3_COMPATIBLE_ACCESS_KEY": "S3-compatible storage access key",
+        "S3_COMPATIBLE_SECRET_KEY": "S3-compatible storage secret key",
+        "S3_COMPATIBLE_BUCKET_NAME": "S3-compatible storage bucket name",
+        "S3_COMPATIBLE_REGION": "S3-compatible storage region",
+        "S3_COMPATIBLE_USE_SSL": "Use SSL for S3-compatible storage connections",
+        "S3_COMPATIBLE_ADDRESSING_STYLE": "S3-compatible addressing style (auto, virtual, path)",
         "CONNECTOR_TIMEOUT": "Database connector timeout in seconds",
         "MAX_CONNECTORS_PER_ORG": "Maximum connectors per organization",
         "ENABLE_S3_CONNECTOR": "Enable/disable S3 connector",
         "ENABLE_DATABASE_CONNECTORS": "Enable/disable database connectors",
-        "AWS_ACCESS_KEY_ID": "AWS access key ID",
-        "AWS_SECRET_ACCESS_KEY": "AWS secret access key",
-        "AWS_DEFAULT_REGION": "AWS default region",
-        "S3_BUCKET_NAME": "S3 bucket name",
         "FIRST_SUPERUSER": "First superuser email",
         "FIRST_SUPERUSER_PASSWORD": "First superuser password",
         "NODE_ENV": "Node.js environment (development/production)"

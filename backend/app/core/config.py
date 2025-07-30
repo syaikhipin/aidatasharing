@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     VERSION: str = "1.0.0"
     
     # Database - Unified database location
-    DATABASE_URL: str = "sqlite:///./storage/aishare_platform.db"
+    DATABASE_URL: str = "sqlite:///../storage/aishare_platform.db"
     
     # CORS origins - will be parsed from comma-separated string
     BACKEND_CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:10103,http://localhost:3001,http://localhost:3004"
@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     MAX_DOCUMENT_SIZE_MB: int = 50
     SUPPORTED_DOCUMENT_TYPES: str = "pdf,docx,doc,txt,rtf,odt"
     DOCUMENT_STORAGE_PATH: str = "./storage/documents"
+    
+    # PDF Processing Configuration
+    ENABLE_PDF_PROCESSING: bool = True
+    PDF_PREVIEW_MAX_WIDTH: int = 400
+    PDF_TEXT_EXTRACTION_MAX_PAGES: int = 10
+    PDF_PROCESSING_LIBRARIES: str = "PyPDF2,PyMuPDF"  # Required libraries for PDF processing
     
     # Data Connector Configuration
     CONNECTOR_TIMEOUT: int = 30
@@ -123,11 +129,11 @@ class Settings(BaseSettings):
         )
     
     # Admin user
-    FIRST_SUPERUSER: str = "admin@example.com"
-    FIRST_SUPERUSER_PASSWORD: str = "admin123"
+    FIRST_SUPERUSER: str
+    FIRST_SUPERUSER_PASSWORD: str
     
     class Config:
-        env_file = "../.env"  # Use unified .env file from project root
+        env_file = ".env"  # Use local .env file in backend directory
         env_file_encoding = "utf-8"
         extra = "allow"
 

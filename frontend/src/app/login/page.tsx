@@ -1,12 +1,22 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authAPI } from '@/lib/api';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+
+interface DemoUser {
+  email: string;
+  password: string;
+  role: string;
+  description: string;
+  organization: string | null;
+  full_name: string;
+  is_superuser: boolean;
+}
 
 export default function LoginPage() {
   const [formData, setFormData] = useState({
@@ -15,8 +25,51 @@ export default function LoginPage() {
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(false);
+  const [demoUsers, setDemoUsers] = useState<DemoUser[]>([]);
+  const [loadingDemoUsers, setLoadingDemoUsers] = useState(true);
   const router = useRouter();
   const { login } = useAuth();
+
+  // Fetch demo users on component mount
+  useEffect(() => {
+    const fetchDemoUsers = async () => {
+      try {
+        const response = await fetch('/api/auth/demo-users');
+        if (response.ok) {
+          const data = await response.json();
+          setDemoUsers(data.demo_users || []);
+        } else {
+          console.warn('Could not fetch demo users, using fallback');
+          // Fallback to hardcoded admin user
+          setDemoUsers([{
+            email: 'admin@example.com',
+            password: 'admin123',
+            role: 'admin',
+            description: 'System Administrator',
+            organization: 'System Administration',
+            full_name: 'Super Admin',
+            is_superuser: true
+          }]);
+        }
+      } catch (error) {
+        console.warn('Error fetching demo users:', error);
+        // Fallback to hardcoded admin user
+        setDemoUsers([{
+          email: 'admin@example.com',
+          password: 'admin123',
+          role: 'admin',
+          description: 'System Administrator',
+          organization: 'System Administration',
+          full_name: 'Super Admin',
+          is_superuser: true
+        }]);
+      } finally {
+        setLoadingDemoUsers(false);
+      }
+    };
+
+    fetchDemoUsers();
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -69,24 +122,18 @@ export default function LoginPage() {
     }
   };
 
-  const fillDemoCredentials = (userType: 'admin' | 'user' | 'test') => {
-    if (userType === 'admin') {
-      setFormData({
-        email: 'admin@example.com',
-        password: 'admin123'
-      });
-    } else if (userType === 'user') {
-      setFormData({
-        email: 'testuser@demo.com',
-        password: 'testpassword123'
-      });
-    } else {
-      setFormData({
-        email: 'test@mailinator.com',
-        password: 'test123'
-      });
-    }
+  const fillDemoCredentials = (demoUser: DemoUser) => {
+    setFormData({
+      email: demoUser.email,
+      password: demoUser.password
+    });
     setErrors({});
+  };
+
+  const getUserIcon = (user: DemoUser) => {
+    if (user.is_superuser) return '👑';
+    if (user.role === 'admin') return '🛡️';
+    return '👤';
   };
 
   return (
@@ -191,39 +238,40 @@ export default function LoginPage() {
                 </div>
               </div>
 
+              {/* Dynamic Demo User Buttons */}
               <div className="space-y-3">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="lg"
-                  onClick={() => fillDemoCredentials('admin')}
-                  className="w-full"
-                >
-                  <span className="mr-2">👑</span>
-                  Login as Admin
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="lg"
-                  onClick={() => fillDemoCredentials('user')}
-                  className="w-full"
-                >
-                  <span className="mr-2">👤</span>
-                  Login as Demo User
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="lg"
-                  onClick={() => fillDemoCredentials('test')}
-                  className="w-full"
-                >
-                  <span className="mr-2">🧪</span>
-                  Login as Test User
-                </Button>
+                {loadingDemoUsers ? (
+                  <div className="text-center py-4">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto"></div>
+                    <p className="text-sm text-gray-500 mt-2">Loading demo accounts...</p>
+                  </div>
+                ) : (
+                  demoUsers.map((user, index) => (
+                    <Button
+                      key={index}
+                      type="button"
+                      variant="outline"
+                      size="lg"
+                      onClick={() => fillDemoCredentials(user)}
+                      className="w-full text-left"
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <div className="flex items-center">
+                          <span className="mr-3 text-lg">{getUserIcon(user)}</span>
+                          <div>
+                            <div className="font-medium">{user.description}</div>
+                            <div className="text-xs text-gray-500">{user.email}</div>
+                          </div>
+                        </div>
+                        {user.organization && (
+                          <div className="text-xs text-gray-400 max-w-24 truncate">
+                            {user.organization}
+                          </div>
+                        )}
+                      </div>
+                    </Button>
+                  ))
+                )}
               </div>
             </form>
 
@@ -240,32 +288,31 @@ export default function LoginPage() {
             </div>
 
             {/* Demo info card */}
-            <Card variant="outlined" className="mt-6 bg-blue-50 border-blue-200">
-              <CardContent className="p-4">
-                <div className="text-center">
-                  <h4 className="text-sm font-medium text-blue-900 mb-3">
-                    🚀 Demo Accounts
-                  </h4>
-                  <div className="grid grid-cols-1 gap-3 text-xs text-blue-700">
-                    <div className="bg-white rounded-lg p-3 border border-blue-200">
-                      <p className="font-medium text-blue-900 mb-1">👑 Admin Account</p>
-                      <p><strong>Email:</strong> admin@example.com</p>
-                      <p><strong>Password:</strong> admin123</p>
-                    </div>
-                    <div className="bg-white rounded-lg p-3 border border-blue-200">
-                      <p className="font-medium text-blue-900 mb-1">👤 Demo User</p>
-                      <p><strong>Email:</strong> testuser@demo.com</p>
-                      <p><strong>Password:</strong> testpassword123</p>
-                    </div>
-                    <div className="bg-white rounded-lg p-3 border border-blue-200">
-                      <p className="font-medium text-blue-900 mb-1">🧪 Test User</p>
-                      <p><strong>Email:</strong> test@mailinator.com</p>
-                      <p><strong>Password:</strong> test123</p>
+            {!loadingDemoUsers && demoUsers.length > 0 && (
+              <Card variant="outlined" className="mt-6 bg-blue-50 border-blue-200">
+                <CardContent className="p-4">
+                  <div className="text-center">
+                    <h4 className="text-sm font-medium text-blue-900 mb-3">
+                      🚀 Available Demo Accounts
+                    </h4>
+                    <div className="grid grid-cols-1 gap-3 text-xs text-blue-700">
+                      {demoUsers.map((user, index) => (
+                        <div key={index} className="bg-white rounded-lg p-3 border border-blue-200">
+                          <p className="font-medium text-blue-900 mb-1">
+                            {getUserIcon(user)} {user.description}
+                          </p>
+                          <p><strong>Email:</strong> {user.email}</p>
+                          <p><strong>Password:</strong> {user.password}</p>
+                          {user.organization && (
+                            <p><strong>Organization:</strong> {user.organization}</p>
+                          )}
+                        </div>
+                      ))}
                     </div>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            )}
           </CardContent>
         </Card>
 

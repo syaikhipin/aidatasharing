@@ -351,3 +351,102 @@ async def update_user_profile(
         created_at=current_user.created_at,
         updated_at=current_user.updated_at
     ) 
+
+@router.get(
+    "/demo-users",
+    summary="Get Demo Users",
+    description="Get list of demo users available for testing the login functionality",
+    response_description="List of demo users with their credentials"
+)
+async def get_demo_users(db: Session = Depends(get_db)):
+    """
+    # 🧪 Get Demo Users
+    
+    Retrieve a list of demo users that can be used for testing the login functionality.
+    This endpoint returns actual users from the database with their login credentials.
+    
+    ## Returned Information
+    - **Admin User**: System administrator with full access
+    - **Regular Users**: Standard users for testing member functionality
+    
+    ## Example Response
+    ```json
+    {
+        "demo_users": [
+            {
+                "email": "admin@example.com",
+                "password": "admin123",
+                "role": "admin",
+                "description": "System Administrator",
+                "organization": "System Administration"
+            }
+        ]
+    }
+    ```
+    
+    ## Use Cases
+    - **Testing**: Quick access to test accounts
+    - **Demo**: Show available accounts to demo users
+    - **Development**: Easy login for development purposes
+    """
+    try:
+        # Get users from database
+        users = db.query(User).filter(User.is_active == True).all()
+        
+        demo_users = []
+        
+        for user in users:
+            organization_name = None
+            if user.organization_id:
+                organization = db.query(Organization).filter(Organization.id == user.organization_id).first()
+                if organization:
+                    organization_name = organization.name
+            
+            # Only include users with known demo passwords or admin user
+            demo_password = None
+            description = ""
+            
+            # Demo Organization users
+            if user.email == "demo1@demo.com":
+                demo_password = "demo123"
+                description = "Demo Organization Member 1"
+            elif user.email == "demo2@demo.com":
+                demo_password = "demo123"
+                description = "Demo Organization Member 2"
+            # Open Source Community users
+            elif user.email == "opensource1@opensource.org":
+                demo_password = "open123"
+                description = "Open Source Community Member 1"
+            elif user.email == "opensource2@opensource.org":
+                demo_password = "open123"
+                description = "Open Source Community Member 2"
+            # Admin user
+            elif user.email == "admin@example.com":
+                demo_password = "admin123"
+                description = "System Administrator with full access"
+            elif user.is_superuser:
+                demo_password = "admin123"  # Default admin password
+                description = "Administrator Account"
+            
+            if demo_password:
+                demo_users.append({
+                    "email": user.email,
+                    "password": demo_password,
+                    "role": user.role or ("admin" if user.is_superuser else "member"),
+                    "description": description,
+                    "organization": organization_name,
+                    "full_name": user.full_name,
+                    "is_superuser": user.is_superuser
+                })
+        
+        return {
+            "demo_users": demo_users,
+            "total_count": len(demo_users),
+            "message": "Demo users retrieved successfully"
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving demo users: {str(e)}"
+        )

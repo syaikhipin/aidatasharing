@@ -25,6 +25,9 @@ from app.schemas.admin_config import (
     MindsDBConfiguration as MindsDBConfigurationSchema
 )
 from app.services.admin_config import AdminConfigurationService
+from app.services.storage import storage_service
+from app.models.organization import Organization
+from app.core.auth import get_password_hash
 import logging
 import json
 import tempfile
@@ -1764,3 +1767,512 @@ def _extract_storage_type(config) -> str:
         return "local"
     
     return config.permanent_storage_config.get("location", "local")
+
+
+@router.get("/storage-service/info")
+async def get_storage_service_info(
+    current_user: User = Depends(get_current_superuser)
+):
+    """Get storage service information and configuration."""
+    try:
+        # Get backend information
+        backend_info = storage_service.get_backend_info()
+        
+        # Get environment configuration
+        storage_config = {
+            "STORAGE_TYPE": os.getenv('STORAGE_TYPE', 'local'),
+            "AWS_ACCESS_KEY_ID": "***CONFIGURED***" if os.getenv('AWS_ACCESS_KEY_ID') else "Not configured",
+            "AWS_SECRET_ACCESS_KEY": "***CONFIGURED***" if os.getenv('AWS_SECRET_ACCESS_KEY') else "Not configured",
+            "AWS_DEFAULT_REGION": os.getenv('AWS_DEFAULT_REGION', 'us-east-1'),
+            "S3_BUCKET_NAME": os.getenv('S3_BUCKET_NAME', 'Not configured'),
+            "S3_COMPATIBLE_ENDPOINT": os.getenv('S3_COMPATIBLE_ENDPOINT', 'Not configured'),
+            "S3_COMPATIBLE_ACCESS_KEY": "***CONFIGURED***" if os.getenv('S3_COMPATIBLE_ACCESS_KEY') else "Not configured",
+            "S3_COMPATIBLE_SECRET_KEY": "***CONFIGURED***" if os.getenv('S3_COMPATIBLE_SECRET_KEY') else "Not configured",
+            "S3_COMPATIBLE_BUCKET_NAME": os.getenv('S3_COMPATIBLE_BUCKET_NAME', 'Not configured'),
+            "S3_COMPATIBLE_REGION": os.getenv('S3_COMPATIBLE_REGION', 'us-east-1')
+        }
+        
+        # Check S3 library availability
+        try:
+            import boto3
+            s3_available = True
+        except ImportError:
+            s3_available = False
+        
+        return {
+            "backend_info": backend_info,
+            "environment_config": storage_config,
+            "s3_library_available": s3_available,
+            "supported_storage_types": ["local", "s3", "s3_compatible"],
+            "current_storage_type": backend_info.get("storage_type", "unknown"),
+            "supports_presigned_urls": backend_info.get("supports_presigned_urls", False),
+            "status": "operational"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting storage service info: {e}")
+        raise HTTPException(status_code=500, detail=f"Error retrieving storage service information: {str(e)}")
+
+
+@router.post("/storage-service/test-connection")
+async def test_storage_connection(
+    current_user: User = Depends(get_current_superuser)
+):
+    """Test the current storage backend connection."""
+    try:
+        # Create a test file
+        test_content = b"Storage service connection test"
+        test_filename = "storage_test.txt"
+        
+        # Store test file
+        result = await storage_service.store_dataset_file(
+            file_content=test_content,
+            original_filename=test_filename,
+            dataset_id=999999,  # Use a high number for test
+            organization_id=999999
+        )
+        
+        # Retrieve test file
+        retrieved_content = await storage_service.retrieve_dataset_file(result['relative_path'])
+        
+        # Verify content matches
+        if retrieved_content != test_content:
+            raise Exception("Content mismatch during retrieval")
+        
+        # Clean up test file
+        await storage_service.delete_dataset_file(result['relative_path'])
+        
+        return {
+            "status": "success",
+            "message": "Storage connection test passed",
+            "backend_type": type(storage_service.backend).__name__,
+            "test_file_size": len(test_content),
+            "operations_tested": ["store", "retrieve", "delete"]
+        }
+        
+    except Exception as e:
+        logger.error(f"Storage connection test failed: {e}")
+        return {
+            "status": "error",
+            "message": f"Storage connection test failed: {str(e)}",
+            "backend_type": type(storage_service.backend).__name__ if storage_service.backend else "unknown"
+        }
+
+
+@router.get("/organizations")
+async def get_all_organizations(
+    current_user: User = Depends(get_current_superuser),
+    db: Session = Depends(get_db)
+):
+    """Get all organizations for admin management."""
+    try:
+        organizations = db.query(Organization).all()
+        
+        org_list = []
+        for org in organizations:
+            # Count users in each organization
+            user_count = db.query(User).filter(User.organization_id == org.id).count()
+            
+            org_list.append({
+                "id": org.id,
+                "name": org.name,
+                "slug": org.slug,
+                "description": org.description,
+                "type": org.type,
+                "is_active": org.is_active,
+                "created_at": org.created_at.isoformat() if org.created_at else None,
+                "user_count": user_count
+            })
+        
+        return {
+            "organizations": org_list,
+            "total": len(org_list)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting organizations: {e}")
+        raise HTTPException(status_code=500, detail=f"Error retrieving organizations: {str(e)}")
+
+
+@router.post("/organizations")
+async def create_organization(
+    org_data: Dict[str, Any],
+    current_user: User = Depends(get_current_superuser),
+    db: Session = Depends(get_db)
+):
+    """Create a new organization."""
+    try:
+        # Validate required fields
+        name = org_data.get("name", "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Organization name is required")
+        
+        # Generate slug from name if not provided
+        slug = org_data.get("slug", "").strip()
+        if not slug:
+            slug = name.lower().replace(" ", "-").replace("_", "-")
+            # Remove special characters
+            import re
+            slug = re.sub(r'[^a-z0-9-]', '', slug)
+        
+        # Check if organization with same name or slug exists
+        existing_org = db.query(Organization).filter(
+            (Organization.name == name) | (Organization.slug == slug)
+        ).first()
+        
+        if existing_org:
+            raise HTTPException(status_code=400, detail="Organization with this name or slug already exists")
+        
+        # Create organization
+        organization = Organization(
+            name=name,
+            slug=slug,
+            description=org_data.get("description", ""),
+            type=org_data.get("type", "SMALL_BUSINESS"),
+            is_active=org_data.get("is_active", True)
+        )
+        
+        db.add(organization)
+        db.commit()
+        db.refresh(organization)
+        
+        return {
+            "message": "Organization created successfully",
+            "organization": {
+                "id": organization.id,
+                "name": organization.name,
+                "slug": organization.slug,
+                "description": organization.description,
+                "type": organization.type,
+                "is_active": organization.is_active,
+                "created_at": organization.created_at.isoformat()
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error creating organization: {e}")
+        raise HTTPException(status_code=500, detail=f"Error creating organization: {str(e)}")
+
+
+@router.put("/organizations/{org_id}")
+async def update_organization(
+    org_id: int,
+    org_data: Dict[str, Any],
+    current_user: User = Depends(get_current_superuser),
+    db: Session = Depends(get_db)
+):
+    """Update an organization."""
+    try:
+        organization = db.query(Organization).filter(Organization.id == org_id).first()
+        if not organization:
+            raise HTTPException(status_code=404, detail="Organization not found")
+        
+        # Update fields
+        if "name" in org_data:
+            organization.name = org_data["name"].strip()
+        if "description" in org_data:
+            organization.description = org_data["description"]
+        if "type" in org_data:
+            organization.type = org_data["type"]
+        if "is_active" in org_data:
+            organization.is_active = org_data["is_active"]
+        
+        db.commit()
+        db.refresh(organization)
+        
+        return {
+            "message": "Organization updated successfully",
+            "organization": {
+                "id": organization.id,
+                "name": organization.name,
+                "slug": organization.slug,
+                "description": organization.description,
+                "type": organization.type,
+                "is_active": organization.is_active,
+                "updated_at": organization.updated_at.isoformat() if organization.updated_at else None
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating organization: {e}")
+        raise HTTPException(status_code=500, detail=f"Error updating organization: {str(e)}")
+
+
+@router.delete("/organizations/{org_id}")
+async def delete_organization(
+    org_id: int,
+    force: bool = False,
+    current_user: User = Depends(get_current_superuser),
+    db: Session = Depends(get_db)
+):
+    """Delete an organization."""
+    try:
+        organization = db.query(Organization).filter(Organization.id == org_id).first()
+        if not organization:
+            raise HTTPException(status_code=404, detail="Organization not found")
+        
+        # Check if organization has users
+        user_count = db.query(User).filter(User.organization_id == org_id).count()
+        if user_count > 0 and not force:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Cannot delete organization with {user_count} users. Use force=true to delete anyway."
+            )
+        
+        # If force delete, update users to have no organization
+        if force and user_count > 0:
+            db.query(User).filter(User.organization_id == org_id).update({"organization_id": None})
+        
+        db.delete(organization)
+        db.commit()
+        
+        return {
+            "message": "Organization deleted successfully",
+            "organization_id": org_id,
+            "users_affected": user_count if force else 0
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting organization: {e}")
+        raise HTTPException(status_code=500, detail=f"Error deleting organization: {str(e)}")
+
+
+@router.get("/users")
+async def get_all_users(
+    skip: int = 0,
+    limit: int = 100,
+    organization_id: Optional[int] = None,
+    current_user: User = Depends(get_current_superuser),
+    db: Session = Depends(get_db)
+):
+    """Get all users for admin management."""
+    try:
+        query = db.query(User)
+        
+        if organization_id:
+            query = query.filter(User.organization_id == organization_id)
+        
+        total_count = query.count()
+        users = query.offset(skip).limit(limit).all()
+        
+        user_list = []
+        for user in users:
+            org_name = None
+            if user.organization_id:
+                org = db.query(Organization).filter(Organization.id == user.organization_id).first()
+                org_name = org.name if org else None
+            
+            user_list.append({
+                "id": user.id,
+                "email": user.email,
+                "full_name": user.full_name,
+                "role": user.role,
+                "is_active": user.is_active,
+                "is_superuser": user.is_superuser,
+                "organization_id": user.organization_id,
+                "organization_name": org_name,
+                "created_at": user.created_at.isoformat() if user.created_at else None,
+                "last_login": user.last_login.isoformat() if user.last_login else None
+            })
+        
+        return {
+            "users": user_list,
+            "total": total_count,
+            "skip": skip,
+            "limit": limit
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting users: {e}")
+        raise HTTPException(status_code=500, detail=f"Error retrieving users: {str(e)}")
+
+
+@router.post("/users")
+async def create_user(
+    user_data: Dict[str, Any],
+    current_user: User = Depends(get_current_superuser),
+    db: Session = Depends(get_db)
+):
+    """Create a new user."""
+    try:
+        # Validate required fields
+        email = user_data.get("email", "").strip().lower()
+        password = user_data.get("password", "").strip()
+        full_name = user_data.get("full_name", "").strip()
+        
+        if not email:
+            raise HTTPException(status_code=400, detail="Email is required")
+        if not password:
+            raise HTTPException(status_code=400, detail="Password is required")
+        if not full_name:
+            raise HTTPException(status_code=400, detail="Full name is required")
+        
+        # Validate email format
+        import re
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_pattern, email):
+            raise HTTPException(status_code=400, detail="Invalid email format")
+        
+        # Check if user already exists
+        existing_user = db.query(User).filter(User.email == email).first()
+        if existing_user:
+            raise HTTPException(status_code=400, detail="User with this email already exists")
+        
+        # Validate organization if provided
+        organization_id = user_data.get("organization_id")
+        if organization_id:
+            org = db.query(Organization).filter(Organization.id == organization_id).first()
+            if not org:
+                raise HTTPException(status_code=400, detail="Organization not found")
+        
+        # Create user
+        user = User(
+            email=email,
+            hashed_password=get_password_hash(password),
+            full_name=full_name,
+            role=user_data.get("role", "member"),
+            is_active=user_data.get("is_active", True),
+            is_superuser=user_data.get("is_superuser", False),
+            organization_id=organization_id
+        )
+        
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        
+        # Get organization name for response
+        org_name = None
+        if user.organization_id:
+            org = db.query(Organization).filter(Organization.id == user.organization_id).first()
+            org_name = org.name if org else None
+        
+        return {
+            "message": "User created successfully",
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "full_name": user.full_name,
+                "role": user.role,
+                "is_active": user.is_active,
+                "is_superuser": user.is_superuser,
+                "organization_id": user.organization_id,
+                "organization_name": org_name,
+                "created_at": user.created_at.isoformat()
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error creating user: {e}")
+        raise HTTPException(status_code=500, detail=f"Error creating user: {str(e)}")
+
+
+@router.put("/users/{user_id}")
+async def update_user(
+    user_id: int,
+    user_data: Dict[str, Any],
+    current_user: User = Depends(get_current_superuser),
+    db: Session = Depends(get_db)
+):
+    """Update a user."""
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Prevent admin from removing their own superuser status
+        if user.id == current_user.id and "is_superuser" in user_data and not user_data["is_superuser"]:
+            raise HTTPException(status_code=400, detail="Cannot remove your own superuser status")
+        
+        # Update fields
+        if "full_name" in user_data:
+            user.full_name = user_data["full_name"].strip()
+        if "role" in user_data:
+            user.role = user_data["role"]
+        if "is_active" in user_data:
+            user.is_active = user_data["is_active"]
+        if "is_superuser" in user_data:
+            user.is_superuser = user_data["is_superuser"]
+        if "organization_id" in user_data:
+            # Validate organization if provided
+            if user_data["organization_id"]:
+                org = db.query(Organization).filter(Organization.id == user_data["organization_id"]).first()
+                if not org:
+                    raise HTTPException(status_code=400, detail="Organization not found")
+            user.organization_id = user_data["organization_id"]
+        if "password" in user_data and user_data["password"].strip():
+            user.hashed_password = get_password_hash(user_data["password"].strip())
+        
+        db.commit()
+        db.refresh(user)
+        
+        # Get organization name for response
+        org_name = None
+        if user.organization_id:
+            org = db.query(Organization).filter(Organization.id == user.organization_id).first()
+            org_name = org.name if org else None
+        
+        return {
+            "message": "User updated successfully",
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "full_name": user.full_name,
+                "role": user.role,
+                "is_active": user.is_active,
+                "is_superuser": user.is_superuser,
+                "organization_id": user.organization_id,
+                "organization_name": org_name,
+                "updated_at": user.updated_at.isoformat() if user.updated_at else None
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating user: {e}")
+        raise HTTPException(status_code=500, detail=f"Error updating user: {str(e)}")
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(
+    user_id: int,
+    current_user: User = Depends(get_current_superuser),
+    db: Session = Depends(get_db)
+):
+    """Delete a user."""
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Prevent admin from deleting themselves
+        if user.id == current_user.id:
+            raise HTTPException(status_code=400, detail="Cannot delete your own account")
+        
+        db.delete(user)
+        db.commit()
+        
+        return {
+            "message": "User deleted successfully",
+            "user_id": user_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting user: {e}")
+        raise HTTPException(status_code=500, detail=f"Error deleting user: {str(e)}")

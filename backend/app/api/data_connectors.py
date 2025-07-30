@@ -519,6 +519,101 @@ async def create_dataset_from_connector(
         )
 
 
+@router.post("/image-remote")
+async def create_remote_image_connector(
+    connector_config: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create a remote image data connector (S3, URL, FTP, etc.)"""
+    if not current_user.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Must belong to an organization"
+        )
+    
+    try:
+        # Validate required fields
+        required_fields = ["name", "source_type", "connection_params"]
+        for field in required_fields:
+            if field not in connector_config:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Missing required field: {field}"
+                )
+        
+        connector_name = connector_config["name"]
+        source_type = connector_config["source_type"]
+        connection_params = connector_config["connection_params"]
+        
+        # Create database connector record
+        connector = DatabaseConnector(
+            name=connector_name,
+            connector_type="image_remote",
+            description=f"Remote image connector for {source_type}",
+            connection_config={
+                "source_type": source_type,
+                "connection_params": connection_params
+            },
+            organization_id=current_user.organization_id,
+            created_by=current_user.id,
+            mindsdb_database_name=f"image_remote_{connector_name.lower().replace(' ', '_')}"
+        )
+        
+        db.add(connector)
+        db.commit()
+        db.refresh(connector)
+        
+        # Create MindsDB handler
+        connector_service = ConnectorService(db)
+        handler_result = connector_service.create_image_remote_handler(connector)
+        
+        if handler_result["success"]:
+            connector.test_status = "connected"
+            connector.last_tested_at = datetime.utcnow()
+            db.commit()
+            
+            return {
+                "success": True,
+                "message": "Remote image connector created successfully",
+                "connector_id": connector.id,
+                "connector_name": connector_name,
+                "source_type": source_type,
+                "mindsdb_handler": handler_result.get("handler_name")
+            }
+        else:
+            # Rollback if handler creation failed
+            db.delete(connector)
+            db.commit()
+            
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create MindsDB handler: {handler_result.get('error')}"
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Remote image connector creation failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Remote image connector creation failed: {str(e)}"
+        )
+
+    
+    if result.get("success"):
+        return {
+            "message": "Dataset created successfully",
+            "dataset_id": result.get("dataset_id"),
+            "dataset_name": result.get("dataset_name")
+        }
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result.get("error", "Failed to create dataset")
+        )
+
+
 async def test_connector_connection_sync(connector: DatabaseConnector) -> Dict[str, Any]:
     """Test connector connection synchronously."""
     try:

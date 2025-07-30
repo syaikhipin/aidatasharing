@@ -33,6 +33,16 @@ class HandlerType(str, enum.Enum):
     DATABASE = "database"
     API = "api"
     ML_ENGINE = "ml_engine"
+    IMAGE = "image"  # New image handler type
+
+
+class FileType(str, enum.Enum):
+    """File type classification"""
+    DOCUMENT = "document"  # PDF, DOCX, TXT, etc.
+    SPREADSHEET = "spreadsheet"  # CSV, XLSX, etc.
+    IMAGE = "image"  # JPG, PNG, GIF, etc.
+    ARCHIVE = "archive"  # ZIP, TAR, etc.
+    OTHER = "other"
 
 
 class FileUpload(Base):
@@ -50,6 +60,13 @@ class FileUpload(Base):
     file_size = Column(Integer, nullable=False)
     file_hash = Column(String(64), nullable=False)
     mime_type = Column(String(100), nullable=True)
+    file_type = Column(String(50), nullable=True)  # FileType enum value
+    
+    # Image-specific metadata
+    image_width = Column(Integer, nullable=True)
+    image_height = Column(Integer, nullable=True)
+    image_format = Column(String(10), nullable=True)  # JPEG, PNG, etc.
+    color_mode = Column(String(20), nullable=True)  # RGB, RGBA, etc.
     
     # Processing status
     upload_status = Column(String(50), default=UploadStatus.PENDING)

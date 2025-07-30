@@ -11,25 +11,8 @@ from app.core.auth import get_password_hash
 import logging
 
 # Import all models to ensure they are registered with SQLAlchemy
-from app.models.user import User
+from app.models import *  # This will import all models and register them
 from app.core.database import Base
-from app.models.organization import Organization, OrganizationType, DataSharingLevel
-from app.models.config import Configuration
-from app.models.dataset import (
-    Dataset, DatasetAccessLog, DatasetModel, DatasetChatSession, 
-    ChatMessage, DatasetShareAccess, DatasetType, DatasetStatus, AIProcessingStatus
-)
-from app.models.file_handler import FileUpload, MindsDBHandler, FileProcessingLog
-from app.models.analytics import (
-    ActivityLog, UsageMetric, DatashareStats, UserSessionLog, 
-    ModelPerformanceLog, ActivityType, UsageMetricType
-)
-from app.models.proxy_connector import (
-    ProxyConnector, SharedProxyLink, ProxyAccessLog, ProxyCredentialVault
-)
-from app.models.admin_config import (
-    ConfigurationOverride, MindsDBConfiguration, ConfigurationHistory
-)
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +114,65 @@ def create_default_data(engine):
                 user.role = "admin"
                 print(f"   🔄 Updated admin user with organization: {admin_org.name}")
             print(f"   ⚠️  Superuser already exists: {settings.FIRST_SUPERUSER}")
+        
+        # Create test users - 2 users per organization (4 total)
+        print("🧪 Creating test users...")
+        demo_org = db.query(Organization).filter(Organization.slug == "demo-org").first()
+        opensource_org = db.query(Organization).filter(Organization.slug == "open-source").first()
+        
+        test_users = [
+            # Demo Organization Users
+            {
+                "email": "demo1@demo.com",
+                "password": "demo123",
+                "full_name": "Demo User 1",
+                "organization_id": demo_org.id if demo_org else None,
+                "role": "admin",
+                "is_superuser": False
+            },
+            {
+                "email": "demo2@demo.com", 
+                "password": "demo123",
+                "full_name": "Demo User 2",
+                "organization_id": demo_org.id if demo_org else None,
+                "role": "member",
+                "is_superuser": False
+            },
+            # Open Source Organization Users
+            {
+                "email": "opensource1@opensource.org",
+                "password": "open123",
+                "full_name": "Open Source User 1",
+                "organization_id": opensource_org.id if opensource_org else None,
+                "role": "owner",
+                "is_superuser": False
+            },
+            {
+                "email": "opensource2@opensource.org",
+                "password": "open123",
+                "full_name": "Open Source User 2",
+                "organization_id": opensource_org.id if opensource_org else None,
+                "role": "member",
+                "is_superuser": False
+            }
+        ]
+        
+        for user_data in test_users:
+            existing_user = db.query(User).filter(User.email == user_data["email"]).first()
+            if not existing_user:
+                test_user = User(
+                    email=user_data["email"],
+                    hashed_password=get_password_hash(user_data["password"]),
+                    full_name=user_data["full_name"],
+                    is_active=True,
+                    is_superuser=user_data["is_superuser"],
+                    organization_id=user_data["organization_id"],
+                    role=user_data["role"]
+                )
+                db.add(test_user)
+                print(f"   ✅ Created test user: {user_data['email']} ({user_data['full_name']})")
+            else:
+                print(f"   ⚠️  Test user already exists: {existing_user.email}")
         
         # Create default configurations
         print("⚙️  Creating default configurations...")

@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useState, useEffect } from 'react';
@@ -374,6 +375,7 @@ function EnvironmentTab({
   const [editValue, setEditValue] = useState('');
   const [showSensitive, setShowSensitive] = useState<{[key: string]: boolean}>({});
   const [saving, setSaving] = useState(false);
+  const [reloading, setReloading] = useState(false);
 
   const categoryIcons = {
     database: Database,
@@ -413,6 +415,24 @@ function EnvironmentTab({
     }
   };
 
+  const handleReloadEnvironment = async () => {
+    try {
+      console.log('🚀 Starting environment reload...');
+      setReloading(true);
+      const result = await adminAPI.reloadEnvironmentVariables();
+      console.log('✅ Environment reload result:', result);
+      alert(`Successfully reloaded ${result.total_variables_reloaded} environment variables from .env files!`);
+      onUpdate(); // Refresh the environment variables display
+    } catch (error) {
+      console.error('❌ Failed to reload environment variables:', error);
+      // Show more detailed error information
+      const errorMessage = error?.response?.data?.detail || error?.message || 'Unknown error';
+      alert(`Failed to reload environment variables: ${errorMessage}`);
+    } finally {
+      setReloading(false);
+    }
+  };
+
   const toggleSensitiveVisibility = (key: string) => {
     setShowSensitive(prev => ({
       ...prev,
@@ -441,13 +461,26 @@ function EnvironmentTab({
       {/* Category Navigation */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center">
-            <Server className="mr-2 h-5 w-5" />
-            Environment Variables
-          </CardTitle>
-          <CardDescription>
-            Manage system configuration through environment variables
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center">
+                <Server className="mr-2 h-5 w-5" />
+                Environment Variables
+              </CardTitle>
+              <CardDescription>
+                Manage system configuration through environment variables
+              </CardDescription>
+            </div>
+            <Button
+              variant="outline"
+              onClick={handleReloadEnvironment}
+              disabled={reloading}
+              className="flex items-center"
+            >
+              <Settings className={`mr-2 h-4 w-4 ${reloading ? 'animate-spin' : ''}`} />
+              {reloading ? 'Reloading...' : 'Reload from .env'}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2">
