@@ -5,8 +5,10 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authAPI } from '@/lib/api';
 import { useAuth } from '@/components/auth/AuthProvider';
+import DemoUsersDisplay from '@/components/auth/DemoUsersDisplay';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface DemoUser {
   email: string;
@@ -25,44 +27,92 @@ export default function LoginPage() {
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedDemoUser, setSelectedDemoUser] = useState<string>('');
   const [demoUsers, setDemoUsers] = useState<DemoUser[]>([]);
   const [loadingDemoUsers, setLoadingDemoUsers] = useState(true);
   const router = useRouter();
   const { login } = useAuth();
 
-  // Fetch demo users on component mount
+  // Fetch all demo users from backend
   useEffect(() => {
     const fetchDemoUsers = async () => {
       try {
-        const response = await fetch('/api/auth/demo-users');
+        const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+        const response = await fetch(`${API_BASE_URL}/api/auth/demo-users`);
         if (response.ok) {
           const data = await response.json();
           setDemoUsers(data.demo_users || []);
         } else {
-          console.warn('Could not fetch demo users, using fallback');
-          // Fallback to hardcoded admin user
-          setDemoUsers([{
-            email: 'admin@example.com',
-            password: 'admin123',
-            role: 'admin',
-            description: 'System Administrator',
-            organization: 'System Administration',
-            full_name: 'Super Admin',
-            is_superuser: true
-          }]);
+          console.warn('Could not fetch demo users from API');
+          // Fallback to hardcoded demo users if API fails
+          setDemoUsers([
+            {
+              email: "superadmin@platform.com",
+              password: "SuperAdmin123!",
+              description: "Platform Superadmin (full platform access)",
+              full_name: "Platform Superadmin"
+            },
+            {
+              email: "alice.manager@techcorp.com",
+              password: "TechManager123!",
+              description: "TechCorp Solutions - Organization Admin",
+              full_name: "Alice Johnson"
+            },
+            {
+              email: "bob.analyst@techcorp.com",
+              password: "TechAnalyst123!",
+              description: "TechCorp Solutions - Organization Member",
+              full_name: "Bob Smith"
+            },
+            {
+              email: "carol.researcher@datasciencehub.com",
+              password: "DataResearch123!",
+              description: "DataScience Hub - Organization Admin",
+              full_name: "Carol Davis"
+            },
+            {
+              email: "david.scientist@datasciencehub.com",
+              password: "DataScience123!",
+              description: "DataScience Hub - Organization Member",
+              full_name: "David Wilson"
+            }
+          ]);
         }
       } catch (error) {
         console.warn('Error fetching demo users:', error);
-        // Fallback to hardcoded admin user
-        setDemoUsers([{
-          email: 'admin@example.com',
-          password: 'admin123',
-          role: 'admin',
-          description: 'System Administrator',
-          organization: 'System Administration',
-          full_name: 'Super Admin',
-          is_superuser: true
-        }]);
+        // Fallback to hardcoded demo users
+        setDemoUsers([
+          {
+            email: "superadmin@platform.com",
+            password: "SuperAdmin123!",
+            description: "Platform Superadmin (full platform access)",
+            full_name: "Platform Superadmin"
+          },
+          {
+            email: "alice.manager@techcorp.com",
+            password: "TechManager123!",
+            description: "TechCorp Solutions - Organization Admin",
+            full_name: "Alice Johnson"
+          },
+          {
+            email: "bob.analyst@techcorp.com",
+            password: "TechAnalyst123!",
+            description: "TechCorp Solutions - Organization Member",
+            full_name: "Bob Smith"
+          },
+          {
+            email: "carol.researcher@datasciencehub.com",
+            password: "DataResearch123!",
+            description: "DataScience Hub - Organization Admin",
+            full_name: "Carol Davis"
+          },
+          {
+            email: "david.scientist@datasciencehub.com",
+            password: "DataScience123!",
+            description: "DataScience Hub - Organization Member",
+            full_name: "David Wilson"
+          }
+        ]);
       } finally {
         setLoadingDemoUsers(false);
       }
@@ -122,18 +172,16 @@ export default function LoginPage() {
     }
   };
 
-  const fillDemoCredentials = (demoUser: DemoUser) => {
-    setFormData({
-      email: demoUser.email,
-      password: demoUser.password
-    });
-    setErrors({});
-  };
-
-  const getUserIcon = (user: DemoUser) => {
-    if (user.is_superuser) return '👑';
-    if (user.role === 'admin') return '🛡️';
-    return '👤';
+  const handleDemoUserSelect = (value: string) => {
+    setSelectedDemoUser(value);
+    const user = demoUsers.find(u => u.email === value);
+    if (user) {
+      setFormData({
+        email: user.email,
+        password: user.password
+      });
+      setErrors({});
+    }
   };
 
   return (
@@ -154,6 +202,47 @@ export default function LoginPage() {
 
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-6">
+              {/* Simple Demo User Selector */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Quick Login (Demo Accounts)
+                </label>
+                {loadingDemoUsers ? (
+                  <div className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 flex items-center justify-center">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                    <span className="text-sm text-gray-500">Loading accounts...</span>
+                  </div>
+                ) : (
+                  <Select value={selectedDemoUser} onValueChange={handleDemoUserSelect}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder={`Choose from ${demoUsers.length} demo accounts...`} />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-80 bg-white border border-gray-200 shadow-lg z-50">
+                      {demoUsers.map((user) => (
+                        <SelectItem key={user.email} value={user.email} className="py-2">
+                          <div className="flex items-center space-x-2">
+                            <span className="font-medium">{user.full_name}</span>
+                            <span className="text-sm text-gray-500">({user.email})</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                <p className="text-xs text-gray-500 mt-1">
+                  {loadingDemoUsers ? 'Loading demo accounts...' : `${demoUsers.length} demo accounts available - select one to auto-fill credentials`}
+                </p>
+              </div>
+
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-300" />
+                </div>
+                <div className="relative flex justify-center text-sm">
+                  <span className="px-2 bg-white text-gray-500">or enter manually</span>
+                </div>
+              </div>
+
               <div className="space-y-4">
                 <div>
                   <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
@@ -228,51 +317,6 @@ export default function LoginPage() {
               >
                 {isLoading ? 'Signing in...' : 'Sign In'}
               </Button>
-
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-gray-300" />
-                </div>
-                <div className="relative flex justify-center text-sm">
-                  <span className="px-2 bg-white text-gray-500">or</span>
-                </div>
-              </div>
-
-              {/* Dynamic Demo User Buttons */}
-              <div className="space-y-3">
-                {loadingDemoUsers ? (
-                  <div className="text-center py-4">
-                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto"></div>
-                    <p className="text-sm text-gray-500 mt-2">Loading demo accounts...</p>
-                  </div>
-                ) : (
-                  demoUsers.map((user, index) => (
-                    <Button
-                      key={index}
-                      type="button"
-                      variant="outline"
-                      size="lg"
-                      onClick={() => fillDemoCredentials(user)}
-                      className="w-full text-left"
-                    >
-                      <div className="flex items-center justify-between w-full">
-                        <div className="flex items-center">
-                          <span className="mr-3 text-lg">{getUserIcon(user)}</span>
-                          <div>
-                            <div className="font-medium">{user.description}</div>
-                            <div className="text-xs text-gray-500">{user.email}</div>
-                          </div>
-                        </div>
-                        {user.organization && (
-                          <div className="text-xs text-gray-400 max-w-24 truncate">
-                            {user.organization}
-                          </div>
-                        )}
-                      </div>
-                    </Button>
-                  ))
-                )}
-              </div>
             </form>
 
             <div className="mt-8 text-center">
@@ -287,34 +331,32 @@ export default function LoginPage() {
               </p>
             </div>
 
-            {/* Demo info card */}
+            {/* Simple demo info */}
             {!loadingDemoUsers && demoUsers.length > 0 && (
               <Card variant="outlined" className="mt-6 bg-blue-50 border-blue-200">
                 <CardContent className="p-4">
                   <div className="text-center">
-                    <h4 className="text-sm font-medium text-blue-900 mb-3">
-                      🚀 Available Demo Accounts
+                    <h4 className="text-sm font-medium text-blue-900 mb-2">
+                      🧪 {demoUsers.length} Demo Accounts Available
                     </h4>
-                    <div className="grid grid-cols-1 gap-3 text-xs text-blue-700">
-                      {demoUsers.map((user, index) => (
-                        <div key={index} className="bg-white rounded-lg p-3 border border-blue-200">
-                          <p className="font-medium text-blue-900 mb-1">
-                            {getUserIcon(user)} {user.description}
-                          </p>
-                          <p><strong>Email:</strong> {user.email}</p>
-                          <p><strong>Password:</strong> {user.password}</p>
-                          {user.organization && (
-                            <p><strong>Organization:</strong> {user.organization}</p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
+                    <p className="text-xs text-blue-700">
+                      Select from the dropdown above to auto-fill credentials.
+                    </p>
                   </div>
                 </CardContent>
               </Card>
             )}
           </CardContent>
         </Card>
+
+        {/* Enhanced Demo Users Display */}
+        <DemoUsersDisplay 
+          demoUsers={demoUsers}
+          onUserSelect={(email, password) => {
+            setFormData({ email, password });
+            setErrors({});
+          }}
+        />
 
         {/* Footer */}
         <div className="text-center mt-8">

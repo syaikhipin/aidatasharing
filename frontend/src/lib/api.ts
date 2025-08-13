@@ -766,19 +766,6 @@ export const dataAccessAPI = {
     const response = await apiClient.post('/api/data-access/notify', data);
     return response.data;
   },
-
-  getNotifications: async (params?: {
-    unread_only?: boolean;
-    limit?: number;
-  }) => {
-    const response = await apiClient.get('/api/data-access/notifications', { params });
-    return response.data;
-  },
-
-  markNotificationRead: async (notificationId: number) => {
-    const response = await apiClient.patch(`/api/data-access/notifications/${notificationId}/read`);
-    return response.data;
-  },
 };
 
 // Analytics API

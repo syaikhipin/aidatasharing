@@ -402,6 +402,18 @@ class DatabaseConnector(Base):
     test_status = Column(String, default="untested")  # 'untested', 'success', 'failed'
     test_error = Column(Text, nullable=True)
     
+    # Enhanced editing capabilities
+    is_editable = Column(Boolean, default=True)
+    supports_write = Column(Boolean, default=False)
+    max_connections = Column(Integer, default=5)
+    connection_timeout = Column(Integer, default=30)
+    
+    # Real-time capabilities
+    supports_real_time = Column(Boolean, default=False)
+    last_synced_at = Column(DateTime, nullable=True)
+    sync_frequency = Column(Integer, default=3600)  # seconds
+    auto_sync_enabled = Column(Boolean, default=False)
+    
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

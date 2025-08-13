@@ -143,6 +143,205 @@ async def list_connectors(
         return result
     
     return connectors
+@router.put("/{connector_id}", response_model=DatabaseConnectorResponse)
+async def update_connector(
+    connector_id: int,
+    connector_update: DatabaseConnectorUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update an existing database connector with enhanced editing capabilities."""
+    if not current_user.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Must belong to an organization"
+        )
+    
+    # Get the connector
+    connector = db.query(DatabaseConnector).filter(
+        DatabaseConnector.id == connector_id,
+        DatabaseConnector.organization_id == current_user.organization_id,
+        DatabaseConnector.is_deleted == False
+    ).first()
+    
+    if not connector:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Connector not found"
+        )
+    
+    # Check if connector is editable
+    if not getattr(connector, 'is_editable', True):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This connector is not editable"
+        )
+    
+    # Update fields
+    update_data = connector_update.dict(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(connector, field, value)
+    
+    # Reset test status if connection config or credentials changed
+    if connector_update.connection_config or connector_update.credentials:
+        connector.test_status = "untested"
+        connector.test_error = None
+        connector.last_tested_at = None
+    
+    connector.updated_at = datetime.utcnow()
+    
+    try:
+        db.commit()
+        db.refresh(connector)
+        
+        logger.info(f"Updated connector {connector_id} by user {current_user.id}")
+        
+        return DatabaseConnectorResponse(
+            id=connector.id,
+            name=connector.name,
+            connector_type=connector.connector_type,
+            description=connector.description,
+            is_active=connector.is_active,
+            test_status=connector.test_status,
+            last_tested_at=connector.last_tested_at,
+            created_at=connector.created_at,
+            mindsdb_database_name=connector.mindsdb_database_name,
+            organization_id=connector.organization_id
+        )
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating connector {connector_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update connector: {str(e)}"
+        )
+
+
+@router.post("/{connector_id}/test")
+async def test_connector_connection(
+    connector_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Test the connection for a database connector."""
+    if not current_user.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Must belong to an organization"
+        )
+    
+    # Get the connector
+    connector = db.query(DatabaseConnector).filter(
+        DatabaseConnector.id == connector_id,
+        DatabaseConnector.organization_id == current_user.organization_id,
+        DatabaseConnector.is_deleted == False
+    ).first()
+    
+    if not connector:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Connector not found"
+        )
+    
+    try:
+        # Initialize connector service
+        connector_service = ConnectorService(db)
+        
+        # Test the connection
+        test_result = await connector_service.test_connection(connector)
+        
+        # Update test status
+        connector.test_status = "success" if test_result["success"] else "failed"
+        connector.test_error = test_result.get("error")
+        connector.last_tested_at = datetime.utcnow()
+        
+        db.commit()
+        
+        return {
+            "success": test_result["success"],
+            "message": test_result.get("message", "Connection test completed"),
+            "error": test_result.get("error"),
+            "test_time": connector.last_tested_at.isoformat(),
+            "connection_details": test_result.get("details", {})
+        }
+        
+    except Exception as e:
+        connector.test_status = "failed"
+        connector.test_error = str(e)
+        connector.last_tested_at = datetime.utcnow()
+        db.commit()
+        
+        logger.error(f"Error testing connector {connector_id}: {str(e)}")
+        return {
+            "success": False,
+            "message": "Connection test failed",
+            "error": str(e),
+            "test_time": connector.last_tested_at.isoformat()
+        }
+
+
+@router.post("/{connector_id}/sync")
+async def sync_connector_data(
+    connector_id: int,
+    force: bool = False,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Manually sync data from a real-time enabled connector."""
+    if not current_user.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Must belong to an organization"
+        )
+    
+    # Get the connector
+    connector = db.query(DatabaseConnector).filter(
+        DatabaseConnector.id == connector_id,
+        DatabaseConnector.organization_id == current_user.organization_id,
+        DatabaseConnector.is_deleted == False
+    ).first()
+    
+    if not connector:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Connector not found"
+        )
+    
+    # Check if real-time sync is supported
+    if not getattr(connector, 'supports_real_time', False) and not force:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Real-time sync not supported for this connector. Use force=true to override."
+        )
+    
+    try:
+        # Initialize connector service
+        connector_service = ConnectorService(db)
+        
+        # Perform sync
+        sync_result = await connector_service.sync_connector_data(connector)
+        
+        # Update sync timestamp
+        connector.last_synced_at = datetime.utcnow()
+        db.commit()
+        
+        return {
+            "success": sync_result["success"],
+            "message": sync_result.get("message", "Data sync completed"),
+            "records_synced": sync_result.get("records_synced", 0),
+            "sync_time": connector.last_synced_at.isoformat(),
+            "details": sync_result.get("details", {})
+        }
+        
+    except Exception as e:
+        logger.error(f"Error syncing connector {connector_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to sync connector data: {str(e)}"
+        )
+
+
 
 
 @router.post("/", response_model=DatabaseConnectorResponse)
@@ -813,7 +1012,128 @@ async def _create_api_dataset(
     dataset_data: CreateDatasetFromConnector, 
     user_id: int
 ) -> Dict[str, Any]:
-    """Create a dataset from API connector data."""
+    """Create a dataset from API connector data using MindsDB web connectors."""
+    try:
+        from app.services.mindsdb import mindsdb_service
+        from app.models.dataset import Dataset, DatasetType, DatasetStatus
+        from app.core.database import get_db
+        
+        # Get database session
+        db = next(get_db())
+        
+        config = connector.connection_config.copy()
+        base_url = config.get("base_url", "")
+        endpoint = dataset_data.table_or_endpoint or config.get("endpoint", "")
+        method = config.get("method", "GET").upper()
+        headers = config.get("headers", {})
+        
+        # Prepare auth config for MindsDB
+        auth_config = None
+        if connector.credentials:
+            auth_config = {
+                "api_key": connector.credentials.get("api_key"),
+                "auth_header": connector.credentials.get("auth_header", "Authorization")
+            }
+        
+        # Create MindsDB web connector
+        web_connector_result = mindsdb_service.create_web_connector(
+            connector_name=f"api_connector_{connector.id}",
+            base_url=base_url,
+            endpoint=endpoint,
+            method=method,
+            headers=headers,
+            auth_config=auth_config
+        )
+        
+        if not web_connector_result.get("success"):
+            logger.error(f"Failed to create MindsDB web connector: {web_connector_result.get('error')}")
+            # Fallback to direct API approach
+            return await _create_api_dataset_fallback(connector, dataset_data, user_id)
+        
+        # Create dataset view from web connector
+        dataset_view_result = mindsdb_service.create_dataset_from_web_connector(
+            connector_name=web_connector_result["connector_name"],
+            dataset_name=dataset_data.dataset_name
+        )
+        
+        if not dataset_view_result.get("success"):
+            logger.error(f"Failed to create dataset view: {dataset_view_result.get('error')}")
+            # Fallback to direct API approach
+            return await _create_api_dataset_fallback(connector, dataset_data, user_id)
+        
+        # Map sharing level
+        sharing_level_map = {
+            "private": DataSharingLevel.PRIVATE,
+            "organization": DataSharingLevel.ORGANIZATION,
+            "public": DataSharingLevel.PUBLIC
+        }
+        sharing_level = sharing_level_map.get(dataset_data.sharing_level.lower(), DataSharingLevel.PRIVATE)
+        
+        # Create dataset record with MindsDB integration
+        dataset = Dataset(
+            name=dataset_data.dataset_name,
+            description=dataset_data.description or f"Web API dataset from {connector.name}",
+            type=DatasetType.API,
+            status=DatasetStatus.ACTIVE,
+            owner_id=user_id,
+            organization_id=connector.organization_id,
+            sharing_level=sharing_level,
+            connector_id=connector.id,
+            source_url=web_connector_result["url"],
+            row_count=dataset_view_result.get("estimated_rows", 0),
+            column_count=len(dataset_view_result.get("columns", [])),
+            schema_info={
+                "columns": [{"name": col, "type": "string"} for col in dataset_view_result.get("columns", [])],
+                "sample_data": dataset_view_result.get("sample_data", []),
+                "web_connector": web_connector_result["connector_name"],
+                "view_name": dataset_view_result["view_name"],
+                "mindsdb_integration": True
+            },
+            allow_download=True,
+            allow_api_access=True,
+            allow_ai_chat=True,
+            # Enhanced chat context for MindsDB web connector
+            chat_context={
+                "web_connector": web_connector_result["connector_name"],
+                "view_name": dataset_view_result["view_name"],
+                "api_endpoint": web_connector_result["url"],
+                "data_sample": dataset_view_result.get("sample_data", []),
+                "total_items": dataset_view_result.get("estimated_rows", 0),
+                "connector_name": connector.name,
+                "schema": dataset_view_result.get("columns", []),
+                "mindsdb_integration": True
+            }
+        )
+        
+        db.add(dataset)
+        db.commit()
+        db.refresh(dataset)
+        
+        logger.info(f"✅ Created MindsDB web connector dataset: {dataset_data.dataset_name} (ID: {dataset.id})")
+        
+        return {
+            "success": True,
+            "dataset_id": dataset.id,
+            "dataset_name": dataset_data.dataset_name,
+            "api_endpoint": web_connector_result["url"],
+            "data_count": dataset_view_result.get("estimated_rows", 0),
+            "web_connector": web_connector_result["connector_name"],
+            "view_name": dataset_view_result["view_name"],
+            "mindsdb_integration": True
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to create MindsDB web connector dataset: {e}")
+        # Fallback to direct API approach
+        return await _create_api_dataset_fallback(connector, dataset_data, user_id)
+
+
+async def _create_api_dataset_fallback(
+    connector: DatabaseConnector, 
+    dataset_data: CreateDatasetFromConnector, 
+    user_id: int
+) -> Dict[str, Any]:
+    """Fallback method to create API dataset without MindsDB web connector."""
     try:
         import requests
         from app.models.dataset import Dataset, DatasetType, DatasetStatus
@@ -869,7 +1189,8 @@ async def _create_api_dataset(
                     "columns": [{"name": key, "type": type(value).__name__} for key, value in first_item.items()],
                     "sample_data": sample_data,
                     "api_endpoint": full_url,
-                    "total_items": data_count
+                    "total_items": data_count,
+                    "mindsdb_integration": False
                 }
         
         # Map sharing level
@@ -903,7 +1224,8 @@ async def _create_api_dataset(
                 "data_sample": sample_data,
                 "total_items": data_count,
                 "connector_name": connector.name,
-                "schema": schema_info.get("columns", [])
+                "schema": schema_info.get("columns", []),
+                "mindsdb_integration": False
             }
         )
         
@@ -911,18 +1233,19 @@ async def _create_api_dataset(
         db.commit()
         db.refresh(dataset)
         
-        logger.info(f"✅ Created API dataset: {dataset_data.dataset_name} (ID: {dataset.id})")
+        logger.info(f"✅ Created fallback API dataset: {dataset_data.dataset_name} (ID: {dataset.id})")
         
         return {
             "success": True,
             "dataset_id": dataset.id,
             "dataset_name": dataset_data.dataset_name,
             "api_endpoint": full_url,
-            "data_count": data_count
+            "data_count": data_count,
+            "mindsdb_integration": False
         }
         
     except Exception as e:
-        logger.error(f"❌ Failed to create API dataset: {e}")
+        logger.error(f"❌ Failed to create fallback API dataset: {e}")
         return {
             "success": False,
             "error": str(e)

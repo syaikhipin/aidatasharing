@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth, organizations, datasets, models, mindsdb, admin, analytics, data_access, data_sharing, file_handler, data_connectors, llm_configurations, environment, proxy_connectors
+from app.api import auth, organizations, datasets, models, mindsdb, admin, analytics, data_access, data_sharing, file_handler, data_connectors, llm_configurations, environment, proxy_connectors, gateway
 from app.core.config import settings
 import logging
 from datetime import datetime
@@ -274,6 +274,7 @@ app.include_router(data_connectors.router, prefix="/api/connectors", tags=["data
 app.include_router(environment.router, prefix="/api/admin/environment", tags=["admin"])
 app.include_router(llm_configurations.router, prefix="/api/llm-configs", tags=["llm-configurations"])
 app.include_router(proxy_connectors.router, prefix="/api/proxy", tags=["proxy-connectors"])
+app.include_router(gateway.router, prefix="/api/gateway", tags=["gateway"])
 logger.info("✅ All API routes registered successfully")
 
 @app.on_event("startup")

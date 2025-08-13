@@ -24,6 +24,102 @@ def create_slug(name: str) -> str:
 
 
 @router.post(
+    "/register-simple", 
+    response_model=UserWithOrganization,
+    status_code=status.HTTP_201_CREATED,
+    summary="Simple User Registration",
+    description="Register a new user account without requiring organization setup",
+    response_description="Newly created user account",
+    responses={
+        201: {"description": "User successfully registered"},
+        400: {"description": "Email already registered"},
+        422: {"description": "Invalid input data"}
+    }
+)
+async def register_simple(
+    user_data: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    # 🔐 Simple User Registration
+    
+    Register a new user account quickly without organization setup.
+    Users can join organizations later through the profile settings.
+    
+    ## Request Parameters
+    - **email**: User's email address (required)
+    - **password**: User's password (required, minimum 8 characters)
+    - **full_name**: User's full name (optional)
+    
+    ## Example Usage
+    ```bash
+    curl -X POST "http://localhost:8000/api/auth/register-simple" \
+         -H "Content-Type: application/json" \
+         -d '{
+           "email": "newuser@example.com",
+           "password": "securepass123",
+           "full_name": "New User"
+         }'
+    ```
+    
+    ## Security Features
+    - Email uniqueness validation
+    - Password hashing
+    - Automatic account activation
+    """
+    # Check if user already exists
+    email = user_data.get("email")
+    password = user_data.get("password")
+    full_name = user_data.get("full_name")
+    
+    if not email or not password:
+        raise HTTPException(
+            status_code=400,
+            detail="Email and password are required"
+        )
+    
+    db_user = db.query(User).filter(User.email == email).first()
+    if db_user:
+        raise HTTPException(
+            status_code=400,
+            detail="Email already registered"
+        )
+    
+    # Validate password length
+    if len(password) < 8:
+        raise HTTPException(
+            status_code=400,
+            detail="Password must be at least 8 characters long"
+        )
+    
+    # Create new user
+    hashed_password = get_password_hash(password)
+    db_user = User(
+        email=email,
+        hashed_password=hashed_password,
+        full_name=full_name,
+        is_active=True,
+        role="member"
+    )
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    
+    # Return user info
+    return UserWithOrganization(
+        id=db_user.id,
+        email=db_user.email,
+        full_name=db_user.full_name,
+        is_active=db_user.is_active,
+        is_superuser=db_user.is_superuser,
+        organization_id=db_user.organization_id,
+        role=db_user.role,
+        organization_name=None,
+        created_at=db_user.created_at,
+        updated_at=db_user.updated_at
+    )
+
+@router.post(
     "/register", 
     response_model=UserWithOrganization,
     status_code=status.HTTP_201_CREATED,
@@ -366,19 +462,20 @@ async def get_demo_users(db: Session = Depends(get_db)):
     This endpoint returns actual users from the database with their login credentials.
     
     ## Returned Information
-    - **Admin User**: System administrator with full access
-    - **Regular Users**: Standard users for testing member functionality
+    - **Superadmin**: Platform administrator with full access
+    - **Organization Admins**: Organization administrators
+    - **Organization Members**: Standard users for testing member functionality
     
     ## Example Response
     ```json
     {
         "demo_users": [
             {
-                "email": "admin@example.com",
-                "password": "admin123",
+                "email": "superadmin@platform.com",
+                "password": "SuperAdmin123!",
                 "role": "admin",
-                "description": "System Administrator",
-                "organization": "System Administration"
+                "description": "Platform Superadmin",
+                "organization": null
             }
         ]
     }
@@ -395,45 +492,44 @@ async def get_demo_users(db: Session = Depends(get_db)):
         
         demo_users = []
         
+        # Define demo user credentials (matching our seed data)
+        demo_credentials = {
+            "superadmin@platform.com": {
+                "password": "SuperAdmin123!",
+                "description": "Platform Superadmin (full platform access)"
+            },
+            "alice.manager@techcorp.com": {
+                "password": "TechManager123!",
+                "description": "TechCorp Solutions - Organization Admin"
+            },
+            "bob.analyst@techcorp.com": {
+                "password": "TechAnalyst123!",
+                "description": "TechCorp Solutions - Organization Member"
+            },
+            "carol.researcher@datasciencehub.com": {
+                "password": "DataResearch123!",
+                "description": "DataScience Hub - Organization Admin"
+            },
+            "david.scientist@datasciencehub.com": {
+                "password": "DataScience123!",
+                "description": "DataScience Hub - Organization Member"
+            }
+        }
+        
         for user in users:
-            organization_name = None
-            if user.organization_id:
-                organization = db.query(Organization).filter(Organization.id == user.organization_id).first()
-                if organization:
-                    organization_name = organization.name
-            
-            # Only include users with known demo passwords or admin user
-            demo_password = None
-            description = ""
-            
-            # Demo Organization users
-            if user.email == "demo1@demo.com":
-                demo_password = "demo123"
-                description = "Demo Organization Member 1"
-            elif user.email == "demo2@demo.com":
-                demo_password = "demo123"
-                description = "Demo Organization Member 2"
-            # Open Source Community users
-            elif user.email == "opensource1@opensource.org":
-                demo_password = "open123"
-                description = "Open Source Community Member 1"
-            elif user.email == "opensource2@opensource.org":
-                demo_password = "open123"
-                description = "Open Source Community Member 2"
-            # Admin user
-            elif user.email == "admin@example.com":
-                demo_password = "admin123"
-                description = "System Administrator with full access"
-            elif user.is_superuser:
-                demo_password = "admin123"  # Default admin password
-                description = "Administrator Account"
-            
-            if demo_password:
+            if user.email in demo_credentials:
+                organization_name = None
+                if user.organization_id:
+                    organization = db.query(Organization).filter(Organization.id == user.organization_id).first()
+                    if organization:
+                        organization_name = organization.name
+                
+                creds = demo_credentials[user.email]
                 demo_users.append({
                     "email": user.email,
-                    "password": demo_password,
+                    "password": creds["password"],
                     "role": user.role or ("admin" if user.is_superuser else "member"),
-                    "description": description,
+                    "description": creds["description"],
                     "organization": organization_name,
                     "full_name": user.full_name,
                     "is_superuser": user.is_superuser

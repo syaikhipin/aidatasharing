@@ -46,6 +46,10 @@ class ProxyConnector(Base):
     total_requests = Column(Integer, default=0)
     last_accessed_at = Column(DateTime(timezone=True))
     
+    # Enhanced editing capabilities
+    is_editable = Column(Boolean, default=True)
+    supports_real_time = Column(Boolean, default=False)
+    
     # Relationships
     organization = relationship("Organization", back_populates="proxy_connectors")
     creator = relationship("User")

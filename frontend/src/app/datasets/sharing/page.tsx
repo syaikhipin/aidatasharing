@@ -27,6 +27,7 @@ import ProxyConnectorForm from '@/components/proxy/ProxyConnectorForm';
 import SharedLinkForm from '@/components/proxy/SharedLinkForm';
 import SimplifiedConnectorForm from '@/components/connectors/SimplifiedConnectorForm';
 import { parseConnectionUrl } from '@/utils/connectionParser';
+import AccessInstructions from '@/components/shared/AccessInstructions';
 import Link from 'next/link';
 
 interface Dataset {
@@ -867,6 +868,20 @@ function UnifiedSharingContent() {
                           )}
                         </div>
                       </div>
+                      
+                      {/* Access Instructions for shared datasets */}
+                      {dataset.public_share_enabled && dataset.share_url && (
+                        <div className="mt-4">
+                          <AccessInstructions
+                            shareUrl={dataset.share_url}
+                            shareToken={dataset.share_token || ''}
+                            isPublic={dataset.sharing_level === 'public'}
+                            requiresAuth={dataset.sharing_level === 'organization'}
+                            enableChat={true}
+                            allowDownload={true}
+                          />
+                        </div>
+                      )}
                     </div>
                   </li>
                 ))}

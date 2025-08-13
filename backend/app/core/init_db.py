@@ -71,8 +71,10 @@ def init_db():
         
         admin_org = None
         for org_data in default_orgs:
+            # Check for existing organization by both slug and name to avoid duplicates
             existing_org = db.query(Organization).filter(
-                Organization.slug == org_data["slug"]
+                (Organization.slug == org_data["slug"]) | 
+                (Organization.name == org_data["name"])
             ).first()
             
             if not existing_org:
@@ -81,9 +83,11 @@ def init_db():
                 db.flush()  # Get the ID
                 if org_data["slug"] == "system-admin":
                     admin_org = org
+                print(f"Created organization: {org_data['name']}")
             else:
                 if org_data["slug"] == "system-admin":
                     admin_org = existing_org
+                print(f"Organization already exists: {existing_org.name}")
         
         # Create superuser if it doesn't exist
         user = db.query(User).filter(User.email == settings.FIRST_SUPERUSER).first()

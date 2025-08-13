@@ -40,53 +40,35 @@ function AdminOrganizationsContent() {
     try {
       setLoading(true);
       
-      // Mock data - replace with actual API call
-      const mockOrganizations: Organization[] = [
-        {
-          id: 'org_001',
-          name: 'TechCorp Analytics',
-          type: 'Enterprise',
-          description: 'Large technology corporation focused on data analytics',
-          memberCount: 245,
-          createdDate: '2023-06-15T10:30:00Z',
-          status: 'active',
-          adminEmail: 'admin@techcorp.com'
-        },
-        {
-          id: 'org_002',
-          name: 'StartupHub',
-          type: 'Startup',
-          description: 'Innovation hub for emerging technology startups',
-          memberCount: 67,
-          createdDate: '2023-09-22T14:20:00Z',
-          status: 'active',
-          adminEmail: 'contact@startuphub.com'
-        },
-        {
-          id: 'org_003',
-          name: 'Research Institute',
-          type: 'Academic',
-          description: 'Academic research institution specializing in AI and ML',
-          memberCount: 123,
-          createdDate: '2023-03-10T09:15:00Z',
-          status: 'active',
-          adminEmail: 'admin@research.edu'
-        },
-        {
-          id: 'org_004',
-          name: 'DataCorp Suspended',
-          type: 'Enterprise',
-          description: 'Suspended organization pending compliance review',
-          memberCount: 89,
-          createdDate: '2023-01-05T16:45:00Z',
-          status: 'suspended',
-          adminEmail: 'admin@datacorp.com'
+      // Fetch organizations from the backend API
+      const response = await fetch('/api/admin/organizations', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
         }
-      ];
+      });
       
-      setOrganizations(mockOrganizations);
+      if (response.ok) {
+        const data = await response.json();
+        // Transform backend data to match frontend interface
+        const transformedOrgs: Organization[] = data.map((org: any) => ({
+          id: org.id.toString(),
+          name: org.name,
+          type: org.type,
+          description: org.description || '',
+          memberCount: org.user_count || 0,
+          createdDate: org.created_at,
+          status: org.is_active ? 'active' : 'inactive',
+          adminEmail: org.contact_email || 'N/A'
+        }));
+        setOrganizations(transformedOrgs);
+      } else {
+        console.error('Failed to fetch organizations');
+        setOrganizations([]);
+      }
     } catch (error) {
       console.error('Error fetching organizations:', error);
+      setOrganizations([]);
     } finally {
       setLoading(false);
     }
