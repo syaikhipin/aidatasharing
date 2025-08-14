@@ -228,9 +228,9 @@ export default function SharedDatasetPage() {
       case 'mongodb':
         return `mongodb://proxy_user:${token}@${proxyHost}/${encodedDatasetName}`;
       case 'api':
-        return `https://${proxyHost}/api/${encodedDatasetName}?token=${token}`;
+        return `http://${proxyHost}/api/${encodedDatasetName}?token=${token}`;
       default:
-        return `${proxyHost}/${encodedDatasetName}?token=${token}`;
+        return `http://${proxyHost}/${encodedDatasetName}?token=${token}`;
     }
   };
 
