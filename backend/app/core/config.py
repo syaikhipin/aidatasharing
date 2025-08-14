@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "AI Share Platform"
     VERSION: str = "1.0.0"
     
-    # Database - Unified database location
+    # Database - Single unified database location
     DATABASE_URL: str = "sqlite:///../storage/aishare_platform.db"
     
     # CORS origins - will be parsed from comma-separated string

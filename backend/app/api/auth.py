@@ -492,44 +492,50 @@ async def get_demo_users(db: Session = Depends(get_db)):
         
         demo_users = []
         
-        # Define demo user credentials (matching our seed data)
+        # Define demo user credentials for existing demo accounts
         demo_credentials = {
-            "superadmin@platform.com": {
+            # Current seed data users with correct passwords
+            "admin@example.com": {
                 "password": "SuperAdmin123!",
-                "description": "Platform Superadmin (full platform access)"
+                "description": "System Administrator"
             },
-            "alice.manager@techcorp.com": {
-                "password": "TechManager123!",
-                "description": "TechCorp Solutions - Organization Admin"
+            "alice@techcorp.com": {
+                "password": "Password123!",
+                "description": "TechCorp Solutions - Data Analyst"
             },
-            "bob.analyst@techcorp.com": {
-                "password": "TechAnalyst123!",
-                "description": "TechCorp Solutions - Organization Member"
-            },
-            "carol.researcher@datasciencehub.com": {
-                "password": "DataResearch123!",
-                "description": "DataScience Hub - Organization Admin"
-            },
-            "david.scientist@datasciencehub.com": {
-                "password": "DataScience123!",
-                "description": "DataScience Hub - Organization Member"
+            "bob@dataanalytics.com": {
+                "password": "Password123!",
+                "description": "Data Analytics Inc - Data Scientist"
             }
         }
         
+        # Add any users that have demo passwords
         for user in users:
+            demo_password = None
+            description = ""
+            
+            # Check if user has predefined demo credentials
             if user.email in demo_credentials:
+                creds = demo_credentials[user.email]
+                demo_password = creds["password"]
+                description = creds["description"]
+            # Add superusers not already in the list
+            elif user.is_superuser and user.email not in demo_credentials:
+                demo_password = "admin123"
+                description = f"Administrator Account - {user.full_name}"
+            
+            if demo_password:
                 organization_name = None
                 if user.organization_id:
                     organization = db.query(Organization).filter(Organization.id == user.organization_id).first()
                     if organization:
                         organization_name = organization.name
                 
-                creds = demo_credentials[user.email]
                 demo_users.append({
                     "email": user.email,
-                    "password": creds["password"],
+                    "password": demo_password,
                     "role": user.role or ("admin" if user.is_superuser else "member"),
-                    "description": creds["description"],
+                    "description": description,
                     "organization": organization_name,
                     "full_name": user.full_name,
                     "is_superuser": user.is_superuser

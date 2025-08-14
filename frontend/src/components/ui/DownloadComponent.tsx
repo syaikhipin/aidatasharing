@@ -254,12 +254,12 @@ const DownloadComponent: React.FC<DownloadComponentProps> = ({
           <select
             value={selectedFormat}
             onChange={(e) => setSelectedFormat(e.target.value)}
-            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+            className="block w-full px-3 py-2.5 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900 transition-colors hover:border-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
             disabled={isDownloading}
           >
             {getAvailableFormats().map((format) => (
-              <option key={format.value} value={format.value}>
-                {format.label}
+              <option key={format.value} value={format.value} className="text-gray-900">
+                📁 {format.label}
               </option>
             ))}
           </select>
@@ -272,12 +272,12 @@ const DownloadComponent: React.FC<DownloadComponentProps> = ({
           <select
             value={compression}
             onChange={(e) => setCompression(e.target.value)}
-            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+            className="block w-full px-3 py-2.5 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900 transition-colors hover:border-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
             disabled={isDownloading}
           >
-            <option value="none">None</option>
-            <option value="zip">ZIP</option>
-            <option value="gzip">GZIP</option>
+            <option value="none" className="text-gray-900">📦 None</option>
+            <option value="zip" className="text-gray-900">🗜️ ZIP</option>
+            <option value="gzip" className="text-gray-900">📦 GZIP</option>
           </select>
         </div>
 

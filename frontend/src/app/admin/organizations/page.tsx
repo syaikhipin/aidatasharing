@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import { adminAPI } from '@/lib/api';
 import Link from 'next/link';
 import {
   Users,
@@ -40,32 +41,19 @@ function AdminOrganizationsContent() {
     try {
       setLoading(true);
       
-      // Fetch organizations from the backend API
-      const response = await fetch('/api/admin/organizations', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        // Transform backend data to match frontend interface
-        const transformedOrgs: Organization[] = data.map((org: any) => ({
-          id: org.id.toString(),
-          name: org.name,
-          type: org.type,
-          description: org.description || '',
-          memberCount: org.user_count || 0,
-          createdDate: org.created_at,
-          status: org.is_active ? 'active' : 'inactive',
-          adminEmail: org.contact_email || 'N/A'
-        }));
-        setOrganizations(transformedOrgs);
-      } else {
-        console.error('Failed to fetch organizations');
-        setOrganizations([]);
-      }
+      // Use the API client instead of direct fetch
+      const orgsList = await adminAPI.getOrganizations();
+      const transformedOrgs: Organization[] = orgsList.map((org: any) => ({
+        id: org.id.toString(),
+        name: org.name,
+        type: org.type,
+        description: org.description || '',
+        memberCount: org.user_count || 0,
+        createdDate: org.created_at,
+        status: org.is_active ? 'active' : 'inactive',
+        adminEmail: org.contact_email || 'N/A'
+      }));
+      setOrganizations(transformedOrgs);
     } catch (error) {
       console.error('Error fetching organizations:', error);
       setOrganizations([]);
@@ -123,10 +111,10 @@ function AdminOrganizationsContent() {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
               <input
                 type="text"
-                placeholder="Search organizations..."
+                placeholder="Search organizations by name or type..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
               />
             </div>
             <div className="flex items-center space-x-2">
@@ -134,12 +122,12 @@ function AdminOrganizationsContent() {
               <select
                 value={filterStatus}
                 onChange={(e) => setFilterStatus(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="px-4 py-2.5 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900 transition-colors hover:border-gray-400"
               >
-                <option value="all">All Status</option>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-                <option value="suspended">Suspended</option>
+                <option value="all">📊 All Status</option>
+                <option value="active">✅ Active</option>
+                <option value="inactive">⚪ Inactive</option>
+                <option value="suspended">🚫 Suspended</option>
               </select>
             </div>
             <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center space-x-2">

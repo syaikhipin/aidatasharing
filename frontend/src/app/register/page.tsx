@@ -278,14 +278,14 @@ export default function RegisterPage() {
                       name="organizationId"
                       value={formData.organizationId}
                       onChange={handleChange}
-                      className={`mt-1 block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 ${
+                      className={`mt-1 block w-full px-3 py-2.5 border rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white text-gray-900 transition-colors hover:border-gray-400 ${
                         errors.organizationId ? 'border-red-300' : 'border-gray-300'
                       }`}
                     >
-                      <option value="">Select an organization</option>
+                      <option value="" className="text-gray-500">Select an organization</option>
                       {organizations.map((org) => (
-                        <option key={org.id} value={org.id}>
-                          {org.name} ({org.type})
+                        <option key={org.id} value={org.id} className="text-gray-900">
+                          🏢 {org.name} ({org.type})
                         </option>
                       ))}
                     </select>

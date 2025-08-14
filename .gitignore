@@ -40,6 +40,7 @@ backend/
 backend/config.env
 config.env
 forge.yaml
+proxy_service.pid
 # Backend specific
 backend/*.log
 backend/app.db

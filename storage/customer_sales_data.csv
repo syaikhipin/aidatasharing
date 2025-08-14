@@ -1,0 +1,11 @@
+customer_id,customer_name,product_category,sale_amount,sale_date,region,sales_rep,commission
+CUST001,John Smith,Electronics,1250.00,2024-01-15,North,Sarah Johnson,125.00
+CUST002,Emma Davis,Software,850.00,2024-01-16,South,Mike Chen,85.00
+CUST003,Robert Brown,Hardware,2100.00,2024-01-17,East,Lisa Wang,210.00
+CUST004,Maria Garcia,Electronics,750.00,2024-01-18,West,Tom Rodriguez,75.00
+CUST005,David Wilson,Software,1800.00,2024-01-19,North,Sarah Johnson,180.00
+CUST006,Jennifer Lee,Services,950.00,2024-01-20,South,Mike Chen,95.00
+CUST007,Michael Taylor,Hardware,1600.00,2024-01-21,East,Lisa Wang,160.00
+CUST008,Lisa Anderson,Electronics,1100.00,2024-01-22,West,Tom Rodriguez,110.00
+CUST009,James Miller,Software,2200.00,2024-01-23,North,Sarah Johnson,220.00
+CUST010,Ashley Thompson,Services,650.00,2024-01-24,South,Mike Chen,65.00

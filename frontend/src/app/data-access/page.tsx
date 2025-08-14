@@ -235,22 +235,24 @@ function DataAccessContent() {
                   <div className="flex-1">
                     <input
                       type="text"
-                      placeholder="Search datasets..."
+                      placeholder="Search datasets by name or description..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
                     />
                   </div>
-                  <select
-                    value={selectedSharingLevel}
-                    onChange={(e) => setSelectedSharingLevel(e.target.value)}
-                    className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value="all">All Sharing Levels</option>
-                    <option value="public">Public</option>
-                    <option value="organization">Organization</option>
-                    <option value="private">Private</option>
-                  </select>
+                  <div className="min-w-0 sm:min-w-[200px]">
+                    <select
+                      value={selectedSharingLevel}
+                      onChange={(e) => setSelectedSharingLevel(e.target.value)}
+                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900 transition-colors hover:border-gray-400"
+                    >
+                      <option value="all">All Sharing Levels</option>
+                      <option value="public">🌐 Public</option>
+                      <option value="organization">👥 Organization</option>
+                      <option value="private">🔒 Private</option>
+                    </select>
+                  </div>
                 </div>
               </CardContent>
             </Card>

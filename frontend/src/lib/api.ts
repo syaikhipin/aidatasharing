@@ -115,7 +115,7 @@ export const adminAPI = {
     organization_id?: number;
   }) => {
     const response = await apiClient.get('/api/admin/datasets', { params });
-    return response.data;
+    return response.data.datasets || response.data; // Handle both response formats
   },
 
   deleteAdminDataset: async (datasetId: number, forceDelete: boolean = false) => {
@@ -181,7 +181,7 @@ export const adminAPI = {
   // Organization management
   getOrganizations: async () => {
     const response = await apiClient.get('/api/admin/organizations');
-    return response.data;
+    return response.data.organizations || response.data; // Handle both response formats
   },
 
   createOrganization: async (orgData: {
@@ -219,7 +219,7 @@ export const adminAPI = {
     organization_id?: number;
   }) => {
     const response = await apiClient.get('/api/admin/users', { params });
-    return response.data;
+    return response.data.users || response.data; // Handle both response formats
   },
 
   createUser: async (userData: {

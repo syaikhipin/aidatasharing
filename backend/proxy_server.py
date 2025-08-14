@@ -95,6 +95,60 @@ class MultiPortProxyService:
                 ]
             }
         
+        # API-specific endpoint for API proxy type
+        if proxy_type == "api":
+            @app.get("/api/{api_name}")
+            @app.post("/api/{api_name}")
+            async def proxy_api_access(
+                api_name: str,
+                request: Request,
+                token: Optional[str] = None,
+                db: Session = Depends(get_db)
+            ):
+                """Handle API access through proxy"""
+                
+                # Get token from query params or headers
+                if not token:
+                    token = request.query_params.get("token")
+                if not token:
+                    auth_header = request.headers.get("Authorization", "")
+                    if auth_header.startswith("Bearer "):
+                        token = auth_header[7:]
+                
+                if not token:
+                    raise HTTPException(status_code=401, detail="Token required")
+                
+                # Decode API name
+                decoded_api_name = urllib.parse.unquote(api_name)
+                
+                try:
+                    # Find proxy connector by API name
+                    proxy_connector = db.query(ProxyConnector).filter(
+                        ProxyConnector.name == decoded_api_name,
+                        ProxyConnector.connector_type == "api",
+                        ProxyConnector.is_active == True
+                    ).first()
+                    
+                    if not proxy_connector:
+                        # Try to find by share token
+                        shared_link = db.query(SharedProxyLink).filter(
+                            SharedProxyLink.share_id == token,
+                            SharedProxyLink.is_active == True
+                        ).first()
+                        
+                        if shared_link:
+                            proxy_connector = shared_link.proxy_connector
+                        else:
+                            raise HTTPException(status_code=404, detail="API not found")
+                    
+                    # Handle API request
+                    result = await self.handle_api_proxy(proxy_connector, request, db)
+                    return result
+                    
+                except Exception as e:
+                    logger.error(f"API proxy operation failed: {e}")
+                    raise HTTPException(status_code=500, detail=str(e))
+        
         # Generic proxy endpoint for database access
         @app.get("/{database_name}")
         @app.post("/{database_name}")
@@ -150,8 +204,10 @@ class MultiPortProxyService:
                     body = await request.json()
                     operation_data = body
                 
-                # Route to appropriate database handler
-                if proxy_type == "mysql":
+                # Route to appropriate handler
+                if proxy_type == "api":
+                    result = await self.handle_api_proxy(proxy_connector, request, db)
+                elif proxy_type == "mysql":
                     result = await self.handle_mysql_proxy(proxy_connector, operation_data, db)
                 elif proxy_type == "postgresql":
                     result = await self.handle_postgresql_proxy(proxy_connector, operation_data, db)
@@ -211,6 +267,79 @@ class MultiPortProxyService:
         
         return app
     
+    async def handle_api_proxy(self, proxy_connector: ProxyConnector, request: Request, db: Session) -> Dict:
+        """Handle API proxy operations"""
+        
+        try:
+            # Get connection configuration
+            if isinstance(proxy_connector.real_connection_config, str):
+                connection_config = json.loads(proxy_connector.real_connection_config)
+            else:
+                connection_config = proxy_connector.real_connection_config
+            
+            # Get the external API URL
+            external_url = connection_config.get('url')
+            if not external_url:
+                raise HTTPException(status_code=400, detail="API URL not configured")
+            
+            # Prepare headers
+            headers = {
+                'User-Agent': 'AI-Share-Platform/1.0',
+                'Accept': 'application/json'
+            }
+            
+            # Add authentication if available
+            if proxy_connector.real_credentials:
+                if isinstance(proxy_connector.real_credentials, str):
+                    credentials = json.loads(proxy_connector.real_credentials)
+                else:
+                    credentials = proxy_connector.real_credentials
+                api_key = credentials.get('api_key')
+                if api_key:
+                    auth_header = credentials.get('auth_header', 'Authorization')
+                    auth_prefix = credentials.get('auth_prefix', 'Bearer ')
+                    headers[auth_header] = f"{auth_prefix}{api_key}"
+            
+            # Make HTTP request to external API
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                if request.method == "GET":
+                    # Forward query parameters
+                    params = dict(request.query_params)
+                    # Remove internal parameters
+                    params.pop('token', None)
+                    
+                    response = await client.get(external_url, headers=headers, params=params)
+                else:
+                    # Forward POST body
+                    body = await request.body()
+                    response = await client.post(external_url, headers=headers, content=body)
+            
+            # Return response data
+            if response.headers.get('content-type', '').startswith('application/json'):
+                data = response.json()
+            else:
+                data = response.text
+            
+            return {
+                "status": "success",
+                "data": data,
+                "status_code": response.status_code,
+                "headers": dict(response.headers)
+            }
+            
+        except httpx.TimeoutException:
+            logger.error(f"API proxy timeout for {proxy_connector.name}")
+            return {
+                "status": "error",
+                "error": "API request timeout"
+            }
+        except Exception as e:
+            logger.error(f"API proxy operation failed: {e}")
+            return {
+                "status": "error",
+                "error": str(e)
+            }
+
     async def handle_mysql_proxy(self, proxy_connector: ProxyConnector, operation_data: Dict, db: Session) -> Dict:
         """Handle MySQL proxy operations"""
         

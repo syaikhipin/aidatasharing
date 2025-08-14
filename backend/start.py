@@ -37,6 +37,11 @@ def main():
     logger.info("  🔍 ReDoc:       http://localhost:8000/redoc")
     logger.info("  🏥 Health:      http://localhost:8000/health")
     logger.info("  📊 Root:        http://localhost:8000/")
+    logger.info("-" * 80)
+    logger.info("👤 DEMO ACCOUNTS:")
+    logger.info("  🔑 Admin:       admin@example.com / SuperAdmin123!")
+    logger.info("  👨‍💼 TechCorp:     alice@techcorp.com / Password123!")
+    logger.info("  👩‍💻 DataAnalytics: bob@dataanalytics.com / Password123!")
     logger.info("=" * 80)
     logger.info("🚀 Starting FastAPI server...")
     

@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authAPI } from '@/lib/api';
 import { useAuth } from '@/components/auth/AuthProvider';
-import DemoUsersDisplay from '@/components/auth/DemoUsersDisplay';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -33,84 +32,78 @@ export default function LoginPage() {
   const router = useRouter();
   const { login } = useAuth();
 
-  // Fetch all demo users from backend
+  // Use the actual demo users from our seed data
   useEffect(() => {
     const fetchDemoUsers = async () => {
       try {
+        // First try to get from backend API
         const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
         const response = await fetch(`${API_BASE_URL}/api/auth/demo-users`);
         if (response.ok) {
           const data = await response.json();
           setDemoUsers(data.demo_users || []);
         } else {
-          console.warn('Could not fetch demo users from API');
-          // Fallback to hardcoded demo users if API fails
+          // Use the actual demo users from our seed data
           setDemoUsers([
             {
-              email: "superadmin@platform.com",
+              email: "admin@example.com",
               password: "SuperAdmin123!",
-              description: "Platform Superadmin (full platform access)",
-              full_name: "Platform Superadmin"
+              role: "admin",
+              description: "System Administrator",
+              organization: null,
+              full_name: "System Administrator",
+              is_superuser: true
             },
             {
-              email: "alice.manager@techcorp.com",
-              password: "TechManager123!",
-              description: "TechCorp Solutions - Organization Admin",
-              full_name: "Alice Johnson"
+              email: "alice@techcorp.com",
+              password: "Password123!",
+              role: "data_analyst",
+              description: "TechCorp Solutions - Data Analyst",
+              organization: "TechCorp Solutions",
+              full_name: "Alice Johnson",
+              is_superuser: false
             },
             {
-              email: "bob.analyst@techcorp.com",
-              password: "TechAnalyst123!",
-              description: "TechCorp Solutions - Organization Member",
-              full_name: "Bob Smith"
-            },
-            {
-              email: "carol.researcher@datasciencehub.com",
-              password: "DataResearch123!",
-              description: "DataScience Hub - Organization Admin",
-              full_name: "Carol Davis"
-            },
-            {
-              email: "david.scientist@datasciencehub.com",
-              password: "DataScience123!",
-              description: "DataScience Hub - Organization Member",
-              full_name: "David Wilson"
+              email: "bob@dataanalytics.com",
+              password: "Password123!",
+              role: "data_scientist",
+              description: "Data Analytics Inc - Data Scientist",
+              organization: "Data Analytics Inc",
+              full_name: "Bob Wilson",
+              is_superuser: false
             }
           ]);
         }
       } catch (error) {
         console.warn('Error fetching demo users:', error);
-        // Fallback to hardcoded demo users
+        // Fallback to our actual seed data users
         setDemoUsers([
           {
-            email: "superadmin@platform.com",
+            email: "admin@example.com",
             password: "SuperAdmin123!",
-            description: "Platform Superadmin (full platform access)",
-            full_name: "Platform Superadmin"
+            role: "admin",
+            description: "System Administrator",
+            organization: null,
+            full_name: "System Administrator",
+            is_superuser: true
           },
           {
-            email: "alice.manager@techcorp.com",
-            password: "TechManager123!",
-            description: "TechCorp Solutions - Organization Admin",
-            full_name: "Alice Johnson"
+            email: "alice@techcorp.com",
+            password: "Password123!",
+            role: "data_analyst",
+            description: "TechCorp Solutions - Data Analyst",
+            organization: "TechCorp Solutions",
+            full_name: "Alice Johnson",
+            is_superuser: false
           },
           {
-            email: "bob.analyst@techcorp.com",
-            password: "TechAnalyst123!",
-            description: "TechCorp Solutions - Organization Member",
-            full_name: "Bob Smith"
-          },
-          {
-            email: "carol.researcher@datasciencehub.com",
-            password: "DataResearch123!",
-            description: "DataScience Hub - Organization Admin",
-            full_name: "Carol Davis"
-          },
-          {
-            email: "david.scientist@datasciencehub.com",
-            password: "DataScience123!",
-            description: "DataScience Hub - Organization Member",
-            full_name: "David Wilson"
+            email: "bob@dataanalytics.com",
+            password: "Password123!",
+            role: "data_scientist",
+            description: "Data Analytics Inc - Data Scientist",
+            organization: "Data Analytics Inc",
+            full_name: "Bob Wilson",
+            is_superuser: false
           }
         ]);
       } finally {
@@ -202,7 +195,7 @@ export default function LoginPage() {
 
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-6">
-              {/* Simple Demo User Selector */}
+              {/* Demo User Selector */}
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Quick Login (Demo Accounts)
@@ -219,10 +212,20 @@ export default function LoginPage() {
                     </SelectTrigger>
                     <SelectContent className="max-h-80 bg-white border border-gray-200 shadow-lg z-50">
                       {demoUsers.map((user) => (
-                        <SelectItem key={user.email} value={user.email} className="py-2">
-                          <div className="flex items-center space-x-2">
-                            <span className="font-medium">{user.full_name}</span>
-                            <span className="text-sm text-gray-500">({user.email})</span>
+                        <SelectItem key={user.email} value={user.email} className="py-3">
+                          <div className="flex flex-col items-start space-y-1">
+                            <div className="flex items-center space-x-2">
+                              <span className="font-medium text-gray-900">{user.full_name}</span>
+                              {user.is_superuser ? (
+                                <span className="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded-full">Admin</span>
+                              ) : (
+                                <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">User</span>
+                              )}
+                            </div>
+                            <div className="text-sm text-gray-500">{user.email}</div>
+                            {user.organization && (
+                              <div className="text-xs text-gray-400">🏢 {user.organization}</div>
+                            )}
                           </div>
                         </SelectItem>
                       ))}
@@ -330,33 +333,8 @@ export default function LoginPage() {
                 </Link>
               </p>
             </div>
-
-            {/* Simple demo info */}
-            {!loadingDemoUsers && demoUsers.length > 0 && (
-              <Card variant="outlined" className="mt-6 bg-blue-50 border-blue-200">
-                <CardContent className="p-4">
-                  <div className="text-center">
-                    <h4 className="text-sm font-medium text-blue-900 mb-2">
-                      🧪 {demoUsers.length} Demo Accounts Available
-                    </h4>
-                    <p className="text-xs text-blue-700">
-                      Select from the dropdown above to auto-fill credentials.
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
           </CardContent>
         </Card>
-
-        {/* Enhanced Demo Users Display */}
-        <DemoUsersDisplay 
-          demoUsers={demoUsers}
-          onUserSelect={(email, password) => {
-            setFormData({ email, password });
-            setErrors({});
-          }}
-        />
 
         {/* Footer */}
         <div className="text-center mt-8">
