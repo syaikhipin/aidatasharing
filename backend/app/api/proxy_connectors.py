@@ -14,6 +14,7 @@ from app.core.auth import get_current_user, get_optional_user
 from app.models.user import User
 from app.models.proxy_connector import ProxyConnector, SharedProxyLink, ProxyAccessLog
 from app.services.proxy_service import ProxyService
+from app.utils.proxy_url_converter import get_corrected_proxy_url, convert_proxy_urls_in_response
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +119,7 @@ async def create_proxy_connector(
             name=proxy_connector.name,
             description=proxy_connector.description,
             connector_type=proxy_connector.connector_type,
-            proxy_url=proxy_connector.proxy_url,
+            proxy_url=get_corrected_proxy_url(proxy_connector),
             is_public=proxy_connector.is_public,
             allowed_operations=proxy_connector.allowed_operations or [],
             total_requests=proxy_connector.total_requests,
@@ -159,7 +160,7 @@ async def get_proxy_connectors(
             name=connector.name,
             description=connector.description,
             connector_type=connector.connector_type,
-            proxy_url=connector.proxy_url,
+            proxy_url=get_corrected_proxy_url(connector),
             is_public=connector.is_public,
             allowed_operations=connector.allowed_operations or [],
             total_requests=connector.total_requests,
@@ -196,7 +197,7 @@ async def get_proxy_connector(
         name=connector.name,
         description=connector.description,
         connector_type=connector.connector_type,
-        proxy_url=connector.proxy_url,
+        proxy_url=get_corrected_proxy_url(connector),
         is_public=connector.is_public,
         allowed_operations=connector.allowed_operations or [],
         total_requests=connector.total_requests,

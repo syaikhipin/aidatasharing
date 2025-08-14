@@ -1153,6 +1153,16 @@ async def _create_api_dataset_fallback(
         
         full_url = f"{base_url.rstrip('/')}{endpoint}"
         
+        # Apply SSL configuration for localhost - convert HTTPS to HTTP for localhost proxy URLs
+        from urllib.parse import urlparse
+        from app.utils.proxy_url_converter import ensure_localhost_proxy_uses_http
+        
+        parsed_url = urlparse(full_url)
+        if parsed_url.hostname in ['localhost', '127.0.0.1'] and parsed_url.port == 10103:
+            # This is a localhost proxy URL, ensure it uses HTTP
+            full_url = ensure_localhost_proxy_uses_http(full_url)
+            logger.info(f"🔓 Converted localhost proxy URL to HTTP: {full_url}")
+        
         # Fetch data from API
         response = requests.request(
             method=method,
