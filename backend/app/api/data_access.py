@@ -269,17 +269,32 @@ async def get_access_requests(
     db: Session = Depends(get_db)
 ):
     """
-    Get access requests (all for admins, user's own requests for regular users)
+    Get access requests (dataset owners see requests for their datasets, requesters see their own requests)
     """
     if not current_user.organization_id:
         return []
     
-    query = db.query(AccessRequest).filter(
+    # Base query - requests within user's organization
+    base_query = db.query(AccessRequest).filter(
         AccessRequest.dataset.has(organization_id=current_user.organization_id)
     )
     
-    if my_requests or not current_user.is_superuser:
-        query = query.filter(AccessRequest.requester_id == current_user.id)
+    if my_requests:
+        # User explicitly wants to see only their own requests
+        query = base_query.filter(AccessRequest.requester_id == current_user.id)
+    elif current_user.is_superuser:
+        # Superusers see all requests in their organization
+        query = base_query
+    else:
+        # Regular users see:
+        # 1. Requests for datasets they own (so they can approve them)
+        # 2. Requests they made themselves
+        query = base_query.filter(
+            or_(
+                AccessRequest.dataset.has(owner_id=current_user.id),  # Requests for their datasets
+                AccessRequest.requester_id == current_user.id         # Their own requests
+            )
+        )
     
     if status:
         query = query.filter(AccessRequest.status == status)
@@ -335,6 +350,19 @@ async def approve_access_request(
     
     if request.status != RequestStatus.PENDING:
         raise HTTPException(status_code=400, detail="Request is not pending")
+    
+    # Load the dataset to check ownership
+    dataset = request.dataset
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Associated dataset not found")
+    
+    # Check if current user is authorized to approve this request
+    # Only dataset owner or superuser can approve
+    if dataset.owner_id != current_user.id and not current_user.is_superuser:
+        raise HTTPException(
+            status_code=403, 
+            detail="Only the dataset owner can approve access requests"
+        )
     
     if approval_data.decision == "approve":
         request.status = RequestStatus.APPROVED

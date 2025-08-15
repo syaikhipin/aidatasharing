@@ -82,6 +82,12 @@ function AdminDatasetsContent() {
       setIsLoading(true);
       setError(null);
       
+      console.log('🔍 Fetching admin datasets with params:', {
+        include_deleted: showDeleted,
+        include_inactive: showInactive,
+        limit: 1000
+      });
+      
       // Fetch datasets with admin controls
       const datasetsResponse = await adminAPI.getAdminDatasets({
         include_deleted: showDeleted,
@@ -89,14 +95,20 @@ function AdminDatasetsContent() {
         limit: 1000 // Get all datasets for admin view
       });
       
-      setDatasets(datasetsResponse.datasets || []);
+      console.log('📊 Admin datasets response:', datasetsResponse);
+      console.log('📄 Datasets array:', datasetsResponse.datasets);
+      console.log('📋 Dataset count:', datasetsResponse.datasets?.length || 0);
+      
+      setDatasets(datasetsResponse.datasets || datasetsResponse || []);
       
       // Fetch admin stats
       const statsResponse = await adminAPI.getAdminDatasetStats();
+      console.log('📈 Admin stats response:', statsResponse);
       setStats(statsResponse);
       
     } catch (error: any) {
-      console.error('Failed to fetch admin data:', error);
+      console.error('❌ Failed to fetch admin data:', error);
+      console.error('❌ Error details:', error.response?.data);
       setError(error.response?.data?.detail || 'Failed to fetch admin data');
       setDatasets([]);
       setStats(null);

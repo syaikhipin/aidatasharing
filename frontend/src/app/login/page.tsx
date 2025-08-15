@@ -20,6 +20,8 @@ interface DemoUser {
 }
 
 export default function LoginPage() {
+  // State initialization with proper client-side guards
+  const [mounted, setMounted] = useState(false);
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -29,11 +31,19 @@ export default function LoginPage() {
   const [selectedDemoUser, setSelectedDemoUser] = useState<string>('');
   const [demoUsers, setDemoUsers] = useState<DemoUser[]>([]);
   const [loadingDemoUsers, setLoadingDemoUsers] = useState(true);
+  
   const router = useRouter();
   const { login } = useAuth();
 
+  // Ensure client-side mounting
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   // Use the actual demo users from our seed data
   useEffect(() => {
+    if (!mounted) return; // Only run on client side
+    
     const fetchDemoUsers = async () => {
       try {
         // First try to get from backend API
@@ -47,7 +57,7 @@ export default function LoginPage() {
           setDemoUsers([
             {
               email: "admin@example.com",
-              password: "SuperAdmin123!",
+              password: "admin123",
               role: "admin",
               description: "System Administrator",
               organization: null,
@@ -112,7 +122,7 @@ export default function LoginPage() {
     };
 
     fetchDemoUsers();
-  }, []);
+  }, [mounted]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -176,6 +186,21 @@ export default function LoginPage() {
       setErrors({});
     }
   };
+
+  // Show loading state while mounting to prevent hydration mismatch
+  if (!mounted) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center p-4">
+        <div className="w-full max-w-md">
+          <Card variant="elevated" className="shadow-xl">
+            <CardContent className="flex items-center justify-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center p-4">

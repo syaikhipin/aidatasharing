@@ -319,8 +319,7 @@ async def update_dataset_metadata(
     data_service.log_access(
         user=current_user,
         dataset=dataset,
-        access_type="metadata_update",
-        details={"updated_fields": updated_fields}
+        access_type="metadata_update"
     )
     
     return dataset
@@ -551,6 +550,8 @@ async def update_dataset(
     current_user: User = Depends(get_current_user)
 ):
     """Update a dataset (only owner can update)."""
+    logger.info(f"Update dataset {dataset_id} called by user {current_user.id} with data: {dataset_update}")
+    
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
     if not dataset:
         raise HTTPException(
@@ -566,12 +567,28 @@ async def update_dataset(
                 detail="Only dataset owner or organization admin can update"
             )
     
-    # Update fields
+    # Update fields with proper type conversion
+    updated_fields = []
     for field, value in dataset_update.dict(exclude_unset=True).items():
+        if field == 'sharing_level' and isinstance(value, str):
+            # Convert string to enum
+            try:
+                original_value = value
+                value = DataSharingLevel(value.lower())
+                logger.info(f"Converted sharing_level from '{original_value}' to {value}")
+            except ValueError:
+                logger.warning(f"Invalid sharing level value: {value}")
+                continue
         setattr(dataset, field, value)
+        updated_fields.append(field)
+    
+    # Update timestamp
+    dataset.updated_at = datetime.utcnow()
     
     db.commit()
     db.refresh(dataset)
+    
+    logger.info(f"Successfully updated dataset {dataset_id} fields: {updated_fields}")
     
     return dataset
 

@@ -128,6 +128,16 @@ class ConnectorService:
             # Determine dataset type based on connector
             dataset_type = self._get_dataset_type_for_connector(connector.connector_type)
             
+            # Determine the correct table name for MindsDB queries
+            if connector.connector_type == 'web':
+                # For web connectors, the table name is typically the same as the database name
+                mindsdb_table_name = connector.mindsdb_database_name
+                source_reference = connector.connection_config.get('base_url', '') + connector.connection_config.get('endpoint', '')
+            else:
+                # For other connectors, use the provided table_or_query
+                mindsdb_table_name = table_or_query
+                source_reference = table_or_query
+            
             # Create dataset record
             dataset = Dataset(
                 name=dataset_name,
@@ -138,16 +148,16 @@ class ConnectorService:
                 organization_id=connector.organization_id,
                 sharing_level=sharing_level,
                 connector_id=connector.id,
-                source_url=table_or_query,
+                source_url=source_reference,
                 mindsdb_database=connector.mindsdb_database_name,
-                mindsdb_table_name=table_or_query,
+                mindsdb_table_name=mindsdb_table_name,
                 allow_download=True,
                 allow_api_access=True,
                 allow_ai_chat=True
             )
             
             # Get schema information
-            schema_info = await self._get_connector_schema(connector, table_or_query)
+            schema_info = await self._get_connector_schema(connector, mindsdb_table_name)
             if schema_info:
                 dataset.schema_info = schema_info
                 dataset.column_count = len(schema_info.get('columns', []))
@@ -165,7 +175,7 @@ class ConnectorService:
                 "dataset_name": dataset_name,
                 "connector_type": connector.connector_type,
                 "mindsdb_database": connector.mindsdb_database_name,
-                "source": table_or_query
+                "source": source_reference
             }
             
         except Exception as e:
@@ -326,6 +336,27 @@ class ConnectorService:
                 "username": config.get("username"),
                 "password": config.get("password")
             }
+        elif connector.connector_type == 'web':
+            # For web connectors, ensure proper URL construction
+            base_url = config.get("base_url", "")
+            endpoint = config.get("endpoint", "")
+            
+            # Construct full URL properly
+            if base_url and not base_url.startswith(('http://', 'https://')):
+                base_url = f"https://{base_url}"
+            
+            full_url = base_url.rstrip('/')
+            if endpoint:
+                if not endpoint.startswith('/'):
+                    endpoint = f"/{endpoint}"
+                full_url += endpoint
+            
+            return {
+                "url": full_url,
+                "method": config.get("method", "GET"),
+                "headers": config.get("headers", {}),
+                **{k: v for k, v in config.items() if k not in ["base_url", "endpoint"]}
+            }
         else:
             return config
     
@@ -390,6 +421,43 @@ class ConnectorService:
                     }
                 else:
                     logger.warning(f"Schema query returned no results for {table_name}")
+            
+            elif connector.connector_type == 'web':
+                # For web connectors, try to fetch a small sample to infer schema
+                sample_query = f"SELECT * FROM {connector.mindsdb_database_name}.{table_name} LIMIT 1"
+                logger.info(f"🔍 Getting web connector schema: {sample_query}")
+                
+                result = self.mindsdb_service.execute_query(sample_query)
+                
+                if result.get("status") == "success" and result.get("rows"):
+                    sample_row = result["rows"][0]
+                    if isinstance(sample_row, dict):
+                        columns = []
+                        for col_name, col_value in sample_row.items():
+                            # Infer column type from value
+                            col_type = "string"
+                            if isinstance(col_value, int):
+                                col_type = "integer"
+                            elif isinstance(col_value, float):
+                                col_type = "float"
+                            elif isinstance(col_value, bool):
+                                col_type = "boolean"
+                            
+                            columns.append({
+                                "name": col_name,
+                                "type": col_type,
+                                "nullable": True
+                            })
+                        
+                        return {
+                            "columns": columns,
+                            "table_name": table_name,
+                            "connector_type": connector.connector_type,
+                            "estimated_rows": 0,  # Cannot easily determine for web APIs
+                            "database_name": connector.mindsdb_database_name
+                        }
+                else:
+                    logger.warning(f"Web connector schema query returned no results for {table_name}")
             
             return None
             

@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 // Create axios instance
 const apiClient = axios.create({
@@ -115,7 +115,9 @@ export const adminAPI = {
     organization_id?: number;
   }) => {
     const response = await apiClient.get('/api/admin/datasets', { params });
-    return response.data.datasets || response.data; // Handle both response formats
+    console.log('🔧 Admin datasets API response:', response.data);
+    // The backend returns { datasets: [...], total: X, ... }
+    return response.data;
   },
 
   deleteAdminDataset: async (datasetId: number, forceDelete: boolean = false) => {
@@ -928,7 +930,7 @@ export const dataConnectorsAPI = {
   },
 
   syncWithMindsDB: async (connectorId: number) => {
-    const response = await apiClient.post(`/api/connectors/${connectorId}/sync`);
+    const response = await apiClient.post(`/api/connectors/${connectorId}/sync-mindsdb`);
     return response.data;
   },
 

@@ -128,7 +128,7 @@ const CONNECTOR_FIELDS = {
     connection_config: [
       { name: 'base_url', label: 'Base URL', type: 'url', placeholder: 'https://api.example.com', required: true },
       { name: 'endpoint', label: 'Endpoint Path', type: 'text', placeholder: '/data', required: false },
-      { name: 'method', label: 'HTTP Method', type: 'select', options: ['GET', 'POST'], placeholder: 'GET', required: true },
+      { name: 'method', label: 'HTTP Method', type: 'select', options: ['GET', 'POST'], placeholder: 'Select method', required: true },
     ],
     credentials: [
       { name: 'api_key', label: 'API Key', type: 'password', placeholder: '••••••••', required: false },
@@ -302,12 +302,12 @@ function ConnectionsPageContent() {
     if (field.type === 'select') {
       return (
         <select
-          value={value || ''}
+          value={value || (field.required && field.options?.length ? field.options[0] : '')}
           onChange={(e) => handleFormFieldChange(section, field.name, e.target.value)}
           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           required={field.required}
         >
-          <option value="">{field.placeholder}</option>
+          {!field.required && <option value="">{field.placeholder}</option>}
           {field.options?.map((option: string) => (
             <option key={option} value={option}>{option}</option>
           ))}

@@ -618,7 +618,7 @@ async def test_connector(
     return result
 
 
-@router.post("/{connector_id}/sync")
+@router.post("/{connector_id}/sync-mindsdb")
 async def sync_with_mindsdb(
     connector_id: int,
     background_tasks: BackgroundTasks,

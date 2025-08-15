@@ -122,6 +122,54 @@ class MindsDBService:
                 "timestamp": datetime.utcnow().isoformat()
             }
 
+    def execute_query(self, query: str) -> Dict[str, Any]:
+        """Execute a SQL query on MindsDB and return results"""
+        try:
+            if not self._ensure_connection():
+                return {"status": "error", "error": "MindsDB connection not available"}
+
+            logger.info(f"🔍 Executing query: {query}")
+            
+            result = self.connection.query(query)
+            
+            if result and hasattr(result, 'fetch'):
+                df = result.fetch()
+                # Handle case where fetch() returns None
+                if df is not None and hasattr(df, 'empty'):
+                    return {
+                        "status": "success",
+                        "rows": df.to_dict('records') if not df.empty else [],
+                        "columns": list(df.columns) if not df.empty else [],
+                        "row_count": len(df)
+                    }
+                else:
+                    # For DDL queries (CREATE, DROP, etc.) that don't return data
+                    logger.info("✅ Query executed successfully (no data returned)")
+                    return {
+                        "status": "success",
+                        "rows": [],
+                        "columns": [],
+                        "row_count": 0,
+                        "message": "Query executed successfully"
+                    }
+            else:
+                # For queries that don't have fetch method or return None
+                logger.info("✅ Query executed successfully (no result object)")
+                return {
+                    "status": "success",
+                    "rows": [],
+                    "columns": [],
+                    "row_count": 0,
+                    "message": "Query executed successfully"
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ Query execution failed: {e}")
+            return {
+                "status": "error",
+                "error": str(e)
+            }
+
     def create_gemini_engine(self) -> Dict[str, Any]:
         """Create or verify Google Gemini engine using raw SQL."""
         try:
@@ -581,8 +629,9 @@ class MindsDBService:
             if not self._ensure_connection():
                 return {"success": False, "error": "MindsDB connection not available"}
 
-            # Try to fetch data from the web connector
-            test_query = f"SELECT * FROM {connector_name}.data LIMIT 3"
+            # For web connectors, try to query the default table (the URL endpoint)
+            # Web connectors in MindsDB typically create a single table representing the endpoint
+            test_query = f"SELECT * FROM {connector_name}.{connector_name} LIMIT 3"
             
             logger.info(f"🧪 Testing web connector: {test_query}")
             

@@ -29,12 +29,20 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const [mounted, setMounted] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
 
+  // Ensure client-side mounting
   useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return; // Only run on client side
+    
     const initializeAuth = async () => {
       // Check if we're in the browser (client-side)
       if (typeof window !== 'undefined') {
@@ -56,7 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     initializeAuth();
-  }, []);
+  }, [mounted]);
 
   const login = async (authToken: string) => {
     if (typeof window !== 'undefined') {
@@ -95,6 +103,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isAuthenticated: !isLoading && !!token && !!user,
   };
 
+  // Don't render children until mounted to prevent hydration issues
+  if (!mounted) {
+    return null;
+  }
+
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
@@ -104,4 +117,4 @@ export function useAuth() {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
-} 
+}  

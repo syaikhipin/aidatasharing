@@ -17,12 +17,14 @@ import {
   Link as LinkIcon,
   TestTube,
   Zap,
-  RefreshCw
+  RefreshCw,
+  ChevronDown
 } from 'lucide-react';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { SharingLevelSelector, SharingLevelBadge } from '@/components/datasets/SharingLevelSelector';
 import { datasetsAPI, dataSharingAPI, dataConnectorsAPI } from '@/lib/api';
+
 import ProxyConnectorForm from '@/components/proxy/ProxyConnectorForm';
 import SharedLinkForm from '@/components/proxy/SharedLinkForm';
 import SimplifiedConnectorForm from '@/components/connectors/SimplifiedConnectorForm';
@@ -749,7 +751,7 @@ function UnifiedSharingContent() {
               <ul className="divide-y divide-gray-200">
                 {datasets.map((dataset) => (
                   <li key={dataset.id} className="px-4 py-6 sm:px-6">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-start justify-between">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center space-x-3">
                           <div className="flex-shrink-0">
@@ -785,32 +787,12 @@ function UnifiedSharingContent() {
                                 </span>
                               )}
                             </div>
-                            
-                            {/* Proxy Connection Details */}
-                            {dataset.public_share_enabled && dataset.share_token && (
-                              <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-md">
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center space-x-2">
-                                    <Shield className="h-4 w-4 text-blue-600" />
-                                    <span className="text-sm font-medium text-blue-900">Third-Party Access</span>
-                                  </div>
-                                  <span className="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded">
-                                    {dataset.type.toUpperCase()} Proxy
-                                  </span>
-                                </div>
-                                <p className="text-xs text-blue-700 mt-1">
-                                  Use the "Copy DB Connection" button above to get connection string for {dataset.type} clients
-                                </p>
-                                <div className="mt-2 text-xs text-blue-600">
-                                  <strong>Supported operations:</strong> {getDefaultOperationsForType(dataset.type).join(', ')}
-                                </div>
-                              </div>
-                            )}
                           </div>
                         </div>
                       </div>
                       
-                      <div className="flex items-center space-x-4">
+                      <div className="flex flex-col items-end space-y-3 ml-4">
+                        {/* Sharing Level Selector */}
                         <div className="flex-shrink-0">
                           <SharingLevelSelector
                             currentLevel={dataset.sharing_level}
@@ -818,22 +800,23 @@ function UnifiedSharingContent() {
                           />
                         </div>
                         
+                        {/* Action Buttons */}
                         <div className="flex items-center space-x-2">
                           {dataset.public_share_enabled && dataset.share_url ? (
                             <>
                               <button
                                 onClick={() => copyShareLink(dataset.share_url!)}
-                                className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                                className="inline-flex items-center px-2 py-1 border border-gray-300 rounded text-xs font-medium text-gray-700 bg-white hover:bg-gray-50"
+                                title="Copy Share Link"
                               >
-                                <Copy className="h-4 w-4 mr-1" />
-                                Copy Link
+                                <Copy className="h-3 w-3" />
                               </button>
                               <button
                                 onClick={() => openShareLink(dataset.share_url!)}
-                                className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                                className="inline-flex items-center px-2 py-1 border border-gray-300 rounded text-xs font-medium text-gray-700 bg-white hover:bg-gray-50"
+                                title="Open Share Link"
                               >
-                                <ExternalLink className="h-4 w-4 mr-1" />
-                                Open
+                                <ExternalLink className="h-3 w-3" />
                               </button>
                               <button
                                 onClick={() => {
@@ -844,17 +827,17 @@ function UnifiedSharingContent() {
                                     showToast("Success", "Proxy connection string copied to clipboard");
                                   }
                                 }}
-                                className="inline-flex items-center px-3 py-2 border border-blue-300 rounded-md text-sm font-medium text-blue-700 bg-blue-50 hover:bg-blue-100"
+                                className="inline-flex items-center px-2 py-1 border border-blue-300 rounded text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100"
+                                title="Copy DB Connection"
                               >
-                                <Database className="h-4 w-4 mr-1" />
-                                Copy DB Connection
+                                <Database className="h-3 w-3" />
                               </button>
                               <button
                                 onClick={() => handleDisableSharing(dataset.id)}
-                                className="inline-flex items-center px-3 py-2 border border-red-300 rounded-md text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100"
+                                className="inline-flex items-center px-2 py-1 border border-red-300 rounded text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100"
+                                title="Disable Sharing"
                               >
-                                <Trash2 className="h-4 w-4 mr-1" />
-                                Disable
+                                <Trash2 className="h-3 w-3" />
                               </button>
                             </>
                           ) : (
@@ -863,26 +846,66 @@ function UnifiedSharingContent() {
                               className="inline-flex items-center px-3 py-2 border border-green-300 rounded-md text-sm font-medium text-green-700 bg-green-50 hover:bg-green-100"
                             >
                               <Share2 className="h-4 w-4 mr-1" />
-                              Create Share + Proxy
+                              Create Share
                             </button>
                           )}
                         </div>
+                        
+                        {/* Status Indicator */}
+                        {dataset.public_share_enabled && (
+                          <div className="flex items-center space-x-1">
+                            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                            <span className="text-xs text-gray-500">Public</span>
+                          </div>
+                        )}
                       </div>
-                      
-                      {/* Access Instructions for shared datasets */}
-                      {dataset.public_share_enabled && dataset.share_url && (
-                        <div className="mt-4">
-                          <AccessInstructions
-                            shareUrl={dataset.share_url}
-                            shareToken={dataset.share_token || ''}
-                            isPublic={dataset.sharing_level === 'public'}
-                            requiresAuth={dataset.sharing_level === 'organization'}
-                            enableChat={true}
-                            allowDownload={true}
-                          />
-                        </div>
-                      )}
                     </div>
+                    
+                    {/* Collapsible Details for Public Datasets */}
+                    {dataset.public_share_enabled && dataset.share_token && (
+                      <div className="mt-4 border-t border-gray-100 pt-4">
+                        <details className="group">
+                          <summary className="flex items-center justify-between cursor-pointer text-sm font-medium text-blue-700 hover:text-blue-800">
+                            <span className="flex items-center space-x-2">
+                              <Shield className="h-4 w-4" />
+                              <span>Connection Details & Access Instructions</span>
+                            </span>
+                            <ChevronDown className="h-4 w-4 group-open:rotate-180 transition-transform" />
+                          </summary>
+                          <div className="mt-3 space-y-3">
+                            {/* Proxy Connection Info */}
+                            <div className="p-3 bg-blue-50 border border-blue-200 rounded-md">
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-sm font-medium text-blue-900">Database Proxy Access</span>
+                                <span className="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded">
+                                  {dataset.type.toUpperCase()}
+                                </span>
+                              </div>
+                              <p className="text-xs text-blue-700 mb-2">
+                                Connect directly using {dataset.type} clients with the proxy connection string.
+                              </p>
+                              <div className="text-xs text-blue-600">
+                                <strong>Supported operations:</strong> {getDefaultOperationsForType(dataset.type).join(', ')}
+                              </div>
+                            </div>
+                            
+                            {/* Access Instructions */}
+                            {dataset.share_url && (
+                              <div className="p-3 bg-gray-50 border border-gray-200 rounded-md">
+                                <AccessInstructions
+                                  shareUrl={dataset.share_url}
+                                  shareToken={dataset.share_token || ''}
+                                  isPublic={dataset.sharing_level === 'public'}
+                                  requiresAuth={dataset.sharing_level === 'organization'}
+                                  enableChat={true}
+                                  allowDownload={true}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </details>
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>
