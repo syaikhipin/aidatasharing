@@ -1,6 +1,7 @@
 import secrets
 from typing import List, Optional, Dict, Any
 from pydantic_settings import BaseSettings
+from .app_config import get_app_config
 
 
 class Settings(BaseSettings):
@@ -12,24 +13,45 @@ class Settings(BaseSettings):
     # Database - Single unified database location
     DATABASE_URL: str = "sqlite:///../storage/aishare_platform.db"
     
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Get centralized configuration
+        self._app_config = get_app_config()
+    
     # CORS origins - will be parsed from comma-separated string
-    BACKEND_CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:10103,http://localhost:3001,http://localhost:3004"
+    @property
+    def BACKEND_CORS_ORIGINS(self) -> str:
+        """Get CORS origins from centralized config"""
+        cors_origins = self._app_config.services.get_cors_origins()
+        return ",".join(cors_origins)
     
     def get_cors_origins(self) -> List[str]:
-        """Parse CORS origins from comma-separated string."""
-        if isinstance(self.BACKEND_CORS_ORIGINS, str):
-            return [origin.strip() for origin in self.BACKEND_CORS_ORIGINS.split(",") if origin.strip()]
-        return self.BACKEND_CORS_ORIGINS
+        """Parse CORS origins from centralized configuration."""
+        return self._app_config.services.get_cors_origins()
     
     # JWT
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    ALGORITHM: str = "HS256"
+    @property 
+    def ACCESS_TOKEN_EXPIRE_MINUTES(self) -> int:
+        """Get JWT expiry from centralized config"""
+        return self._app_config.security.JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+    
+    @property
+    def ALGORITHM(self) -> str:
+        """Get JWT algorithm from centralized config"""
+        return self._app_config.security.JWT_ALGORITHM
     
     # Google API Configuration - Now from environment
-    GOOGLE_API_KEY: Optional[str] = None
+    @property
+    def GOOGLE_API_KEY(self) -> Optional[str]:
+        """Get Google API key from centralized config"""
+        return self._app_config.integrations.GOOGLE_API_KEY
     
     # MindsDB Configuration
-    MINDSDB_URL: str = "http://127.0.0.1:47334"
+    @property
+    def MINDSDB_URL(self) -> str:
+        """Get MindsDB URL from centralized config"""
+        return self._app_config.services.get_mindsdb_url()
+    
     MINDSDB_DATABASE: str = "mindsdb"
     MINDSDB_USERNAME: Optional[str] = None
     MINDSDB_PASSWORD: Optional[str] = None

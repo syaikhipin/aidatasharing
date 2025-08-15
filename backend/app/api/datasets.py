@@ -2,10 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import List, Optional, Dict, Any
+from datetime import datetime
 from app.core.database import get_db
 from app.core.auth import get_current_user
 from app.models.user import User
-from app.models.dataset import Dataset, DatasetType, DatasetStatus
+from app.models.dataset import Dataset, DatasetType, DatasetStatus, AIProcessingStatus, DatabaseConnector
 from app.models.organization import DataSharingLevel
 from app.schemas.dataset import (
     DatasetCreate, DatasetUpdate, DatasetResponse, 
@@ -22,6 +23,44 @@ import time
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+# Helper functions for JSON metadata analysis
+def _count_json_nesting(obj, level=0):
+    """Count the maximum nesting level in a JSON object"""
+    if isinstance(obj, dict):
+        if not obj:
+            return level
+        return max(_count_json_nesting(v, level + 1) for v in obj.values())
+    elif isinstance(obj, list):
+        if not obj:
+            return level
+        return max(_count_json_nesting(item, level + 1) for item in obj)
+    else:
+        return level
+
+def _count_json_elements(obj):
+    """Count total elements in a JSON structure"""
+    if isinstance(obj, dict):
+        return sum(_count_json_elements(v) for v in obj.values()) + len(obj)
+    elif isinstance(obj, list):
+        return sum(_count_json_elements(item) for item in obj) + len(obj)
+    else:
+        return 1
+
+def _analyze_json_types(obj, max_depth=3, current_depth=0):
+    """Analyze data types in JSON structure"""
+    if current_depth >= max_depth:
+        return type(obj).__name__
+        
+    if isinstance(obj, dict):
+        return {k: _analyze_json_types(v, max_depth, current_depth + 1) for k, v in list(obj.items())[:5]}  # Limit to first 5 keys
+    elif isinstance(obj, list):
+        if obj:
+            return [_analyze_json_types(obj[0], max_depth, current_depth + 1)]  # Analyze first element as example
+        else:
+            return []
+    else:
+        return type(obj).__name__
 
 router = APIRouter()
 
@@ -217,6 +256,292 @@ async def get_dataset(
     )
     
     return dataset
+
+@router.put("/{dataset_id}", response_model=DatasetResponse)
+@router.put("/{dataset_id}/metadata", response_model=DatasetResponse)
+async def update_dataset_metadata(
+    dataset_id: int,
+    metadata_update: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update dataset metadata including schema, description, and custom fields."""
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Dataset not found"
+        )
+    
+    # Check permissions
+    data_service = DataSharingService(db)
+    if not data_service.can_access_dataset(current_user, dataset):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied to this dataset"
+        )
+    
+    # Only owner or admin can update metadata
+    if dataset.owner_id != current_user.id and not current_user.is_superuser:
+        if current_user.role not in ["owner", "admin"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only dataset owner or organization admin can update metadata"
+            )
+    
+    # Update allowed metadata fields
+    allowed_fields = [
+        'name', 'description', 'schema_info', 'file_metadata', 'content_preview',
+        'ai_summary', 'ai_insights', 'ai_recommendations', 'sharing_level',
+        'public_share_enabled', 'ai_chat_enabled', 'allow_download'
+    ]
+    
+    updated_fields = []
+    for field, value in metadata_update.items():
+        if field in allowed_fields:
+            if field == 'sharing_level' and isinstance(value, str):
+                # Convert string to enum
+                try:
+                    value = DataSharingLevel(value.upper())
+                except ValueError:
+                    continue
+            
+            setattr(dataset, field, value)
+            updated_fields.append(field)
+    
+    # Update timestamp
+    dataset.updated_at = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(dataset)
+    
+    # Log the metadata update
+    data_service.log_access(
+        user=current_user,
+        dataset=dataset,
+        access_type="metadata_update",
+        details={"updated_fields": updated_fields}
+    )
+    
+    return dataset
+
+@router.get("/{dataset_id}/metadata/detailed", response_model=Dict[str, Any])
+async def get_detailed_dataset_metadata(
+    dataset_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get comprehensive dataset metadata including schema, statistics, and AI insights."""
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Dataset not found"
+        )
+    
+    # Check access permissions
+    data_service = DataSharingService(db)
+    if not data_service.can_access_dataset(current_user, dataset):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied to this dataset"
+        )
+    
+    # Compile comprehensive metadata
+    metadata = {
+        "basic_info": {
+            "id": dataset.id,
+            "name": dataset.name,
+            "description": dataset.description,
+            "type": dataset.type,
+            "status": dataset.status,
+            "created_at": dataset.created_at,
+            "updated_at": dataset.updated_at
+        },
+        "ownership": {
+            "owner_id": dataset.owner_id,
+            "owner_name": dataset.owner.full_name if dataset.owner else None,
+            "organization_id": dataset.organization_id,
+            "organization_name": dataset.organization.name if dataset.organization else None
+        },
+        "data_structure": {
+            "size_bytes": dataset.size_bytes,
+            "row_count": dataset.row_count,
+            "column_count": dataset.column_count,
+            "schema_info": dataset.schema_info,
+            "file_metadata": dataset.file_metadata
+        },
+        "ai_processing": {
+            "ai_processing_status": dataset.ai_processing_status,
+            "ai_summary": dataset.ai_summary,
+            "ai_insights": dataset.ai_insights,
+            "ai_recommendations": dataset.ai_recommendations,
+            "ai_chat_enabled": dataset.ai_chat_enabled,
+            "chat_model_name": dataset.chat_model_name,
+            "chat_context": dataset.chat_context
+        },
+        "sharing_settings": {
+            "sharing_level": dataset.sharing_level,
+            "public_share_enabled": dataset.public_share_enabled,
+            "share_token": dataset.share_token if dataset.public_share_enabled else None,
+            "share_expires_at": dataset.share_expires_at,
+            "share_view_count": dataset.share_view_count,
+            "allow_download": dataset.allow_download
+        },
+        "data_source": {
+            "source_url": dataset.source_url,
+            "connection_params": dataset.connection_params,
+            "connector_id": dataset.connector_id,
+            "mindsdb_table_name": dataset.mindsdb_table_name,
+            "mindsdb_database": dataset.mindsdb_database
+        },
+        "content_preview": dataset.content_preview[:500] if dataset.content_preview else None,
+        "statistics": {
+            "access_count": getattr(dataset, 'access_count', 0),
+            "download_count": getattr(dataset, 'download_count', 0),
+            "last_accessed": getattr(dataset, 'last_accessed_at', None),
+            "last_downloaded": getattr(dataset, 'last_downloaded_at', None)
+        }
+    }
+    
+    # Add connector information if available
+    if dataset.connector_id:
+        connector = db.query(DatabaseConnector).filter(
+            DatabaseConnector.id == dataset.connector_id
+        ).first()
+        if connector:
+            metadata["connector_info"] = {
+                "name": connector.name,
+                "description": connector.description,
+                "type": connector.type,
+                "host": connector.host,
+                "port": connector.port,
+                "status": connector.status
+            }
+    
+    # Log the metadata access
+    data_service.log_access(
+        user=current_user,
+        dataset=dataset,
+        access_type="metadata_view"
+    )
+    
+    return metadata
+
+@router.post("/{dataset_id}/edit", response_model=Dict[str, Any])
+async def edit_dataset_content(
+    dataset_id: int,
+    edit_request: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Edit dataset content and structure (for supported dataset types)."""
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Dataset not found"
+        )
+    
+    # Check permissions - only owner or admin can edit
+    if dataset.owner_id != current_user.id and not current_user.is_superuser:
+        if current_user.role not in ["owner", "admin"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only dataset owner or organization admin can edit content"
+            )
+    
+    # Check if dataset type supports editing
+    editable_types = [DatasetType.CSV, DatasetType.JSON, DatasetType.TXT]
+    if dataset.type not in editable_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Dataset type {dataset.type} does not support content editing"
+        )
+    
+    edit_type = edit_request.get("edit_type")
+    
+    if edit_type == "update_content":
+        # Update entire content
+        new_content = edit_request.get("content")
+        if not new_content:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Content is required for content update"
+            )
+        
+        # Update content preview and metadata
+        dataset.content_preview = new_content[:1000] + "..." if len(new_content) > 1000 else new_content
+        dataset.size_bytes = len(new_content.encode('utf-8'))
+        
+        # Update schema info based on type
+        if dataset.type == DatasetType.CSV:
+            lines = new_content.strip().split('\n')
+            dataset.row_count = len(lines) - 1 if lines else 0
+            dataset.column_count = len(lines[0].split(',')) if lines else 0
+        elif dataset.type == DatasetType.JSON:
+            try:
+                json_data = json.loads(new_content)
+                if isinstance(json_data, list):
+                    dataset.row_count = len(json_data)
+                dataset.schema_info = {"type": "json", "structure": type(json_data).__name__}
+            except json.JSONDecodeError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid JSON content"
+                )
+        elif dataset.type == DatasetType.TXT:
+            lines = new_content.split('\n')
+            dataset.schema_info = {
+                "type": "text",
+                "line_count": len(lines),
+                "word_count": len(new_content.split()),
+                "character_count": len(new_content)
+            }
+    
+    elif edit_type == "update_schema":
+        # Update schema information
+        new_schema = edit_request.get("schema_info")
+        if new_schema:
+            dataset.schema_info = new_schema
+    
+    elif edit_type == "update_metadata":
+        # Update file metadata
+        new_metadata = edit_request.get("file_metadata")
+        if new_metadata:
+            dataset.file_metadata = new_metadata
+    
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid edit_type. Supported types: update_content, update_schema, update_metadata"
+        )
+    
+    # Update timestamp
+    dataset.updated_at = datetime.utcnow()
+    
+    # Reset AI processing status to trigger re-analysis
+    dataset.ai_processing_status = AIProcessingStatus.NOT_PROCESSED
+    
+    db.commit()
+    db.refresh(dataset)
+    
+    # Log the edit action
+    data_service = DataSharingService(db)
+    data_service.log_access(
+        user=current_user,
+        dataset=dataset,
+        access_type="content_edit",
+        details={"edit_type": edit_type}
+    )
+    
+    return {
+        "success": True,
+        "message": f"Dataset {edit_type} completed successfully",
+        "updated_at": dataset.updated_at,
+        "ai_processing_status": dataset.ai_processing_status
+    }
+
 
 @router.put("/{dataset_id}", response_model=DatasetResponse)
 async def update_dataset(
@@ -496,6 +821,12 @@ async def upload_dataset_file(
     row_count = None
     column_count = None
     
+    # Initialize enhanced metadata fields for all file types
+    schema_metadata = {}
+    quality_metrics = {}
+    column_statistics = {}
+    preview_data = {}
+    
     # Save file temporarily for processing
     import tempfile
     import os
@@ -518,6 +849,53 @@ async def upload_dataset_file(
                     if file_extension == "json":
                         row_count = file_metadata.get("element_count")
                         column_count = 1  # JSON treated as single complex column
+                        
+                        # Generate enhanced metadata for JSON
+                        try:
+                            import json as json_module
+                            with open(temp_file_path, 'r', encoding='utf-8') as f:
+                                json_data = json_module.load(f)
+                            
+                            # Enhanced schema metadata for JSON
+                            schema_metadata = {
+                                'file_type': 'json',
+                                'original_filename': file.filename,
+                                'encoding': 'utf-8',
+                                'structure': {
+                                    'type': type(json_data).__name__,
+                                    'is_array': isinstance(json_data, list),
+                                    'nested_levels': _count_json_nesting(json_data),
+                                    'total_elements': _count_json_elements(json_data)
+                                },
+                                'data_types': _analyze_json_types(json_data),
+                                'sample_data': str(json_data)[:200] + "..." if len(str(json_data)) > 200 else str(json_data)
+                            }
+                            
+                            # Enhanced quality metrics for JSON
+                            quality_metrics = {
+                                'overall_score': 95,  # JSON files are typically well-structured
+                                'completeness': 100,  # JSON files don't have missing values in the same way
+                                'consistency': 95,
+                                'accuracy': 90,
+                                'issues': [],
+                                'last_analyzed': datetime.utcnow().isoformat()
+                            }
+                            
+                            # Enhanced preview data for JSON
+                            preview_data = {
+                                'type': 'json',
+                                'structure_preview': str(json_data)[:500] + "..." if len(str(json_data)) > 500 else str(json_data),
+                                'total_elements': _count_json_elements(json_data),
+                                'is_sample': len(str(json_data)) > 500,
+                                'preview_generated_at': datetime.utcnow().isoformat()
+                            }
+                            
+                        except Exception as json_e:
+                            logger.warning(f"Could not generate enhanced JSON metadata: {json_e}")
+                            # Fallback metadata
+                            schema_metadata = {'file_type': 'json', 'error': 'Could not parse JSON structure'}
+                            quality_metrics = {'overall_score': 50, 'issues': ['JSON parsing failed']}
+                            preview_data = {'type': 'json', 'error': 'Preview generation failed'}
                     
                     logger.info(f"Successfully processed {file_extension} file: {file_metadata}")
             except Exception as e:
@@ -546,13 +924,9 @@ async def upload_dataset_file(
         if temp_file_path and os.path.exists(temp_file_path):
             os.unlink(temp_file_path)
 
-    # Generate enhanced metadata for the new fields
-    schema_metadata = {}
-    quality_metrics = {}
-    column_statistics = {}
-    preview_data = {}
-    
-    if file_metadata:
+    # Generate enhanced metadata for files that haven't been processed yet
+    # (CSV files and JSON files are already processed above)
+    if not schema_metadata and file_metadata:
         # Enhanced schema metadata
         schema_metadata = {
             "file_type": file_extension,
@@ -1137,7 +1511,6 @@ async def get_dataset_metadata(
     current_user: User = Depends(get_current_user)
 ):
     """Get detailed metadata for a dataset."""
-    from app.services.cache import cache_service
     
     data_service = DataSharingService(db)
     
@@ -1159,11 +1532,10 @@ async def get_dataset_metadata(
         metadata_service = MetadataService(db)
         
         # Check cache first (unless refresh is requested)
-        if not refresh:
-            cached_metadata = cache_service.get(dataset_id, "metadata", ttl=3600)
-            if cached_metadata:
-                logger.info(f"📋 Returning cached metadata for dataset {dataset_id}")
-                return cached_metadata["data"]
+        cached_metadata = None
+        if not refresh and cached_metadata:
+            logger.info(f"📋 Returning cached metadata for dataset {dataset_id}")
+            return cached_metadata["data"]
         
         # Generate fresh metadata
         logger.info(f"📋 Generating fresh metadata for dataset {dataset_id}")
@@ -1188,9 +1560,6 @@ async def get_dataset_metadata(
             },
             "generated_at": schema_metadata.get("analysis_timestamp")
         }
-        
-        # Cache the result
-        cache_service.set(dataset_id, "metadata", metadata_response, ttl=3600)
         
         # Log access
         data_service.log_access(
@@ -1218,7 +1587,6 @@ async def get_dataset_preview(
     current_user: User = Depends(get_current_user)
 ):
     """Get dataset content preview."""
-    from app.services.cache import cache_service
     
     data_service = DataSharingService(db)
     
@@ -1240,12 +1608,11 @@ async def get_dataset_preview(
         preview_service = PreviewService(db)
         
         # Check cache first (unless refresh is requested)
+        cached_preview = None
         cache_key_params = {"rows": rows, "include_stats": include_stats}
-        if not refresh:
-            cached_preview = cache_service.get(dataset_id, "preview", ttl=1800, **cache_key_params)
-            if cached_preview:
-                logger.info(f"👁️ Returning cached preview for dataset {dataset_id}")
-                return cached_preview["data"]
+        if not refresh and cached_preview:
+            logger.info(f"👁️ Returning cached preview for dataset {dataset_id}")
+            return cached_preview["data"]
         
         # Generate fresh preview
         logger.info(f"👁️ Generating fresh preview for dataset {dataset_id}")
@@ -1265,9 +1632,6 @@ async def get_dataset_preview(
                 "include_stats": include_stats
             }
         }
-        
-        # Cache the result
-        cache_service.set(dataset_id, "preview", preview_response, ttl=1800, **cache_key_params)
         
         # Log access
         data_service.log_access(
@@ -1323,7 +1687,6 @@ async def refresh_dataset_metadata(
     current_user: User = Depends(get_current_user)
 ):
     """Refresh and update dataset metadata (owner only)."""
-    from app.services.cache import cache_service
     
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
     if not dataset:
@@ -1344,9 +1707,6 @@ async def refresh_dataset_metadata(
         
         # Update metadata in database
         result = await metadata_service.update_dataset_metadata(dataset_id)
-        
-        # Clear cache
-        cache_service.clear_dataset_cache(dataset_id)
         
         logger.info(f"🔄 Metadata refreshed for dataset {dataset_id}")
         
@@ -1513,4 +1873,505 @@ async def transfer_dataset_ownership(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to transfer ownership: {str(e)}"
+        )
+
+@router.get("/{dataset_id}/preview/enhanced")
+async def get_enhanced_dataset_preview(
+    dataset_id: int,
+    include_connector_preview: bool = True,
+    include_file_preview: bool = True,
+    preview_rows: int = 50,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get enhanced dataset preview including file/connector-specific previews for metadata viewing."""
+    data_service = DataSharingService(db)
+    
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Dataset not found"
+        )
+    
+    # Check access permissions
+    if not data_service.can_access_dataset(current_user, dataset):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied to this dataset"
+        )
+    
+    try:
+        preview_response = {
+            "dataset_id": dataset_id,
+            "dataset_name": dataset.name,
+            "type": dataset.type.value if dataset.type else "unknown",
+            "preview_metadata": {}
+        }
+        
+        # Base preview data from existing fields
+        if dataset.preview_data:
+            preview_response["preview_metadata"]["base_preview"] = dataset.preview_data
+        elif dataset.content_preview:
+            preview_response["preview_metadata"]["base_preview"] = {
+                "content_sample": dataset.content_preview,
+                "is_sample": True
+            }
+        
+        # Enhanced file preview for different types
+        if include_file_preview and dataset.file_path:
+            try:
+                file_preview = await _get_file_type_preview(dataset)
+                preview_response["preview_metadata"]["file_preview"] = file_preview
+            except Exception as e:
+                logger.warning(f"Could not generate file preview for dataset {dataset_id}: {e}")
+                preview_response["preview_metadata"]["file_preview"] = {
+                    "error": f"File preview unavailable: {str(e)}",
+                    "file_type": dataset.type.value if dataset.type else "unknown"
+                }
+        
+        # Enhanced connector preview if connected via database connector
+        if include_connector_preview and dataset.connector_id:
+            try:
+                connector_preview = await _get_connector_preview(dataset, preview_rows, db)
+                preview_response["preview_metadata"]["connector_preview"] = connector_preview
+            except Exception as e:
+                logger.warning(f"Could not generate connector preview for dataset {dataset_id}: {e}")
+                preview_response["preview_metadata"]["connector_preview"] = {
+                    "error": f"Connector preview unavailable: {str(e)}",
+                    "connector_id": dataset.connector_id
+                }
+        
+        # Schema and structure information
+        preview_response["preview_metadata"]["schema_summary"] = {
+            "row_count": dataset.row_count,
+            "column_count": dataset.column_count,
+            "size_bytes": dataset.size_bytes,
+            "file_metadata": dataset.file_metadata or {},
+            "schema_metadata": dataset.schema_metadata or {},
+            "quality_score": dataset.quality_metrics.get("overall_score") if dataset.quality_metrics else None
+        }
+        
+        # Column statistics preview
+        if dataset.column_statistics:
+            preview_response["preview_metadata"]["columns_summary"] = {
+                "total_columns": len(dataset.column_statistics),
+                "column_types": {},
+                "sample_columns": list(dataset.column_statistics.keys())[:10]
+            }
+            
+            # Summarize column types
+            for col, stats in dataset.column_statistics.items():
+                col_type = stats.get("data_type", "unknown")
+                preview_response["preview_metadata"]["columns_summary"]["column_types"][col_type] = \
+                    preview_response["preview_metadata"]["columns_summary"]["column_types"].get(col_type, 0) + 1
+        
+        # Log access
+        data_service.log_access(
+            user=current_user,
+            dataset=dataset,
+            access_type="enhanced_preview"
+        )
+        
+        return preview_response
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get enhanced preview for dataset {dataset_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get enhanced preview: {str(e)}"
+        )
+
+
+async def _get_file_type_preview(dataset: Dataset) -> Dict[str, Any]:
+    """Generate file-type specific preview data."""
+    file_preview = {
+        "file_type": dataset.type.value if dataset.type else "unknown",
+        "file_size": dataset.size_bytes,
+        "preview_available": True
+    }
+    
+    if dataset.type == DatasetType.CSV:
+        # CSV specific preview
+        if dataset.schema_metadata and "columns" in dataset.schema_metadata:
+            file_preview.update({
+                "columns": dataset.schema_metadata["columns"],
+                "delimiter": dataset.file_metadata.get("delimiter", ",") if dataset.file_metadata else ",",
+                "encoding": dataset.schema_metadata.get("encoding", "utf-8"),
+                "has_header": True  # Assume CSV has header
+            })
+    
+    elif dataset.type == DatasetType.JSON:
+        # JSON specific preview
+        file_preview.update({
+            "structure": dataset.schema_metadata.get("structure", {}) if dataset.schema_metadata else {},
+            "is_array": dataset.file_metadata.get("is_array", False) if dataset.file_metadata else False,
+            "nested_levels": dataset.file_metadata.get("nested_levels", 0) if dataset.file_metadata else 0
+        })
+    
+    elif dataset.type == DatasetType.EXCEL:
+        # Excel specific preview
+        file_preview.update({
+            "sheets": dataset.file_metadata.get("sheets", []) if dataset.file_metadata else [],
+            "active_sheet": dataset.file_metadata.get("active_sheet", "Sheet1") if dataset.file_metadata else "Sheet1",
+            "has_formulas": dataset.file_metadata.get("has_formulas", False) if dataset.file_metadata else False
+        })
+    
+    elif dataset.type == DatasetType.PDF:
+        # PDF specific preview
+        file_preview.update({
+            "pages": dataset.file_metadata.get("pages", 0) if dataset.file_metadata else 0,
+            "text_content": bool(dataset.content_preview),
+            "extractable": dataset.file_metadata.get("extractable", True) if dataset.file_metadata else True
+        })
+    
+    return file_preview
+
+
+async def _get_connector_preview(dataset: Dataset, preview_rows: int, db: Session) -> Dict[str, Any]:
+    """Generate connector-specific preview data."""
+    from app.models.dataset import DatabaseConnector
+    
+    connector = db.query(DatabaseConnector).filter(
+        DatabaseConnector.id == dataset.connector_id
+    ).first()
+    
+    if not connector:
+        raise ValueError("Connector not found")
+    
+    connector_preview = {
+        "connector_id": connector.id,
+        "connector_name": connector.name,
+        "connector_type": connector.type,
+        "status": connector.status,
+        "connection_info": {
+            "host": connector.host,
+            "port": connector.port,
+            "database": connector.database_name
+        }
+    }
+    
+    # Try to get live preview from connector
+    try:
+        if dataset.mindsdb_table_name and dataset.mindsdb_database:
+            query = f"SELECT * FROM {dataset.mindsdb_database}.{dataset.mindsdb_table_name} LIMIT {preview_rows};"
+            result = mindsdb_service.execute_query(query)
+            
+            if result.get('data'):
+                connector_preview["live_preview"] = {
+                    "sample_data": result['data'][:10],  # Show first 10 rows
+                    "total_rows_available": len(result['data']),
+                    "is_live": True,
+                    "query_timestamp": datetime.utcnow().isoformat()
+                }
+            else:
+                connector_preview["live_preview"] = {
+                    "error": "No data available from connector",
+                    "is_live": False
+                }
+    
+    except Exception as e:
+        connector_preview["live_preview"] = {
+            "error": f"Could not fetch live data: {str(e)}",
+            "is_live": False
+        }
+    
+    return connector_preview
+
+
+@router.post("/{dataset_id}/reupload")
+async def reupload_dataset_file(
+    dataset_id: int,
+    file: UploadFile = File(...),
+    preserve_metadata: bool = True,
+    update_sharing_settings: bool = False,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Reupload/replace the file for an existing dataset while preserving configuration."""
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Dataset not found"
+        )
+    
+    # Check permissions - only owner or admin can reupload
+    if dataset.owner_id != current_user.id and not current_user.is_superuser:
+        if current_user.role not in ["owner", "admin"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only dataset owner or organization admin can reupload files"
+            )
+    
+    # Validate file type
+    if not file.filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No file provided"
+        )
+    
+    file_extension = file.filename.split('.')[-1].lower()
+    if file_extension not in ['csv', 'json', 'xlsx', 'xls', 'txt', 'pdf']:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported file type. Supported formats: CSV, JSON, Excel, TXT, PDF"
+        )
+    
+    try:
+        # Store original metadata if preserving
+        original_metadata = {}
+        if preserve_metadata:
+            original_metadata = {
+                "name": dataset.name,
+                "description": dataset.description,
+                "sharing_level": dataset.sharing_level,
+                "ai_summary": dataset.ai_summary,
+                "ai_insights": dataset.ai_insights,
+                "ai_recommendations": dataset.ai_recommendations,
+                "custom_metadata": getattr(dataset, 'custom_metadata', {}),
+                "tags": getattr(dataset, 'tags', [])
+            }
+        
+        # Read new file content
+        content = await file.read()
+        file_size = len(content)
+        
+        # Backup old file path (in case rollback is needed)
+        old_file_path = dataset.file_path
+        
+        # Store new file using storage service
+        storage_result = await storage_service.store_dataset_file(
+            file_content=content,
+            original_filename=file.filename,
+            dataset_id=dataset_id,
+            organization_id=current_user.organization_id
+        )
+        
+        # Determine new dataset type
+        if file_extension == 'csv':
+            new_dataset_type = DatasetType.CSV
+        elif file_extension == 'json':
+            new_dataset_type = DatasetType.JSON
+        elif file_extension in ['xlsx', 'xls']:
+            new_dataset_type = DatasetType.EXCEL
+        elif file_extension == 'pdf':
+            new_dataset_type = DatasetType.PDF
+        else:
+            new_dataset_type = DatasetType.CSV  # Default fallback
+        
+        # Process new file content and extract metadata
+        file_metadata = {}
+        content_preview = None
+        row_count = None
+        column_count = None
+        
+        # Save file temporarily for processing
+        import tempfile
+        import os
+        
+        temp_file_path = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_extension}") as temp_file:
+                temp_file.write(content)
+                temp_file_path = temp_file.name
+            
+            # Process different file types
+            if file_extension in ["pdf", "json"]:
+                try:
+                    content_result = mindsdb_service.process_file_content(temp_file_path, file_extension)
+                    if content_result.get("success"):
+                        file_metadata = content_result.get("metadata", {})
+                        content_preview = content_result["content"][:500] + "..." if len(content_result["content"]) > 500 else content_result["content"]
+                        
+                        if file_extension == "json":
+                            row_count = file_metadata.get("element_count")
+                            column_count = 1
+                        
+                        logger.info(f"Successfully processed reuploaded {file_extension} file: {file_metadata}")
+                except Exception as e:
+                    logger.warning(f"Could not process reuploaded {file_extension} file content: {e}")
+            
+            # For CSV files, try to get basic info
+            elif file_extension == "csv":
+                try:
+                    import pandas as pd
+                    df = pd.read_csv(temp_file_path)
+                    file_metadata = {
+                        "row_count": len(df),
+                        "column_count": len(df.columns),
+                        "columns": df.columns.tolist(),
+                        "dtypes": {col: str(dtype) for col, dtype in df.dtypes.items()}
+                    }
+                    content_preview = df.head(3).to_string()
+                    row_count = len(df)
+                    column_count = len(df.columns)
+                    logger.info(f"Successfully analyzed reuploaded CSV file: {file_metadata}")
+                except Exception as e:
+                    logger.warning(f"Could not analyze reuploaded CSV file: {e}")
+        
+        finally:
+            # Clean up temporary file
+            if temp_file_path and os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
+        
+        # Generate enhanced metadata for new file
+        schema_metadata = {}
+        quality_metrics = {}
+        column_statistics = {}
+        preview_data = {}
+        
+        if file_metadata:
+            # Enhanced schema metadata
+            schema_metadata = {
+                "file_type": file_extension,
+                "original_filename": file.filename,
+                "encoding": "utf-8",
+                "structure": file_metadata.get("structure", {}),
+                "columns": file_metadata.get("columns", []),
+                "data_types": file_metadata.get("dtypes", {}),
+                "sample_data": file_metadata.get("sample_data", []),
+                "reupload_timestamp": datetime.utcnow().isoformat()
+            }
+            
+            # Basic quality metrics
+            quality_metrics = {
+                "overall_score": 0.85,
+                "completeness": 1.0 if row_count and row_count > 0 else 0.0,
+                "consistency": 0.9,
+                "accuracy": 0.8,
+                "issues": [],
+                "last_analyzed": datetime.utcnow().isoformat(),
+                "reupload_analysis": True
+            }
+            
+            # Column statistics
+            if "column_stats" in file_metadata:
+                column_statistics = file_metadata["column_stats"]
+            elif "dtypes" in file_metadata:
+                column_statistics = {}
+                for col, dtype in file_metadata["dtypes"].items():
+                    column_statistics[col] = {
+                        "data_type": dtype,
+                        "non_null_count": row_count or 0,
+                        "null_count": 0,
+                        "unique_count": "unknown"
+                    }
+            
+            # Preview data structure
+            preview_data = {
+                "headers": file_metadata.get("columns", []),
+                "sample_rows": file_metadata.get("sample_data", [])[:10],
+                "total_rows": row_count or 0,
+                "is_sample": True,
+                "preview_generated_at": datetime.utcnow().isoformat(),
+                "from_reupload": True
+            }
+        
+        # Update dataset with new file information
+        dataset.type = new_dataset_type
+        dataset.size_bytes = file_size
+        dataset.source_url = storage_result['relative_path']
+        dataset.file_path = storage_result['file_path']
+        dataset.row_count = row_count
+        dataset.column_count = column_count
+        dataset.file_metadata = file_metadata
+        dataset.content_preview = content_preview
+        dataset.schema_metadata = schema_metadata
+        dataset.quality_metrics = quality_metrics
+        dataset.column_statistics = column_statistics
+        dataset.preview_data = preview_data
+        dataset.updated_at = datetime.utcnow()
+        
+        # Preserve original metadata if requested
+        if preserve_metadata and not update_sharing_settings:
+            dataset.name = original_metadata.get("name", dataset.name)
+            dataset.description = original_metadata.get("description", dataset.description)
+            dataset.sharing_level = original_metadata.get("sharing_level", dataset.sharing_level)
+            dataset.ai_summary = original_metadata.get("ai_summary", dataset.ai_summary)
+            dataset.ai_insights = original_metadata.get("ai_insights", dataset.ai_insights)
+            dataset.ai_recommendations = original_metadata.get("ai_recommendations", dataset.ai_recommendations)
+        
+        # Reset AI processing status to trigger re-analysis
+        dataset.ai_processing_status = AIProcessingStatus.NOT_PROCESSED
+        
+        db.commit()
+        db.refresh(dataset)
+        
+        # Try to recreate ML models for the new file
+        ml_model_result = None
+        try:
+            # Clean up old models first
+            cleanup_result = mindsdb_service.delete_dataset_models(dataset_id)
+            logger.info(f"Cleaned up old models for reuploaded dataset {dataset_id}: {cleanup_result}")
+            
+            # Create new models
+            ml_model_result = mindsdb_service.create_dataset_ml_model(
+                dataset_id=dataset_id,
+                dataset_name=dataset.name,
+                dataset_type=new_dataset_type.value,
+                dataset_content=content_preview
+            )
+            
+            if ml_model_result.get("success"):
+                logger.info(f"Successfully created new ML models for reuploaded dataset {dataset_id}")
+            else:
+                logger.warning(f"ML model creation failed for reuploaded dataset {dataset_id}: {ml_model_result.get('error')}")
+        
+        except Exception as e:
+            logger.error(f"Error recreating ML models for reuploaded dataset {dataset_id}: {e}")
+            ml_model_result = {
+                "success": False,
+                "error": str(e),
+                "message": "ML model recreation failed but file reupload was successful"
+            }
+        
+        # Log the reupload action
+        data_service = DataSharingService(db)
+        data_service.log_access(
+            user=current_user,
+            dataset=dataset,
+            access_type="file_reupload"
+        )
+        
+        # Prepare response
+        response_data = {
+            "message": "Dataset file reuploaded successfully",
+            "dataset_id": dataset_id,
+            "dataset_name": dataset.name,
+            "file_changes": {
+                "new_file_type": new_dataset_type.value,
+                "new_filename": file.filename,
+                "new_size_bytes": file_size,
+                "new_row_count": row_count,
+                "new_column_count": column_count
+            },
+            "metadata_preserved": preserve_metadata,
+            "ml_models": ml_model_result,
+            "updated_at": dataset.updated_at.isoformat()
+        }
+        
+        # Add AI chat availability info
+        if ml_model_result and ml_model_result.get("success"):
+            response_data["ai_features"] = {
+                "chat_enabled": True,
+                "model_ready": True,
+                "chat_endpoint": f"/api/datasets/{dataset_id}/chat"
+            }
+        else:
+            response_data["ai_features"] = {
+                "chat_enabled": False,
+                "model_ready": False,
+                "error": ml_model_result.get("error") if ml_model_result else "Unknown error"
+            }
+        
+        logger.info(f"✅ Dataset {dataset_id} file reuploaded successfully by user {current_user.id}")
+        
+        return response_data
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to reupload file for dataset {dataset_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to reupload file: {str(e)}"
         )

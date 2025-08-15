@@ -143,10 +143,17 @@ export function SharingLevelSelector({
         <div 
           ref={dropdownRef}
           className={`
-            absolute right-0 z-[9999] w-80 bg-white border border-gray-200 rounded-lg shadow-xl
-            ${dropdownPosition === 'bottom' ? 'mt-2' : 'mb-2 bottom-full'}
+            fixed z-[99999] w-80 bg-white border border-gray-200 rounded-lg shadow-xl
             animate-in fade-in-0 zoom-in-95 duration-200
           `}
+          style={{
+            top: dropdownPosition === 'bottom' 
+              ? (buttonRef.current?.getBoundingClientRect().bottom ?? 0) + 8 
+              : (buttonRef.current?.getBoundingClientRect().top ?? 0) - 320 - 8,
+            left: Math.max(8, (buttonRef.current?.getBoundingClientRect().right ?? 0) - 320),
+            maxHeight: '400px',
+            overflowY: 'auto'
+          }}
           role="listbox"
         >
           <div className="py-2">

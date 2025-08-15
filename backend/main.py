@@ -2,8 +2,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import auth, organizations, datasets, models, mindsdb, admin, analytics, data_access, data_sharing, file_handler, data_connectors, llm_configurations, environment, proxy_connectors, gateway
 from app.core.config import settings
+from app.core.config_validator import validate_and_exit_on_failure
 import logging
 from datetime import datetime
+
+# Validate configuration before proceeding
+validate_and_exit_on_failure()
 
 # Enhanced API metadata and documentation
 description = """
@@ -271,6 +275,7 @@ app.include_router(data_access.router, prefix="/api/data-access", tags=["data-ac
 app.include_router(data_sharing.router, prefix="/api/data-sharing", tags=["data-sharing"])
 app.include_router(file_handler.router, prefix="/api/files", tags=["file-handler"])
 app.include_router(data_connectors.router, prefix="/api/connectors", tags=["data-connectors"])
+app.include_router(data_connectors.router, prefix="/api/data-connectors", tags=["data-connectors"])  # Alternative endpoint
 app.include_router(environment.router, prefix="/api/admin/environment", tags=["admin"])
 app.include_router(llm_configurations.router, prefix="/api/llm-configs", tags=["llm-configurations"])
 app.include_router(proxy_connectors.router, prefix="/api/proxy", tags=["proxy-connectors"])

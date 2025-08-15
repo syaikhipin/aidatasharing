@@ -2,6 +2,7 @@
 """
 Database Migration Manager
 Handles database schema changes and migrations in a systematic way.
+Integrates with the consolidated migration system.
 """
 
 import os
@@ -10,21 +11,27 @@ import logging
 from datetime import datetime
 from typing import List, Dict, Any
 from pathlib import Path
+import importlib.util
 
 logger = logging.getLogger(__name__)
 
 class MigrationManager:
-    """Manages database migrations"""
+    """Manages database migrations with consolidated migration support"""
     
     def __init__(self, db_path: str = None):
         if db_path is None:
-            # Extract from DATABASE_URL environment variable
-            from app.core.config import settings
-            db_path = settings.DATABASE_URL.replace('sqlite:///', '')
+            # Extract from DATABASE_URL environment variable or use default
+            try:
+                from app.core.config import settings
+                db_path = settings.DATABASE_URL.replace('sqlite:///', '')
+            except (ImportError, AttributeError):
+                # Fallback to default path
+                db_path = str(Path("../storage/aishare_platform.db").resolve())
         
         self.db_path = db_path
         self.migrations_dir = Path(__file__).parent / "versions"
         self.migrations_dir.mkdir(exist_ok=True)
+        self.consolidated_migration_path = Path(__file__).parent / "consolidated_migration.py"
         
     def _ensure_migrations_table(self, cursor):
         """Ensure the migrations tracking table exists"""
@@ -34,7 +41,8 @@ class MigrationManager:
                 version VARCHAR(255) UNIQUE NOT NULL,
                 description TEXT,
                 applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                checksum VARCHAR(255)
+                checksum VARCHAR(255),
+                migration_type VARCHAR(50) DEFAULT 'individual'
             )
         """)
     
@@ -42,6 +50,13 @@ class MigrationManager:
         """Get list of already applied migrations"""
         cursor.execute("SELECT version FROM schema_migrations ORDER BY version")
         return [row[0] for row in cursor.fetchall()]
+    
+    def _check_consolidated_migration_applied(self, cursor) -> bool:
+        """Check if consolidated migration has been applied"""
+        cursor.execute(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 'consolidated_v1' AND migration_type = 'consolidated'"
+        )
+        return cursor.fetchone()[0] > 0
     
     def _get_pending_migrations(self) -> List[Dict[str, Any]]:
         """Get list of pending migrations"""
@@ -75,6 +90,61 @@ class MigrationManager:
         except Exception:
             return "No description"
     
+    def _run_consolidated_migration(self, cursor) -> bool:
+        """Run the consolidated migration"""
+        try:
+            logger.info("Running consolidated migration...")
+            
+            # Import the consolidated migration module
+            spec = importlib.util.spec_from_file_location(
+                "consolidated_migration", 
+                self.consolidated_migration_path
+            )
+            consolidated_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(consolidated_module)
+            
+            # Create an instance and run the migration
+            migration_instance = consolidated_module.ConsolidatedMigration(
+                database_url=f"sqlite:///{self.db_path}"
+            )
+            
+            # Execute the migration (but we need to handle this differently since it creates its own connection)
+            # We'll use the existing cursor instead
+            migration_instance.database_path = Path(self.db_path)
+            
+            # Call individual table creation methods
+            migration_instance._create_users_table(cursor)
+            migration_instance._create_organizations_table(cursor)
+            migration_instance._create_datasets_table(cursor)
+            migration_instance._create_models_table(cursor)
+            migration_instance._create_file_uploads_table(cursor)
+            migration_instance._create_data_connectors_table(cursor)
+            migration_instance._create_proxy_connectors_table(cursor)
+            migration_instance._create_shared_proxy_links_table(cursor)
+            migration_instance._create_shared_datasets_table(cursor)
+            migration_instance._create_chat_sessions_table(cursor)
+            migration_instance._create_chat_messages_table(cursor)
+            migration_instance._create_access_requests_table(cursor)
+            migration_instance._create_notifications_table(cursor)
+            migration_instance._create_audit_logs_table(cursor)
+            migration_instance._create_analytics_table(cursor)
+            migration_instance._create_admin_config_table(cursor)
+            migration_instance._create_indexes(cursor)
+            migration_instance._insert_initial_data(cursor)
+            
+            # Record the consolidated migration as applied
+            cursor.execute(
+                "INSERT INTO schema_migrations (version, description, migration_type) VALUES (?, ?, ?)",
+                ("consolidated_v1", "Consolidated database migration - all tables and initial data", "consolidated")
+            )
+            
+            logger.info("Consolidated migration completed successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Consolidated migration failed: {e}")
+            return False
+    
     def _execute_migration(self, cursor, migration_info: Dict[str, Any]):
         """Execute a single migration"""
         version = migration_info["version"]
@@ -82,21 +152,28 @@ class MigrationManager:
         
         logger.info(f"Applying migration {version}...")
         
-        # Import and execute the migration
-        spec = __import__(f"migrations.versions.{version}", fromlist=["upgrade"])
-        
-        if hasattr(spec, 'upgrade'):
-            spec.upgrade(cursor)
-        else:
-            logger.warning(f"Migration {version} has no upgrade function")
-        
-        # Record the migration as applied
-        cursor.execute(
-            "INSERT INTO schema_migrations (version, description) VALUES (?, ?)",
-            (version, migration_info["description"])
-        )
-        
-        logger.info(f"Migration {version} applied successfully")
+        try:
+            # Import and execute the migration
+            spec = importlib.util.spec_from_file_location(version, file_path)
+            migration_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(migration_module)
+            
+            if hasattr(migration_module, 'upgrade'):
+                migration_module.upgrade(cursor)
+            else:
+                logger.warning(f"Migration {version} has no upgrade function")
+            
+            # Record the migration as applied
+            cursor.execute(
+                "INSERT INTO schema_migrations (version, description, migration_type) VALUES (?, ?, ?)",
+                (version, migration_info["description"], "individual")
+            )
+            
+            logger.info(f"Migration {version} applied successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to apply migration {version}: {e}")
+            raise
     
     def migrate(self) -> Dict[str, Any]:
         """Run all pending migrations"""
@@ -104,8 +181,31 @@ class MigrationManager:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
+            # Enable foreign key constraints
+            cursor.execute("PRAGMA foreign_keys = ON")
+            
             # Ensure migrations table exists
             self._ensure_migrations_table(cursor)
+            
+            # Check if database is empty (no tables except migrations table)
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name != 'schema_migrations'")
+            existing_tables = cursor.fetchall()
+            
+            executed = []
+            
+            # If database is empty or has very few tables, run consolidated migration
+            if len(existing_tables) < 5 and not self._check_consolidated_migration_applied(cursor):
+                logger.info("Database appears to be new or incomplete. Running consolidated migration...")
+                if self._run_consolidated_migration(cursor):
+                    executed.append("consolidated_v1")
+                else:
+                    conn.rollback()
+                    conn.close()
+                    return {
+                        "status": "error",
+                        "message": "Consolidated migration failed",
+                        "executed": []
+                    }
             
             # Get applied and pending migrations
             applied = self._get_applied_migrations(cursor)
@@ -115,14 +215,17 @@ class MigrationManager:
             pending = [m for m in all_migrations if m["version"] not in applied]
             
             if not pending:
-                logger.info("No pending migrations")
+                if not executed:
+                    logger.info("No pending migrations")
+                conn.commit()
+                conn.close()
                 return {
                     "status": "success",
-                    "message": "No pending migrations",
-                    "executed": []
+                    "message": "No pending migrations" if not executed else f"Applied {len(executed)} migrations",
+                    "executed": executed
                 }
             
-            executed = []
+            # Apply pending individual migrations
             for migration in pending:
                 try:
                     self._execute_migration(cursor, migration)
@@ -130,6 +233,7 @@ class MigrationManager:
                 except Exception as e:
                     logger.error(f"Failed to apply migration {migration['version']}: {e}")
                     conn.rollback()
+                    conn.close()
                     return {
                         "status": "error",
                         "message": f"Migration {migration['version']} failed: {e}",
@@ -147,6 +251,12 @@ class MigrationManager:
             
         except Exception as e:
             logger.error(f"Migration failed: {e}")
+            if 'conn' in locals():
+                try:
+                    conn.rollback()
+                    conn.close()
+                except:
+                    pass
             return {
                 "status": "error",
                 "message": str(e),
@@ -173,11 +283,19 @@ logger = logging.getLogger(__name__)
 def upgrade(cursor):
     """Apply the migration"""
     # Add your migration code here
+    # Example:
+    # cursor.execute("""
+    #     ALTER TABLE some_table ADD COLUMN new_column VARCHAR(255)
+    # """)
     pass
 
 def downgrade(cursor):
     """Rollback the migration (optional)"""
     # Add rollback code here if needed
+    # Example:
+    # cursor.execute("""
+    #     ALTER TABLE some_table DROP COLUMN new_column
+    # """)
     pass
 '''
         
@@ -194,32 +312,107 @@ def downgrade(cursor):
             cursor = conn.cursor()
             
             self._ensure_migrations_table(cursor)
-            applied = self._get_applied_migrations(cursor)
+            
+            # Get applied migrations with details
+            cursor.execute("""
+                SELECT version, description, migration_type, applied_at 
+                FROM schema_migrations 
+                ORDER BY applied_at
+            """)
+            applied_details = cursor.fetchall()
+            
             all_migrations = self._get_pending_migrations()
-            pending = [m for m in all_migrations if m["version"] not in applied]
+            applied_versions = [row[0] for row in applied_details]
+            pending = [m for m in all_migrations if m["version"] not in applied_versions]
+            
+            # Check if consolidated migration was applied
+            consolidated_applied = self._check_consolidated_migration_applied(cursor)
             
             conn.close()
             
             return {
-                "applied_count": len(applied),
+                "consolidated_applied": consolidated_applied,
+                "applied_count": len(applied_details),
                 "pending_count": len(pending),
-                "applied": applied,
-                "pending": [m["version"] for m in pending]
+                "applied": [
+                    {
+                        "version": row[0],
+                        "description": row[1],
+                        "type": row[2],
+                        "applied_at": row[3]
+                    } for row in applied_details
+                ],
+                "pending": [
+                    {
+                        "version": m["version"],
+                        "description": m["description"]
+                    } for m in pending
+                ]
             }
             
         except Exception as e:
             return {
                 "error": str(e)
             }
+    
+    def reset_database(self) -> Dict[str, Any]:
+        """Reset database by dropping all tables and re-running consolidated migration"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Get all table names
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = cursor.fetchall()
+            
+            # Drop all tables
+            for table in tables:
+                cursor.execute(f"DROP TABLE IF EXISTS {table[0]}")
+            
+            # Re-run consolidated migration
+            self._ensure_migrations_table(cursor)
+            if self._run_consolidated_migration(cursor):
+                conn.commit()
+                conn.close()
+                return {
+                    "status": "success",
+                    "message": "Database reset and consolidated migration applied successfully"
+                }
+            else:
+                conn.rollback()
+                conn.close()
+                return {
+                    "status": "error",
+                    "message": "Failed to apply consolidated migration after reset"
+                }
+                
+        except Exception as e:
+            logger.error(f"Database reset failed: {e}")
+            if 'conn' in locals():
+                try:
+                    conn.rollback()
+                    conn.close()
+                except:
+                    pass
+            return {
+                "status": "error",
+                "message": str(e)
+            }
 
 if __name__ == "__main__":
     # CLI interface for migrations
     import sys
     
+    # Set up logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
     manager = MigrationManager()
     
     if len(sys.argv) < 2:
-        print("Usage: python migration_manager.py [migrate|status|create <name>]")
+        print("Usage: python migration_manager.py [migrate|status|create <name>|reset]")
         sys.exit(1)
     
     command = sys.argv[1]
@@ -235,6 +428,9 @@ if __name__ == "__main__":
         description = sys.argv[3] if len(sys.argv) > 3 else ""
         file_path = manager.create_migration(name, description)
         print(f"Created migration: {file_path}")
+    elif command == "reset":
+        result = manager.reset_database()
+        print(f"Reset result: {result}")
     else:
-        print("Invalid command")
+        print("Invalid command. Available commands: migrate, status, create <name>, reset")
         sys.exit(1)

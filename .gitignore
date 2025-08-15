@@ -112,3 +112,5 @@ htmlcov/
 !*.key.example 
 
 node_modules/
+
+forge.yaml

@@ -1,0 +1,21 @@
+product_id,product_name,category,price,units_sold,revenue,quarter,year,region
+P001,Laptop Pro 15,Electronics,1299.99,150,194998.50,Q1,2024,North America
+P002,Wireless Headphones,Electronics,199.99,380,75996.20,Q1,2024,North America
+P003,Smart Watch,Electronics,399.99,220,87997.80,Q1,2024,Europe
+P004,Tablet Ultra,Electronics,699.99,95,66499.05,Q1,2024,Asia
+P005,Gaming Keyboard,Electronics,129.99,310,40297.90,Q1,2024,North America
+P006,4K Monitor,Electronics,449.99,85,38249.15,Q1,2024,Europe
+P007,Wireless Mouse,Electronics,79.99,420,33595.80,Q1,2024,Global
+P008,Webcam HD,Electronics,89.99,180,16198.20,Q1,2024,North America
+P009,USB-C Hub,Electronics,59.99,250,14997.50,Q1,2024,Asia
+P010,External SSD,Electronics,149.99,140,20998.60,Q1,2024,Europe
+P011,Smartphone Case,Electronics,29.99,890,26691.10,Q1,2024,Global
+P012,Charging Cable,Electronics,19.99,1200,23988.00,Q1,2024,Global
+P013,Bluetooth Speaker,Electronics,179.99,160,28798.40,Q1,2024,North America
+P014,Power Bank,Electronics,49.99,340,16996.60,Q1,2024,Asia
+P015,VR Headset,Electronics,599.99,45,26999.55,Q1,2024,North America
+P016,Drone Camera,Electronics,899.99,30,26999.70,Q1,2024,Europe
+P017,Smart Light Bulb,Home,39.99,520,20794.80,Q1,2024,Global
+P018,Security Camera,Home,199.99,75,14999.25,Q1,2024,North America
+P019,Smart Thermostat,Home,249.99,60,14999.40,Q1,2024,North America
+P020,Robot Vacuum,Home,399.99,35,13999.65,Q1,2024,Europe

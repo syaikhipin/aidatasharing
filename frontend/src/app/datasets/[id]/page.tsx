@@ -6,6 +6,7 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { datasetsAPI, dataSharingAPI, organizationsAPI } from '@/lib/api';
+import { createApiClient } from '../../../../unified-api-client';
 import Link from 'next/link';
 import { 
   Download, 
@@ -23,7 +24,11 @@ import {
   Calendar,
   Users,
   Database,
-  UserCheck
+  UserCheck,
+  Upload,
+  Edit,
+  FileText,
+  Sparkles
 } from 'lucide-react';
 
 function formatFileSize(bytes: number): string {
@@ -50,9 +55,17 @@ function DatasetDetailContent() {
   const router = useRouter();
   const datasetId = parseInt(params.id as string);
   
+  // Initialize unified API client
+  const unifiedClient = createApiClient({
+    baseUrl: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
+    getAuthToken: () => localStorage.getItem('access_token')
+  });
+  
   const [dataset, setDataset] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [enhancedPreview, setEnhancedPreview] = useState<any>(null);
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [chatMessage, setChatMessage] = useState('');
   const [chatResponse, setChatResponse] = useState<any>(null);
   const [isChatting, setIsChatting] = useState(false);
@@ -77,9 +90,31 @@ function DatasetDetailContent() {
   const [isTransferring, setIsTransferring] = useState(false);
   const [orgUsers, setOrgUsers] = useState<any[]>([]);
 
+  // Edit and Metadata state
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showMetadataModal, setShowMetadataModal] = useState(false);
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [showReuploadModal, setShowReuploadModal] = useState(false);
+  const [editForm, setEditForm] = useState({
+    name: '',
+    description: '',
+    content: ''
+  });
+  const [renameForm, setRenameForm] = useState({
+    name: '',
+    description: ''
+  });
+  const [reuploadFile, setReuploadFile] = useState<File | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [isReuploading, setIsReuploading] = useState(false);
+  const [detailedMetadata, setDetailedMetadata] = useState<any>(null);
+  const [isLoadingMetadata, setIsLoadingMetadata] = useState(false);
+
   useEffect(() => {
     fetchDataset();
     fetchSharedLinks();
+    fetchEnhancedPreview();
   }, [datasetId]);
 
   const fetchDataset = async () => {
@@ -106,6 +141,73 @@ function DatasetDetailContent() {
       console.error('Failed to fetch shared links:', error);
     } finally {
       setIsLoadingShares(false);
+    }
+  };
+
+  const fetchEnhancedPreview = async () => {
+    try {
+      setIsLoadingPreview(true);
+      const response = await datasetsAPI.getDatasetPreview(datasetId);
+      
+      // The backend returns the response structure with preview data nested inside
+      console.log('Preview API response:', response);
+      
+      // Extract the actual preview data from the response
+      let previewData = response.preview || response;
+      
+      // Enhanced fallback handling for different preview types
+      if (previewData && dataset) {
+        // If type is unknown or basic, try to infer type from dataset info
+        if (!previewData.type || previewData.type === 'unknown' || previewData.type === 'basic') {
+          const fileType = dataset.type?.toLowerCase();
+          
+          if (fileType === 'csv' && previewData.headers) {
+            previewData = {
+              ...previewData,
+              type: 'tabular',
+              format: 'csv'
+            };
+          } else if (fileType === 'json') {
+            previewData = {
+              ...previewData,
+              type: 'json',
+              format: 'json'
+            };
+          } else if (fileType === 'xlsx' || fileType === 'xls') {
+            previewData = {
+              ...previewData,
+              type: 'excel',
+              format: fileType
+            };
+          }
+        }
+        
+        // Add file size if not present
+        if (!previewData.file_size_bytes && dataset.size_bytes) {
+          previewData.file_size_bytes = dataset.size_bytes;
+        }
+        
+        // Add row/column counts if available from dataset
+        if (!previewData.estimated_total_rows && dataset.row_count) {
+          previewData.estimated_total_rows = dataset.row_count;
+        }
+        
+        if (!previewData.total_columns && dataset.column_count) {
+          previewData.total_columns = dataset.column_count;
+        }
+      }
+      
+      setEnhancedPreview(previewData);
+    } catch (error) {
+      console.error('Failed to fetch enhanced preview:', error);
+      // Set a fallback preview structure
+      setEnhancedPreview({
+        type: 'error',
+        message: 'Preview could not be loaded',
+        error: error.response?.data?.detail || error.message
+      });
+    } finally {
+      setIsLoadingPreview(false);
     }
   };
 
@@ -227,6 +329,198 @@ function DatasetDetailContent() {
     setShowTransferModal(true);
   };
 
+  const handleEditDataset = async () => {
+    if (!editForm.name.trim()) {
+      alert('Dataset name is required');
+      return;
+    }
+
+    try {
+      setIsEditing(true);
+      await datasetsAPI.editDataset(datasetId, {
+        name: editForm.name,
+        description: editForm.description,
+        content: editForm.content
+      });
+      
+      setShowEditModal(false);
+      await fetchDataset(); // Refresh dataset data
+      
+    } catch (error: any) {
+      console.error('Failed to edit dataset:', error);
+      alert(error.response?.data?.detail || 'Failed to edit dataset');
+    } finally {
+      setIsEditing(false);
+    }
+  };
+
+  const openEditModal = () => {
+    setEditForm({
+      name: dataset?.name || '',
+      description: dataset?.description || '',
+      content: dataset?.content_preview || ''
+    });
+    setShowEditModal(true);
+  };
+
+  const fetchDetailedMetadata = async () => {
+    try {
+      setIsLoadingMetadata(true);
+      const metadata = await datasetsAPI.getDatasetMetadata(datasetId);
+      setDetailedMetadata(metadata);
+    } catch (error: any) {
+      console.error('Failed to fetch metadata:', error);
+      alert(error.response?.data?.detail || 'Failed to fetch metadata');
+    } finally {
+      setIsLoadingMetadata(false);
+    }
+  };
+
+  const openMetadataModal = () => {
+    setShowMetadataModal(true);
+    if (!detailedMetadata) {
+      fetchDetailedMetadata();
+    }
+  };
+
+  const handleRenameDataset = async () => {
+    if (!renameForm.name.trim()) {
+      alert('Dataset name is required');
+      return;
+    }
+
+    try {
+      setIsRenaming(true);
+      await datasetsAPI.updateDataset(datasetId, {
+        name: renameForm.name,
+        description: renameForm.description
+      });
+      
+      setShowRenameModal(false);
+      await fetchDataset(); // Refresh dataset data
+      
+    } catch (error: any) {
+      console.error('Failed to rename dataset:', error);
+      alert(error.response?.data?.detail || 'Failed to rename dataset');
+    } finally {
+      setIsRenaming(false);
+    }
+  };
+
+  const openRenameModal = () => {
+    setRenameForm({
+      name: dataset?.name || '',
+      description: dataset?.description || ''
+    });
+    setShowRenameModal(true);
+  };
+
+  const handleDownload = async (format = 'original') => {
+    try {
+      setIsLoading(true);
+      
+      const token = localStorage.getItem('access_token');
+      if (!token) {
+        alert('Authentication required. Please log in again.');
+        return;
+      }
+      
+      // Try direct file download first
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/datasets/${datasetId}/download`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ format })
+      });
+      
+      if (response.ok) {
+        const contentType = response.headers.get('Content-Type');
+        
+        // Check if response is a direct file download
+        if (contentType && !contentType.includes('application/json')) {
+          const blob = await response.blob();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.style.display = 'none';
+          a.href = url;
+          a.download = `${dataset?.name || 'dataset'}.${format === 'original' ? dataset?.type || 'csv' : format}`;
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(a);
+          return;
+        }
+        
+        // Handle JSON response with download info
+        const downloadInfo = await response.json();
+        if (downloadInfo.download_url) {
+          window.open(downloadInfo.download_url, '_blank');
+        } else if (downloadInfo.download_token) {
+          alert('Download initiated. Please wait...');
+        } else {
+          throw new Error('Invalid download response');
+        }
+      } else if (response.status === 405) {
+        // Method not allowed - try GET instead
+        const getResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/datasets/${datasetId}/download?format=${format}`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        
+        if (getResponse.ok) {
+          const blob = await getResponse.blob();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.style.display = 'none';
+          a.href = url;
+          a.download = `${dataset?.name || 'dataset'}.${format === 'original' ? dataset?.type || 'csv' : format}`;
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(a);
+        } else {
+          throw new Error(`Download failed with status ${getResponse.status}`);
+        }
+      } else {
+        throw new Error(`Download failed with status ${response.status}`);
+      }
+    } catch (error: any) {
+      console.error('Failed to download dataset:', error);
+      alert(error.message || 'Failed to download dataset');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleReuploadDataset = async () => {
+    if (!reuploadFile) {
+      alert('Please select a file to upload');
+      return;
+    }
+
+    try {
+      setIsReuploading(true);
+      await datasetsAPI.reuploadDataset(datasetId, reuploadFile, {
+        name: dataset?.name || '',
+        description: dataset?.description || ''
+      });
+      
+      setShowReuploadModal(false);
+      setReuploadFile(null);
+      await Promise.all([fetchDataset(), fetchEnhancedPreview()]);
+      
+    } catch (error: any) {
+      console.error('Failed to reupload dataset:', error);
+      alert(error.response?.data?.detail || 'Failed to reupload dataset');
+    } finally {
+      setIsReuploading(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -308,10 +602,55 @@ function DatasetDetailContent() {
               </p>
             </div>
             <div className="flex space-x-3">
-              <button className="flex items-center bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium">
-                <Download className="w-4 h-4 mr-2" />
-                Download
-              </button>
+              <div className="relative group">
+                <button 
+                  onClick={() => handleDownload('original')}
+                  className="flex items-center bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  Download
+                </button>
+                <div className="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-10 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
+                  <div className="py-1">
+                    <button
+                      onClick={() => handleDownload('original')}
+                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      📄 Original Format ({dataset?.type?.toUpperCase()})
+                    </button>
+                    <button
+                      onClick={() => handleDownload('csv')}
+                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      📊 CSV Format
+                    </button>
+                    <button
+                      onClick={() => handleDownload('json')}
+                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      📋 JSON Format
+                    </button>
+                  </div>
+                </div>
+              </div>
+              {isOwner && (
+                <>
+                  <button
+                    onClick={openRenameModal}
+                    className="flex items-center bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+                  >
+                    <Edit className="w-4 h-4 mr-2" />
+                    Rename
+                  </button>
+                  <button
+                    onClick={() => setShowReuploadModal(true)}
+                    className="flex items-center bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+                  >
+                    <Upload className="w-4 h-4 mr-2" />
+                    Reupload
+                  </button>
+                </>
+              )}
               <Link
                 href={`/datasets/${datasetId}/chat`}
                 className="flex items-center bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm font-medium"
@@ -322,7 +661,7 @@ function DatasetDetailContent() {
               {isOwner && (
                 <button 
                   onClick={() => setShowCreateShareModal(true)}
-                  className="flex items-center bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+                  className="flex items-center bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-md text-sm font-medium"
                 >
                   <Share2 className="w-4 h-4 mr-2" />
                   Share
@@ -335,6 +674,418 @@ function DatasetDetailContent() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Main Content */}
           <div className="lg:col-span-2 space-y-8">
+            {/* Enhanced Preview Section */}
+            <div className="bg-white shadow rounded-lg p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium text-gray-900">Dataset Preview</h3>
+                {isLoadingPreview && (
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                )}
+              </div>
+              
+              {enhancedPreview ? (
+                <div className="space-y-6">
+                  {/* Error State */}
+                  {enhancedPreview.type === 'error' && (
+                    <div className="bg-red-50 border border-red-200 rounded-md p-4">
+                      <div className="flex">
+                        <div className="flex-shrink-0">
+                          <svg className="h-5 w-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.268 18.5c-.77.833.192 2.5 1.732 2.5z" />
+                          </svg>
+                        </div>
+                        <div className="ml-3">
+                          <h3 className="text-sm font-medium text-red-800">Preview Error</h3>
+                          <div className="mt-2 text-sm text-red-700">
+                            <p>{enhancedPreview.message || 'Failed to load preview'}</p>
+                            {enhancedPreview.error && (
+                              <p className="mt-1 text-xs">{enhancedPreview.error}</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* CSV/Tabular Preview */}
+                  {(enhancedPreview.type === 'tabular' || (enhancedPreview.headers && dataset?.type === 'csv')) && (
+                    <div>
+                      <h4 className="text-md font-medium text-gray-900 mb-3 flex items-center">
+                        <FileText className="w-4 h-4 mr-2 text-blue-600" />
+                        Data Preview ({enhancedPreview.total_rows_in_preview || enhancedPreview.total_rows || dataset?.row_count || 'Unknown'} rows)
+                      </h4>
+                      
+                      {enhancedPreview.headers && (
+                        <div className="bg-gray-50 rounded-md border overflow-hidden">
+                          <div className="overflow-x-auto max-h-64">
+                            <table className="w-full text-xs">
+                              <thead className="bg-gray-100">
+                                <tr>
+                                  {enhancedPreview.headers.map((header: string) => (
+                                    <th key={header} className="px-3 py-2 text-left font-medium text-gray-900 border-b">
+                                      {header}
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {enhancedPreview.rows && enhancedPreview.rows.length > 0 ? (
+                                  enhancedPreview.rows.slice(0, 10).map((row: any, index: number) => (
+                                    <tr key={index} className="border-b border-gray-200 hover:bg-gray-50">
+                                      {enhancedPreview.headers.map((header: string) => (
+                                        <td key={header} className="px-3 py-2 text-gray-700 truncate max-w-32">
+                                          {String(row[header] || '')}
+                                        </td>
+                                      ))}
+                                    </tr>
+                                  ))
+                                ) : (
+                                  <tr>
+                                    <td colSpan={enhancedPreview.headers.length} className="px-3 py-4 text-center text-gray-500">
+                                      <div className="flex flex-col items-center">
+                                        <FileText className="w-8 h-8 text-gray-400 mb-2" />
+                                        <p>Sample data not available</p>
+                                        <p className="text-xs mt-1">Headers detected: {enhancedPreview.headers.length} columns</p>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Column Types */}
+                      {enhancedPreview.column_types && (
+                        <div className="mt-3">
+                          <h5 className="text-sm font-medium text-gray-900 mb-2">Column Types</h5>
+                          <div className="flex flex-wrap gap-2">
+                            {Object.entries(enhancedPreview.column_types).map(([col, type]: [string, any]) => (
+                              <span key={col} className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                {col}: {type}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Display available metadata if no sample data */}
+                      {(!enhancedPreview.rows || enhancedPreview.rows.length === 0) && dataset && (
+                        <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-md">
+                          <h5 className="text-sm font-medium text-blue-800 mb-2">Dataset Information</h5>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                            {dataset.row_count && (
+                              <div>
+                                <span className="font-medium text-blue-700">Rows:</span>
+                                <p className="text-blue-900">{dataset.row_count.toLocaleString()}</p>
+                              </div>
+                            )}
+                            {dataset.column_count && (
+                              <div>
+                                <span className="font-medium text-blue-700">Columns:</span>
+                                <p className="text-blue-900">{dataset.column_count}</p>
+                              </div>
+                            )}
+                            {dataset.size_bytes && (
+                              <div>
+                                <span className="font-medium text-blue-700">Size:</span>
+                                <p className="text-blue-900">{formatFileSize(dataset.size_bytes)}</p>
+                              </div>
+                            )}
+                            {dataset.type && (
+                              <div>
+                                <span className="font-medium text-blue-700">Format:</span>
+                                <p className="text-blue-900">{dataset.type.toUpperCase()}</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* JSON Preview */}
+                  {(enhancedPreview.type === 'json' || dataset?.type === 'json') && (
+                    <div>
+                      <h4 className="text-md font-medium text-gray-900 mb-3 flex items-center">
+                        <FileText className="w-4 h-4 mr-2 text-green-600" />
+                        JSON Data Preview
+                      </h4>
+                      
+                      {enhancedPreview.items && enhancedPreview.items.length > 0 && (
+                        <div className="bg-gray-50 rounded-md p-4 max-h-64 overflow-y-auto">
+                          <pre className="whitespace-pre-wrap text-sm text-gray-700 font-mono">
+                            {JSON.stringify(enhancedPreview.items.slice(0, 3), null, 2)}
+                          </pre>
+                          {enhancedPreview.items.length > 3 && (
+                            <p className="text-xs text-gray-500 mt-2">
+                              ... and {enhancedPreview.items.length - 3} more items
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {enhancedPreview.content && (
+                        <div className="bg-gray-50 rounded-md p-4 max-h-64 overflow-y-auto">
+                          <pre className="whitespace-pre-wrap text-sm text-gray-700 font-mono">
+                            {JSON.stringify(enhancedPreview.content, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                      
+                      {/* Fallback: try to show dataset content_preview if available */}
+                      {(!enhancedPreview.items || enhancedPreview.items.length === 0) && 
+                       !enhancedPreview.content && 
+                       dataset?.content_preview && (
+                        <div className="bg-gray-50 rounded-md p-4 max-h-64 overflow-y-auto">
+                          <h5 className="text-sm font-medium text-gray-700 mb-2">Content Preview</h5>
+                          <pre className="whitespace-pre-wrap text-sm text-gray-700 font-mono">
+                            {dataset.content_preview}
+                          </pre>
+                        </div>
+                      )}
+                      
+                      {/* Show structure info if no content available */}
+                      {(!enhancedPreview.items || enhancedPreview.items.length === 0) && 
+                       !enhancedPreview.content && 
+                       !dataset?.content_preview && (
+                        <div className="bg-gray-50 rounded-md p-4 text-center">
+                          <FileText className="w-8 h-8 text-gray-400 mb-2 mx-auto" />
+                          <p className="text-gray-600">JSON content preview not available</p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            File size: {dataset?.size_bytes ? formatFileSize(dataset.size_bytes) : 'Unknown'}
+                          </p>
+                        </div>
+                      )}
+
+                      {enhancedPreview.common_fields && enhancedPreview.common_fields.length > 0 && (
+                        <div className="mt-3">
+                          <h5 className="text-sm font-medium text-gray-900 mb-2">Common Fields</h5>
+                          <div className="flex flex-wrap gap-2">
+                            {enhancedPreview.common_fields.map((field: string) => (
+                              <span key={field} className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                {field}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Show basic file info for JSON */}
+                      {dataset?.type === 'json' && (
+                        <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-md">
+                          <h5 className="text-sm font-medium text-green-800 mb-2">JSON File Information</h5>
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                            {dataset.size_bytes && (
+                              <div>
+                                <span className="font-medium text-green-700">Size:</span>
+                                <p className="text-green-900">{formatFileSize(dataset.size_bytes)}</p>
+                              </div>
+                            )}
+                            <div>
+                              <span className="font-medium text-green-700">Format:</span>
+                              <p className="text-green-900">JSON</p>
+                            </div>
+                            {dataset.created_at && (
+                              <div>
+                                <span className="font-medium text-green-700">Created:</span>
+                                <p className="text-green-900">{new Date(dataset.created_at).toLocaleDateString()}</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Excel Preview */}
+                  {enhancedPreview.type === 'excel' && enhancedPreview.sheets && (
+                    <div>
+                      <h4 className="text-md font-medium text-gray-900 mb-3 flex items-center">
+                        <FileText className="w-4 h-4 mr-2 text-orange-600" />
+                        Excel Preview ({enhancedPreview.sheet_count} sheets)
+                      </h4>
+                      
+                      {Object.entries(enhancedPreview.sheets).map(([sheetName, sheetData]: [string, any]) => (
+                        <div key={sheetName} className="mb-4">
+                          <h5 className="text-sm font-medium text-gray-900 mb-2">Sheet: {sheetName}</h5>
+                          <div className="bg-gray-50 rounded-md border overflow-hidden">
+                            <div className="overflow-x-auto max-h-48">
+                              <table className="w-full text-xs">
+                                <thead className="bg-gray-100">
+                                  <tr>
+                                    {sheetData.headers && sheetData.headers.map((header: string) => (
+                                      <th key={header} className="px-3 py-2 text-left font-medium text-gray-900 border-b">
+                                        {header}
+                                      </th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {sheetData.rows && sheetData.rows.slice(0, 5).map((row: any, index: number) => (
+                                    <tr key={index} className="border-b border-gray-200 hover:bg-gray-50">
+                                      {sheetData.headers && sheetData.headers.map((header: string) => (
+                                        <td key={header} className="px-3 py-2 text-gray-700 truncate max-w-32">
+                                          {String(row[header] || '')}
+                                        </td>
+                                      ))}
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* PDF Preview */}
+                  {enhancedPreview.type === 'pdf' && (
+                    <div>
+                      <h4 className="text-md font-medium text-gray-900 mb-3 flex items-center">
+                        <FileText className="w-4 h-4 mr-2 text-red-600" />
+                        PDF Preview ({enhancedPreview.page_count} pages)
+                      </h4>
+                      
+                      {enhancedPreview.pages && enhancedPreview.pages.length > 0 && (
+                        <div className="space-y-3">
+                          {enhancedPreview.pages.map((page: any, index: number) => (
+                            <div key={index} className="bg-gray-50 rounded-md p-4">
+                              <h5 className="text-sm font-medium text-gray-900 mb-2">
+                                Page {page.page_number}
+                              </h5>
+                              <div className="text-sm text-gray-700 max-h-32 overflow-y-auto">
+                                <pre className="whitespace-pre-wrap font-mono">
+                                  {page.text_content || 'No extractable text found'}
+                                </pre>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      
+                      {enhancedPreview.error && (
+                        <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
+                          <p className="text-sm text-yellow-800">{enhancedPreview.error}</p>
+                          {enhancedPreview.note && (
+                            <p className="text-xs text-yellow-700 mt-1">{enhancedPreview.note}</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Basic Statistics */}
+                  {enhancedPreview.basic_stats && (
+                    <div>
+                      <h4 className="text-md font-medium text-gray-900 mb-3">Statistics</h4>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="bg-blue-50 rounded-md p-3">
+                          <span className="text-sm font-medium text-blue-700">Rows</span>
+                          <p className="text-sm text-blue-900 mt-1">{enhancedPreview.basic_stats.row_count?.toLocaleString()}</p>
+                        </div>
+                        <div className="bg-blue-50 rounded-md p-3">
+                          <span className="text-sm font-medium text-blue-700">Columns</span>
+                          <p className="text-sm text-blue-900 mt-1">{enhancedPreview.basic_stats.column_count}</p>
+                        </div>
+                        {enhancedPreview.basic_stats.numeric_columns?.length > 0 && (
+                          <div className="bg-blue-50 rounded-md p-3">
+                            <span className="text-sm font-medium text-blue-700">Numeric Cols</span>
+                            <p className="text-sm text-blue-900 mt-1">{enhancedPreview.basic_stats.numeric_columns.length}</p>
+                          </div>
+                        )}
+                        {enhancedPreview.basic_stats.text_columns?.length > 0 && (
+                          <div className="bg-blue-50 rounded-md p-3">
+                            <span className="text-sm font-medium text-blue-700">Text Cols</span>
+                            <p className="text-sm text-blue-900 mt-1">{enhancedPreview.basic_stats.text_columns.length}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* General File Information */}
+                  {(enhancedPreview.estimated_total_rows || enhancedPreview.total_columns || enhancedPreview.file_size_bytes) && (
+                    <div>
+                      <h4 className="text-md font-medium text-gray-900 mb-3">File Information</h4>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        {enhancedPreview.estimated_total_rows && (
+                          <div className="bg-gray-50 rounded-md p-3">
+                            <span className="text-sm font-medium text-gray-700">Total Rows</span>
+                            <p className="text-sm text-gray-900 mt-1">{enhancedPreview.estimated_total_rows?.toLocaleString()}</p>
+                          </div>
+                        )}
+                        {enhancedPreview.total_columns && (
+                          <div className="bg-gray-50 rounded-md p-3">
+                            <span className="text-sm font-medium text-gray-700">Columns</span>
+                            <p className="text-sm text-gray-900 mt-1">{enhancedPreview.total_columns}</p>
+                          </div>
+                        )}
+                        {enhancedPreview.file_size_bytes && (
+                          <div className="bg-gray-50 rounded-md p-3">
+                            <span className="text-sm font-medium text-gray-700">File Size</span>
+                            <p className="text-sm text-gray-900 mt-1">{formatFileSize(enhancedPreview.file_size_bytes)}</p>
+                          </div>
+                        )}
+                        {enhancedPreview.format && (
+                          <div className="bg-gray-50 rounded-md p-3">
+                            <span className="text-sm font-medium text-gray-700">Format</span>
+                            <p className="text-sm text-gray-900 mt-1">{enhancedPreview.format.toUpperCase()}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Fallback for other types */}
+                  {enhancedPreview.basic_info && enhancedPreview.type === 'basic' && (
+                    <div>
+                      <h4 className="text-md font-medium text-gray-900 mb-3">Basic Information</h4>
+                      <div className="bg-gray-50 rounded-md p-4">
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div>
+                            <span className="font-medium text-gray-700">Name:</span>
+                            <p className="text-gray-900">{enhancedPreview.basic_info.name}</p>
+                          </div>
+                          <div>
+                            <span className="font-medium text-gray-700">Size:</span>
+                            <p className="text-gray-900">{enhancedPreview.basic_info.size_bytes ? formatFileSize(enhancedPreview.basic_info.size_bytes) : 'Unknown'}</p>
+                          </div>
+                          {enhancedPreview.basic_info.row_count && (
+                            <div>
+                              <span className="font-medium text-gray-700">Rows:</span>
+                              <p className="text-gray-900">{enhancedPreview.basic_info.row_count.toLocaleString()}</p>
+                            </div>
+                          )}
+                          {enhancedPreview.basic_info.column_count && (
+                            <div>
+                              <span className="font-medium text-gray-700">Columns:</span>
+                              <p className="text-gray-900">{enhancedPreview.basic_info.column_count}</p>
+                            </div>
+                          )}
+                        </div>
+                        {enhancedPreview.message && (
+                          <p className="text-sm text-gray-600 mt-3">{enhancedPreview.message}</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : !isLoadingPreview && (
+                <div className="text-center py-8">
+                  <p className="text-gray-500">Preview not available</p>
+                  <button
+                    onClick={fetchEnhancedPreview}
+                    className="mt-2 text-blue-600 hover:text-blue-800 text-sm font-medium"
+                  >
+                    Try loading again
+                  </button>
+                </div>
+              )}
+            </div>
+
             {/* Document Preview (for document datasets) */}
             {dataset.document_type && (
               <div className="bg-white shadow rounded-lg p-6">
@@ -377,9 +1128,31 @@ function DatasetDetailContent() {
               </div>
             )}
 
-            {/* Dataset Info */}
+            {/* Dataset Info with Edit and Metadata Features */}
             <div className="bg-white shadow rounded-lg p-6">
-              <h3 className="text-lg font-medium text-gray-900 mb-4">Dataset Information</h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium text-gray-900">Dataset Information</h3>
+                <div className="flex space-x-2">
+                  <button
+                    onClick={openMetadataModal}
+                    className="flex items-center px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100"
+                  >
+                    <Database className="w-4 h-4 mr-1.5" />
+                    View Metadata
+                  </button>
+                  {isOwner && (
+                    <button
+                      onClick={openEditModal}
+                      className="flex items-center px-3 py-1.5 text-sm font-medium text-green-700 bg-green-50 border border-green-200 rounded-md hover:bg-green-100"
+                    >
+                      <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                      Edit Dataset
+                    </button>
+                  )}
+                </div>
+              </div>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 <div>
                   <span className="text-sm font-medium text-gray-500">Type</span>
@@ -425,77 +1198,6 @@ function DatasetDetailContent() {
                     <p className="mt-1 text-sm text-gray-900">{dataset.column_count}</p>
                   </div>
                 )}
-              </div>
-            </div>
-
-            {/* AI Chat */}
-            <div className="bg-white shadow rounded-lg p-6">
-              <h3 className="text-lg font-medium text-gray-900 mb-4">Chat with AI about this dataset</h3>
-              
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Ask a question about your data
-                  </label>
-                  <div className="flex space-x-3">
-                    <input
-                      type="text"
-                      value={chatMessage}
-                      onChange={(e) => setChatMessage(e.target.value)}
-                      onKeyPress={(e) => e.key === 'Enter' && handleChat()}
-                      placeholder="What insights can you provide about this dataset?"
-                      className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    />
-                    <button
-                      onClick={handleChat}
-                      disabled={!chatMessage.trim() || isChatting}
-                      className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {isChatting ? 'Asking...' : 'Ask AI'}
-                    </button>
-                  </div>
-                </div>
-
-                {chatResponse && (
-                  <div className={`p-4 rounded-md ${chatResponse.error ? 'bg-red-50 border border-red-200' : 'bg-blue-50 border border-blue-200'}`}>
-                    <div className="flex">
-                      <div className="flex-shrink-0">
-                        {chatResponse.error ? (
-                          <svg className="h-5 w-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.268 18.5c-.77.833.192 2.5 1.732 2.5z" />
-                          </svg>
-                        ) : (
-                          <svg className="h-5 w-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                          </svg>
-                        )}
-                      </div>
-                      <div className="ml-3">
-                        <h4 className={`text-sm font-medium ${chatResponse.error ? 'text-red-800' : 'text-blue-800'}`}>
-                          {chatResponse.error ? 'Error' : 'AI Response'}
-                        </h4>
-                        <div className={`mt-2 text-sm ${chatResponse.error ? 'text-red-700' : 'text-blue-700'}`}>
-                          <p className="whitespace-pre-wrap">{chatResponse.answer}</p>
-                        </div>
-                        {!chatResponse.error && chatResponse.model && (
-                          <div className="mt-2 text-xs text-blue-600">
-                            Model: {chatResponse.model} | Tokens: {chatResponse.tokens_used || 0}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <div className="text-xs text-gray-500">
-                  <p>💡 Try asking questions like:</p>
-                  <ul className="mt-1 list-disc list-inside">
-                    <li>What insights can you provide about this dataset?</li>
-                    <li>How many records are in this dataset?</li>
-                    <li>What are the key patterns in the data?</li>
-                    <li>Can you summarize the main findings?</li>
-                  </ul>
-                </div>
               </div>
             </div>
           </div>
@@ -593,48 +1295,64 @@ function DatasetDetailContent() {
             <div className="bg-white shadow rounded-lg p-6">
               <h3 className="text-lg font-medium text-gray-900 mb-4">Quick Actions</h3>
               <div className="space-y-3">
-                <Link
-                  href={`/datasets/${datasetId}/chat`}
-                  className="flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50"
+                <button 
+                  onClick={() => handleDownload('original')}
+                  className="w-full flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50"
                 >
-                  <MessageSquare className="w-5 h-5 text-purple-600 mr-3" />
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">Chat with Data</p>
-                    <p className="text-xs text-gray-500">Ask questions about this dataset</p>
-                  </div>
-                </Link>
-
-                <button className="w-full flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50">
                   <Download className="w-5 h-5 text-green-600 mr-3" />
                   <div className="text-left">
                     <p className="text-sm font-medium text-gray-900">Download Dataset</p>
-                    <p className="text-xs text-gray-500">Export as CSV or JSON</p>
+                    <p className="text-xs text-gray-500">Export as CSV, JSON, or original format</p>
                   </div>
                 </button>
+
+                {isOwner && (
+                  <>
+                    <button
+                      onClick={openRenameModal}
+                      className="w-full flex items-center p-3 border border-gray-200 rounded-lg hover:bg-blue-50"
+                    >
+                      <Edit className="w-5 h-5 text-blue-600 mr-3" />
+                      <div className="text-left">
+                        <p className="text-sm font-medium text-gray-900">Rename Dataset</p>
+                        <p className="text-xs text-gray-500">Change name and description</p>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => setShowReuploadModal(true)}
+                      className="w-full flex items-center p-3 border border-gray-200 rounded-lg hover:bg-orange-50"
+                    >
+                      <Upload className="w-5 h-5 text-orange-600 mr-3" />
+                      <div className="text-left">
+                        <p className="text-sm font-medium text-gray-900">Reupload File</p>
+                        <p className="text-xs text-gray-500">Replace with new file</p>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={openTransferModal}
+                      className="w-full flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50"
+                    >
+                      <UserCheck className="w-5 h-5 text-orange-600 mr-3" />
+                      <div className="text-left">
+                        <p className="text-sm font-medium text-gray-900">Transfer Ownership</p>
+                        <p className="text-xs text-gray-500">Transfer to another user</p>
+                      </div>
+                    </button>
+                  </>
+                )}
 
                 <Link
                   href={`/models/create?dataset_id=${datasetId}`}
                   className="flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50"
                 >
-                  <Database className="w-5 h-5 text-blue-600 mr-3" />
+                  <Database className="w-5 h-5 text-indigo-600 mr-3" />
                   <div>
                     <p className="text-sm font-medium text-gray-900">Create AI Model</p>
                     <p className="text-xs text-gray-500">Build ML models from this data</p>
                   </div>
                 </Link>
-
-                {isOwner && (
-                  <button
-                    onClick={openTransferModal}
-                    className="w-full flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50"
-                  >
-                    <UserCheck className="w-5 h-5 text-orange-600 mr-3" />
-                    <div className="text-left">
-                      <p className="text-sm font-medium text-gray-900">Transfer Ownership</p>
-                      <p className="text-xs text-gray-500">Transfer to another user</p>
-                    </div>
-                  </button>
-                )}
               </div>
             </div>
           </div>
@@ -781,6 +1499,340 @@ function DatasetDetailContent() {
                     className="flex-1 px-4 py-2 text-sm font-medium text-white bg-orange-600 border border-transparent rounded-md hover:bg-orange-700 disabled:opacity-50"
                   >
                     {isTransferring ? 'Transferring...' : 'Transfer Ownership'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Dataset Modal */}
+        {showEditModal && (
+          <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 flex items-center justify-center">
+            <div className="relative mx-auto p-5 border w-[600px] shadow-lg rounded-md bg-white max-h-[90vh] overflow-y-auto">
+              <div className="mt-3">
+                <h3 className="text-lg font-medium text-gray-900 mb-4">Edit Dataset</h3>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Dataset Name
+                    </label>
+                    <input
+                      type="text"
+                      value={editForm.name}
+                      onChange={(e) => setEditForm({...editForm, name: e.target.value})}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Description
+                    </label>
+                    <textarea
+                      value={editForm.description}
+                      onChange={(e) => setEditForm({...editForm, description: e.target.value})}
+                      rows={3}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+
+                  {dataset?.type === 'csv' || dataset?.type === 'json' ? (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Content Preview
+                      </label>
+                      <textarea
+                        value={editForm.content}
+                        onChange={(e) => setEditForm({...editForm, content: e.target.value})}
+                        rows={8}
+                        className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm font-mono focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                        placeholder="Dataset content..."
+                      />
+                    </div>
+                  ) : (
+                    <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
+                      <p className="text-sm text-gray-600">
+                        Content editing is only available for CSV and JSON datasets.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex space-x-3 mt-6">
+                  <button
+                    onClick={() => setShowEditModal(false)}
+                    className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-200 border border-gray-300 rounded-md hover:bg-gray-300"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleEditDataset}
+                    disabled={isEditing || !editForm.name.trim()}
+                    className="flex-1 px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700 disabled:opacity-50"
+                  >
+                    {isEditing ? 'Saving...' : 'Save Changes'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Metadata Modal */}
+        {showMetadataModal && (
+          <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 flex items-center justify-center">
+            <div className="relative mx-auto p-5 border w-[700px] shadow-lg rounded-md bg-white max-h-[90vh] overflow-y-auto">
+              <div className="mt-3">
+                <h3 className="text-lg font-medium text-gray-900 mb-4">Detailed Metadata</h3>
+                
+                {isLoadingMetadata ? (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                  </div>
+                ) : detailedMetadata ? (
+                  <div className="space-y-6">
+                    {/* Basic Information */}
+                    <div>
+                      <h4 className="text-md font-medium text-gray-900 mb-3">Basic Information</h4>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <span className="font-medium text-gray-500">Name:</span>
+                          <p className="text-gray-900">{detailedMetadata.name}</p>
+                        </div>
+                        <div>
+                          <span className="font-medium text-gray-500">Type:</span>
+                          <p className="text-gray-900">{detailedMetadata.type?.toUpperCase()}</p>
+                        </div>
+                        <div>
+                          <span className="font-medium text-gray-500">Status:</span>
+                          <p className="text-gray-900">{detailedMetadata.status}</p>
+                        </div>
+                        <div>
+                          <span className="font-medium text-gray-500">Size:</span>
+                          <p className="text-gray-900">{detailedMetadata.size_bytes ? formatFileSize(detailedMetadata.size_bytes) : 'Unknown'}</p>
+                        </div>
+                        <div>
+                          <span className="font-medium text-gray-500">Created:</span>
+                          <p className="text-gray-900">{new Date(detailedMetadata.created_at).toLocaleString()}</p>
+                        </div>
+                        <div>
+                          <span className="font-medium text-gray-500">Modified:</span>
+                          <p className="text-gray-900">{new Date(detailedMetadata.updated_at).toLocaleString()}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* AI Processing */}
+                    <div>
+                      <h4 className="text-md font-medium text-gray-900 mb-3">AI Processing</h4>
+                      <div className="grid grid-cols-1 gap-4 text-sm">
+                        <div>
+                          <span className="font-medium text-gray-500">Processing Status:</span>
+                          <p className="text-gray-900">{detailedMetadata.ai_processing_status}</p>
+                        </div>
+                        {detailedMetadata.ai_summary && (
+                          <div>
+                            <span className="font-medium text-gray-500">AI Summary:</span>
+                            <p className="text-gray-900 mt-1 p-3 bg-blue-50 rounded-md">{detailedMetadata.ai_summary}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Organization */}
+                    {detailedMetadata.organization && (
+                      <div>
+                        <h4 className="text-md font-medium text-gray-900 mb-3">Organization</h4>
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div>
+                            <span className="font-medium text-gray-500">Organization:</span>
+                            <p className="text-gray-900">{detailedMetadata.organization.name}</p>
+                          </div>
+                          <div>
+                            <span className="font-medium text-gray-500">Owner:</span>
+                            <p className="text-gray-900">{detailedMetadata.owner?.full_name || 'Unknown'}</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* File Information */}
+                    {detailedMetadata.source_url && (
+                      <div>
+                        <h4 className="text-md font-medium text-gray-900 mb-3">File Information</h4>
+                        <div className="text-sm">
+                          <div>
+                            <span className="font-medium text-gray-500">File Path:</span>
+                            <p className="text-gray-900 break-all">{detailedMetadata.source_url}</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Sharing Information */}
+                    <div>
+                      <h4 className="text-md font-medium text-gray-900 mb-3">Sharing</h4>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <span className="font-medium text-gray-500">Sharing Level:</span>
+                          <p className="text-gray-900">{detailedMetadata.sharing_level || 'private'}</p>
+                        </div>
+                        <div>
+                          <span className="font-medium text-gray-500">Public Share:</span>
+                          <p className="text-gray-900">{detailedMetadata.is_public ? 'Enabled' : 'Disabled'}</p>
+                        </div>
+                        {detailedMetadata.share_expires_at && (
+                          <>
+                            <div>
+                              <span className="font-medium text-gray-500">Share Expires:</span>
+                              <p className="text-gray-900">{new Date(detailedMetadata.share_expires_at).toLocaleString()}</p>
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-500">Share Views:</span>
+                              <p className="text-gray-900">{detailedMetadata.share_view_count || 0}</p>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <p className="text-gray-600">Failed to load metadata</p>
+                  </div>
+                )}
+
+                <div className="flex justify-end mt-6">
+                  <button
+                    onClick={() => setShowMetadataModal(false)}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-200 border border-gray-300 rounded-md hover:bg-gray-300"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Rename Dataset Modal */}
+        {showRenameModal && (
+          <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 flex items-center justify-center">
+            <div className="relative mx-auto p-5 border w-96 shadow-lg rounded-md bg-white max-h-[90vh] overflow-y-auto">
+              <div className="mt-3">
+                <h3 className="text-lg font-medium text-gray-900 mb-4">Rename Dataset</h3>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Dataset Name
+                    </label>
+                    <input
+                      type="text"
+                      value={renameForm.name}
+                      onChange={(e) => setRenameForm({...renameForm, name: e.target.value})}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Description
+                    </label>
+                    <textarea
+                      value={renameForm.description}
+                      onChange={(e) => setRenameForm({...renameForm, description: e.target.value})}
+                      rows={3}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex space-x-3 mt-6">
+                  <button
+                    onClick={() => setShowRenameModal(false)}
+                    className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-200 border border-gray-300 rounded-md hover:bg-gray-300"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleRenameDataset}
+                    disabled={isRenaming || !renameForm.name.trim()}
+                    className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {isRenaming ? 'Saving...' : 'Save Changes'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Reupload Dataset Modal */}
+        {showReuploadModal && (
+          <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 flex items-center justify-center">
+            <div className="relative mx-auto p-5 border w-96 shadow-lg rounded-md bg-white max-h-[90vh] overflow-y-auto">
+              <div className="mt-3">
+                <h3 className="text-lg font-medium text-gray-900 mb-4">Reupload Dataset File</h3>
+                
+                <div className="space-y-4">
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
+                    <div className="flex">
+                      <div className="flex-shrink-0">
+                        <svg className="h-5 w-5 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.268 18.5c-.77.833.192 2.5 1.732 2.5z" />
+                        </svg>
+                      </div>
+                      <div className="ml-3">
+                        <p className="text-sm text-yellow-800">
+                          <strong>Warning:</strong> This will replace the current dataset file. Make sure the new file has the same structure.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Select New File
+                    </label>
+                    <input
+                      type="file"
+                      onChange={(e) => setReuploadFile(e.target.files?.[0] || null)}
+                      accept=".csv,.json,.xlsx,.xls"
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Supported formats: CSV, JSON, Excel (.xlsx, .xls)
+                    </p>
+                  </div>
+
+                  {reuploadFile && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+                      <p className="text-sm text-blue-800">
+                        Selected file: <strong>{reuploadFile.name}</strong> ({formatFileSize(reuploadFile.size)})
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex space-x-3 mt-6">
+                  <button
+                    onClick={() => {
+                      setShowReuploadModal(false);
+                      setReuploadFile(null);
+                    }}
+                    className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-200 border border-gray-300 rounded-md hover:bg-gray-300"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleReuploadDataset}
+                    disabled={isReuploading || !reuploadFile}
+                    className="flex-1 px-4 py-2 text-sm font-medium text-white bg-orange-600 border border-transparent rounded-md hover:bg-orange-700 disabled:opacity-50"
+                  >
+                    {isReuploading ? 'Uploading...' : 'Reupload File'}
                   </button>
                 </div>
               </div>

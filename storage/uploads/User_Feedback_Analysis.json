@@ -1,0 +1,54 @@
+{
+  "user_feedback": {
+    "collection_period": "2024-Q1",
+    "total_responses": 1847,
+    "response_rate": 23.4,
+    "satisfaction_scores": {
+      "overall": 4.2,
+      "product_quality": 4.5,
+      "customer_service": 3.9,
+      "pricing": 3.7,
+      "delivery": 4.1,
+      "website_experience": 4.0
+    },
+    "feedback_categories": [
+      {
+        "category": "Product Quality",
+        "positive_count": 1456,
+        "negative_count": 124,
+        "neutral_count": 267,
+        "top_keywords": ["excellent", "durable", "high-quality", "reliable"],
+        "improvement_areas": ["packaging", "instructions", "accessories"]
+      },
+      {
+        "category": "Customer Service",
+        "positive_count": 1089,
+        "negative_count": 298,
+        "neutral_count": 460,
+        "top_keywords": ["helpful", "responsive", "knowledgeable", "friendly"],
+        "improvement_areas": ["wait times", "availability", "technical expertise"]
+      },
+      {
+        "category": "Delivery",
+        "positive_count": 1234,
+        "negative_count": 203,
+        "neutral_count": 410,
+        "top_keywords": ["fast", "reliable", "well-packaged", "tracking"],
+        "improvement_areas": ["delivery windows", "weekend delivery", "rural areas"]
+      }
+    ],
+    "nps_score": 67,
+    "churn_risk_indicators": [
+      "pricing concerns",
+      "competitor comparison",
+      "service quality issues",
+      "feature requests not addressed"
+    ],
+    "action_items": [
+      "Review pricing strategy for competitive positioning",
+      "Expand customer service training program",
+      "Improve delivery options in rural areas",
+      "Enhance product instruction materials"
+    ]
+  }
+}

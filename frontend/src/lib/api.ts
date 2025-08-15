@@ -251,6 +251,33 @@ export const adminAPI = {
     const response = await apiClient.delete(`/api/admin/users/${userId}`);
     return response.data;
   },
+
+  // Database cleanup endpoints
+  getCleanupStats: async () => {
+    const response = await apiClient.get('/api/admin/cleanup/stats');
+    return response.data;
+  },
+
+  cleanupOrphanedDatasets: async (confirm: boolean = false) => {
+    const response = await apiClient.post('/api/admin/cleanup/orphaned-datasets', null, {
+      params: { confirm }
+    });
+    return response.data;
+  },
+
+  cleanupEmptyOrganizations: async (confirm: boolean = false) => {
+    const response = await apiClient.post('/api/admin/cleanup/empty-organizations', null, {
+      params: { confirm }
+    });
+    return response.data;
+  },
+
+  cleanupAllOrphanedData: async (confirm: boolean = false) => {
+    const response = await apiClient.post('/api/admin/cleanup/all', null, {
+      params: { confirm }
+    });
+    return response.data;
+  },
 };
 
 // Organizations API
@@ -311,6 +338,45 @@ export const datasetsAPI = {
   
   getDataset: async (datasetId: number) => {
     const response = await apiClient.get(`/api/datasets/${datasetId}`);
+    return response.data;
+  },
+
+  getDatasetMetadata: async (datasetId: number) => {
+    const response = await apiClient.get(`/api/datasets/${datasetId}/metadata/detailed`);
+    return response.data;
+  },
+
+  getDatasetPreview: async (datasetId: number) => {
+    const response = await apiClient.get(`/api/datasets/${datasetId}/preview`);
+    return response.data;
+  },
+
+  editDataset: async (datasetId: number, editData: {
+    name?: string;
+    description?: string;
+    content?: string;
+  }) => {
+    const response = await apiClient.put(`/api/datasets/${datasetId}/edit`, editData);
+    return response.data;
+  },
+
+  reuploadDataset: async (datasetId: number, file: File, metadata: {
+    name?: string;
+    description?: string;
+  }) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    Object.entries(metadata).forEach(([key, value]) => {
+      if (value !== undefined) {
+        formData.append(key, value.toString());
+      }
+    });
+
+    const response = await apiClient.put(`/api/datasets/${datasetId}/reupload`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
     return response.data;
   },
   

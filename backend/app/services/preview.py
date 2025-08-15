@@ -61,24 +61,52 @@ class PreviewService:
             Dict with preview data and metadata
         """
         try:
-            if not dataset.file_path:
-                return self._get_cached_preview(dataset, rows)
+            # First try to get preview from FileUpload metadata (universal upload system)
+            file_upload_preview = await self._get_file_upload_preview(dataset, rows, include_stats)
+            if file_upload_preview:
+                return file_upload_preview
             
-            file_path = Path(dataset.file_path)
-            if not file_path.exists():
-                return self._get_cached_preview(dataset, rows)
-            
-            # Generate preview based on file type
-            if dataset.type.value.lower() == 'csv':
-                return await self._generate_csv_preview(file_path, dataset, rows, include_stats)
-            elif dataset.type.value.lower() == 'json':
-                return await self._generate_json_preview(file_path, dataset, rows, include_stats)
-            elif dataset.type.value.lower() in ['excel', 'xlsx', 'xls']:
-                return await self._generate_excel_preview(file_path, dataset, rows, include_stats)
-            elif dataset.type.value.lower() == 'pdf':
-                return await self._generate_pdf_preview(file_path, dataset, rows, include_stats)
+            # Fallback to file-based preview for legacy datasets
+            file_path = None
+            if dataset.source_url:
+                # Handle both relative and absolute paths
+                if dataset.source_url.startswith('./'):
+                    file_path = Path(dataset.source_url[2:])  # Remove './' prefix
+                elif dataset.source_url.startswith('/'):
+                    file_path = Path(dataset.source_url)
+                else:
+                    # Try relative to storage directories
+                    potential_paths = [
+                        Path(dataset.source_url),
+                        Path("storage") / dataset.source_url,
+                        Path("backend/storage") / dataset.source_url,
+                        Path("storage/uploads") / dataset.source_url
+                    ]
+                    for potential_path in potential_paths:
+                        if potential_path.exists():
+                            file_path = potential_path
+                            break
+            elif dataset.file_path:
+                file_path = Path(dataset.file_path)
+                
+            # If we found a valid file path, try to generate preview
+            if file_path and file_path.exists():
+                logger.info(f"📁 Generating preview from file: {file_path}")
+                
+                # Generate preview based on file type
+                if dataset.type.value.lower() == 'csv':
+                    return await self._generate_csv_preview(file_path, dataset, rows, include_stats)
+                elif dataset.type.value.lower() == 'json':
+                    return await self._generate_json_preview(file_path, dataset, rows, include_stats)
+                elif dataset.type.value.lower() in ['excel', 'xlsx', 'xls']:
+                    return await self._generate_excel_preview(file_path, dataset, rows, include_stats)
+                elif dataset.type.value.lower() == 'pdf':
+                    return await self._generate_pdf_preview(file_path, dataset, rows, include_stats)
             else:
-                return self._get_cached_preview(dataset, rows)
+                logger.warning(f"⚠️ File not found for dataset {dataset.id}: {dataset.source_url}")
+                
+            # If no file found or unsupported format, try to load from existing data
+            return await self._generate_preview_from_metadata(dataset, rows, include_stats)
                 
         except Exception as e:
             logger.error(f"❌ Preview generation failed for dataset {dataset.id}: {e}")
@@ -433,13 +461,26 @@ class PreviewService:
                 "last_generated": cached_preview.get("preview_generated_at", "unknown"),
                 "note": "Using cached preview data"
             })
+            # Ensure we have proper structure for UI
+            # Handle different field names used in preview data
+            if not cached_preview.get("rows") and cached_preview.get("sample_rows"):
+                cached_preview["rows"] = cached_preview["sample_rows"]
+                cached_preview["total_rows_in_preview"] = len(cached_preview["sample_rows"])
+            elif not cached_preview.get("rows") and cached_preview.get("headers"):
+                # Generate empty rows structure for UI
+                cached_preview["rows"] = []
+                cached_preview["total_rows_in_preview"] = 0
+                cached_preview["note"] = "Headers available but no sample data"
             return cached_preview
         
-        # Fallback to basic info
+        # Fallback to basic info with proper structure for UI
         return {
             "type": "basic",
             "format": dataset.type.value if dataset.type else "unknown",
-            "message": "Preview not available",
+            "message": "Preview not available - no file path found",
+            "headers": [],
+            "rows": [],
+            "total_rows_in_preview": 0,
             "basic_info": {
                 "name": dataset.name,
                 "size_bytes": dataset.size_bytes,
@@ -534,3 +575,206 @@ class PreviewService:
             base_formats.extend(["text", "pages"])
         
         return base_formats
+    async def _generate_preview_from_metadata(self, dataset: Dataset, rows: int, include_stats: bool) -> Dict[str, Any]:
+        """Generate preview from dataset metadata when file is not available"""
+        try:
+            # Check if we have sample data in schema_info
+            if dataset.schema_info and isinstance(dataset.schema_info, dict):
+                sample_data = dataset.schema_info.get("sample_data", [])
+                headers = dataset.schema_info.get("headers", [])
+                
+                if sample_data and headers:
+                    # Use existing sample data
+                    preview_data = {
+                        "type": "tabular",
+                        "format": dataset.type.value.lower(),
+                        "headers": headers,
+                        "rows": sample_data[:rows],
+                        "total_rows_in_preview": min(len(sample_data), rows),
+                        "estimated_total_rows": dataset.row_count or len(sample_data),
+                        "total_columns": len(headers),
+                        "is_sample": True,
+                        "sample_info": {
+                            "method": "metadata_sample",
+                            "rows_requested": rows,
+                            "rows_returned": min(len(sample_data), rows)
+                        },
+                        "generated_at": datetime.utcnow().isoformat(),
+                        "source": "metadata_sample",
+                        "note": "Generated from stored sample data"
+                    }
+                    
+                    if include_stats:
+                        # Generate basic stats from sample data
+                        preview_data["basic_stats"] = {
+                            "row_count": min(len(sample_data), rows),
+                            "column_count": len(headers),
+                            "sample_based": True
+                        }
+                    
+                    return convert_numpy_types(preview_data)
+            
+            # Check if dataset has preview_data field with useful content
+            if dataset.preview_data and isinstance(dataset.preview_data, dict):
+                preview = dataset.preview_data.copy()
+                if preview.get("headers"):
+                    # Ensure proper structure for UI
+                    # Handle different field names
+                    if not preview.get("rows") and preview.get("sample_rows"):
+                        preview["rows"] = preview["sample_rows"]
+                        preview["total_rows_in_preview"] = len(preview["sample_rows"])
+                    elif not preview.get("rows"):
+                        preview["rows"] = []
+                        preview["total_rows_in_preview"] = 0
+                        preview["note"] = "Headers available but no sample data found"
+                    preview["source"] = "stored_preview"
+                    return convert_numpy_types(preview)
+            
+            # Generate a basic structure for datasets with metadata but no sample data
+            headers = []
+            if dataset.schema_metadata and isinstance(dataset.schema_metadata, dict):
+                columns = dataset.schema_metadata.get("columns", [])
+                if columns:
+                    headers = columns if isinstance(columns[0], str) else [col.get("name", f"col_{i}") for i, col in enumerate(columns)]
+            
+            return {
+                "type": "metadata",
+                "format": dataset.type.value.lower() if dataset.type else "unknown",
+                "headers": headers,
+                "rows": [],
+                "total_rows_in_preview": 0,
+                "estimated_total_rows": dataset.row_count or 0,
+                "total_columns": len(headers),
+                "is_sample": False,
+                "message": "Dataset metadata available but no sample data",
+                "basic_info": {
+                    "name": dataset.name,
+                    "size_bytes": dataset.size_bytes,
+                    "row_count": dataset.row_count,
+                    "column_count": dataset.column_count,
+                    "created_at": dataset.created_at.isoformat() if dataset.created_at else None
+                },
+                "generated_at": datetime.utcnow().isoformat(),
+                "source": "metadata_only"
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to generate preview from metadata for dataset {dataset.id}: {e}")
+            return self._get_cached_preview(dataset, rows)
+    async def _get_file_upload_preview(self, dataset: Dataset, rows: int, include_stats: bool) -> Dict[str, Any]:
+        """Generate preview from FileUpload metadata (universal upload system)"""
+        from app.models.dataset import FileUpload
+        
+        # Get the FileUpload record for this dataset
+        file_upload = self.db.query(FileUpload).filter(
+            FileUpload.dataset_id == dataset.id
+        ).first()
+        
+        if not file_upload or not file_upload.file_metadata:
+            return None
+            
+        metadata = file_upload.file_metadata
+        
+        # Create rich preview from stored metadata
+        preview_data = {
+            "type": metadata.get("type", "basic"),
+            "format": metadata.get("format", "unknown"),
+            "file_size_bytes": file_upload.file_size,
+            "estimated_total_rows": metadata.get("rows", metadata.get("data_rows", 0)),
+            "total_columns": len(metadata.get("headers", [])) if metadata.get("headers") else metadata.get("columns", 0),
+            "source": "file_upload_metadata",
+            "generated_at": datetime.utcnow().isoformat()
+        }
+        
+        # Handle different file types
+        if metadata.get("type") == "spreadsheet":
+            preview_data.update(self._create_spreadsheet_preview(metadata, rows))
+        elif metadata.get("type") == "document":
+            preview_data.update(self._create_document_preview(metadata, rows))
+        elif file_upload.file_type == "other" and metadata.get("structure_type"):
+            preview_data.update(self._create_json_preview(metadata, rows))
+        else:
+            preview_data.update(self._create_basic_preview(metadata, rows))
+            
+        # Add basic statistics if requested
+        if include_stats and metadata.get("column_statistics"):
+            preview_data["basic_stats"] = {
+                "row_count": metadata.get("data_rows", metadata.get("rows", 0)),
+                "column_count": len(metadata.get("headers", [])) if metadata.get("headers") else 0,
+                "numeric_columns": [],
+                "text_columns": []
+            }
+            
+            # Categorize columns by type
+            for col, stats in metadata.get("column_statistics", {}).items():
+                col_type = stats.get("inferred_type", "unknown")
+                if col_type in ["numeric", "integer", "float"]:
+                    preview_data["basic_stats"]["numeric_columns"].append(col)
+                else:
+                    preview_data["basic_stats"]["text_columns"].append(col)
+                    
+        return preview_data
+    
+    def _create_spreadsheet_preview(self, metadata: Dict[str, Any], rows: int) -> Dict[str, Any]:
+        """Create preview for spreadsheet data from metadata"""
+        sample_data = metadata.get("sample_data", [])
+        
+        preview = {
+            "headers": metadata.get("headers", []),
+            "rows": sample_data[:rows],  # Normalize to 'rows' field
+            "total_rows_in_preview": min(len(sample_data), rows),
+            "has_header": metadata.get("has_header", True),
+            "delimiter": metadata.get("delimiter", ","),
+            "encoding": metadata.get("encoding", "utf-8")
+        }
+        
+        # Add column types if available
+        if metadata.get("estimated_data_types"):
+            preview["column_types"] = metadata["estimated_data_types"]
+            
+        return preview
+    
+    def _create_document_preview(self, metadata: Dict[str, Any], rows: int) -> Dict[str, Any]:
+        """Create preview for document data from metadata"""
+        preview = {
+            "content_type": "document",
+            "lines": metadata.get("lines", 0),
+            "characters": metadata.get("characters", 0),
+            "words": metadata.get("words", 0),
+            "preview": metadata.get("preview", "")[:1000]  # Limit preview length
+        }
+        
+        if metadata.get("encoding"):
+            preview["encoding"] = metadata["encoding"]
+            
+        return preview
+    
+    def _create_json_preview(self, metadata: Dict[str, Any], rows: int) -> Dict[str, Any]:
+        """Create preview for JSON data from metadata"""
+        preview = {
+            "structure_type": metadata.get("structure_type", "unknown"),
+            "top_level_keys": metadata.get("top_level_keys", []),
+            "valid_json": metadata.get("valid_json", True)
+        }
+        
+        # Add structure analysis if available
+        if metadata.get("structure_analysis"):
+            preview["structure_analysis"] = metadata["structure_analysis"]
+            
+        # Add preview content if available
+        if metadata.get("preview"):
+            preview["content_preview"] = metadata["preview"]
+            
+        return preview
+    
+    def _create_basic_preview(self, metadata: Dict[str, Any], rows: int) -> Dict[str, Any]:
+        """Create basic preview for other file types"""
+        return {
+            "file_format": metadata.get("format", "unknown"),
+            "size_bytes": metadata.get("size_bytes", 0),
+            "basic_info": {
+                "filename": metadata.get("filename", "unknown"),
+                "type": metadata.get("type", "unknown"),
+                "mindsdb_compatible": metadata.get("mindsdb_compatible", False)
+            }
+        }

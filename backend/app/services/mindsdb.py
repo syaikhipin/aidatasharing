@@ -2,6 +2,7 @@ import mindsdb_sdk
 import google.generativeai as genai
 from typing import Dict, List, Optional, Any
 from app.core.config import settings
+from app.core.app_config import get_app_config
 import logging
 import json
 import os
@@ -19,9 +20,12 @@ logger = logging.getLogger(__name__)
 
 class MindsDBService:
     def __init__(self):
-        # Use settings from environment
-        self.base_url = settings.MINDSDB_URL
-        self.api_key = settings.GOOGLE_API_KEY
+        # Get centralized configuration
+        self.app_config = get_app_config()
+        
+        # Use settings from centralized configuration
+        self.base_url = self.app_config.services.get_mindsdb_url()
+        self.api_key = self.app_config.integrations.GOOGLE_API_KEY
         
         # Debug log the API key (masked for security)
         if self.api_key:

@@ -2276,3 +2276,339 @@ async def delete_user(
         db.rollback()
         logger.error(f"Error deleting user: {e}")
         raise HTTPException(status_code=500, detail=f"Error deleting user: {str(e)}")
+
+
+# Database Cleanup Endpoints
+@router.get("/cleanup/stats")
+async def get_cleanup_stats(
+    current_user: User = Depends(get_current_superuser),
+    db: Session = Depends(get_db)
+):
+    """Get database cleanup statistics - orphaned datasets and empty organizations."""
+    try:
+        # Find orphaned datasets (datasets with non-existent owner_id)
+        orphaned_datasets = db.query(Dataset).filter(
+            ~Dataset.owner_id.in_(db.query(User.id))
+        ).all()
+        
+        # Find empty organizations (excluding admin organizations)
+        empty_orgs_query = db.query(Organization).filter(
+            ~Organization.id.in_(
+                db.query(User.organization_id).filter(User.organization_id.isnot(None))
+            )
+        )
+        
+        # Filter out admin-related organizations
+        empty_orgs = []
+        for org in empty_orgs_query.all():
+            if not any(keyword in org.name.lower() for keyword in ['admin', 'system', 'default', 'super']):
+                empty_orgs.append(org)
+        
+        # Get related data counts for orphaned datasets
+        orphaned_dataset_ids = [d.id for d in orphaned_datasets]
+        related_data_counts = {}
+        
+        if orphaned_dataset_ids:
+            from app.models.dataset import (
+                DatasetAccessLog, DatasetDownload, DatasetModel, 
+                DatasetChatSession, ChatMessage, DatasetShareAccess
+            )
+            
+            related_data_counts = {
+                'access_logs': db.query(DatasetAccessLog).filter(
+                    DatasetAccessLog.dataset_id.in_(orphaned_dataset_ids)
+                ).count(),
+                'downloads': db.query(DatasetDownload).filter(
+                    DatasetDownload.dataset_id.in_(orphaned_dataset_ids)
+                ).count(),
+                'models': db.query(DatasetModel).filter(
+                    DatasetModel.dataset_id.in_(orphaned_dataset_ids)
+                ).count(),
+                'chat_sessions': db.query(DatasetChatSession).filter(
+                    DatasetChatSession.dataset_id.in_(orphaned_dataset_ids)
+                ).count(),
+                'share_accesses': db.query(DatasetShareAccess).filter(
+                    DatasetShareAccess.dataset_id.in_(orphaned_dataset_ids)
+                ).count(),
+            }
+            
+            # Count chat messages
+            chat_sessions = db.query(DatasetChatSession).filter(
+                DatasetChatSession.dataset_id.in_(orphaned_dataset_ids)
+            ).all()
+            
+            if chat_sessions:
+                session_ids = [cs.id for cs in chat_sessions]
+                related_data_counts['chat_messages'] = db.query(ChatMessage).filter(
+                    ChatMessage.session_id.in_(session_ids)
+                ).count()
+            else:
+                related_data_counts['chat_messages'] = 0
+        
+        # Get organization related data counts
+        empty_org_ids = [o.id for o in empty_orgs]
+        org_related_data_counts = {}
+        
+        if empty_org_ids:
+            from app.models.dataset import DatabaseConnector
+            
+            org_related_data_counts = {
+                'connectors': db.query(DatabaseConnector).filter(
+                    DatabaseConnector.organization_id.in_(empty_org_ids)
+                ).count(),
+                'org_datasets': db.query(Dataset).filter(
+                    Dataset.organization_id.in_(empty_org_ids)
+                ).count(),
+            }
+        
+        return {
+            "database_stats": {
+                "total_users": db.query(User).count(),
+                "total_organizations": db.query(Organization).count(),
+                "total_datasets": db.query(Dataset).count(),
+                "active_datasets": db.query(Dataset).filter(
+                    Dataset.is_active == True, 
+                    Dataset.is_deleted == False
+                ).count(),
+            },
+            "orphaned_data": {
+                "orphaned_datasets": {
+                    "count": len(orphaned_datasets),
+                    "datasets": [
+                        {
+                            "id": d.id,
+                            "name": d.name,
+                            "owner_id": d.owner_id,
+                            "created_at": d.created_at.isoformat() if d.created_at else None
+                        } for d in orphaned_datasets
+                    ],
+                    "related_data": related_data_counts
+                },
+                "empty_organizations": {
+                    "count": len(empty_orgs),
+                    "organizations": [
+                        {
+                            "id": o.id,
+                            "name": o.name,
+                            "type": o.type,
+                            "created_at": o.created_at.isoformat() if o.created_at else None
+                        } for o in empty_orgs
+                    ],
+                    "related_data": org_related_data_counts
+                }
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting cleanup stats: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting cleanup stats: {str(e)}")
+
+
+@router.post("/cleanup/orphaned-datasets")
+async def cleanup_orphaned_datasets(
+    confirm: bool = False,
+    current_user: User = Depends(get_current_superuser),
+    db: Session = Depends(get_db)
+):
+    """Clean up orphaned datasets (datasets with non-existent owners)."""
+    try:
+        if not confirm:
+            raise HTTPException(
+                status_code=400, 
+                detail="Must set confirm=true to perform cleanup"
+            )
+        
+        # Find orphaned datasets
+        orphaned_datasets = db.query(Dataset).filter(
+            ~Dataset.owner_id.in_(db.query(User.id))
+        ).all()
+        
+        if not orphaned_datasets:
+            return {
+                "message": "No orphaned datasets found",
+                "deleted_count": 0,
+                "deleted_datasets": []
+            }
+        
+        dataset_ids = [d.id for d in orphaned_datasets]
+        
+        # Import related models
+        from app.models.dataset import (
+            DatasetAccessLog, DatasetDownload, DatasetModel, 
+            DatasetChatSession, ChatMessage, DatasetShareAccess
+        )
+        
+        # Delete related data in correct order (foreign key dependencies)
+        deleted_counts = {}
+        
+        # Delete chat messages first
+        chat_sessions = db.query(DatasetChatSession).filter(
+            DatasetChatSession.dataset_id.in_(dataset_ids)
+        ).all()
+        
+        if chat_sessions:
+            session_ids = [cs.id for cs in chat_sessions]
+            deleted_counts['chat_messages'] = db.query(ChatMessage).filter(
+                ChatMessage.session_id.in_(session_ids)
+            ).delete(synchronize_session=False)
+        else:
+            deleted_counts['chat_messages'] = 0
+        
+        # Delete chat sessions
+        deleted_counts['chat_sessions'] = db.query(DatasetChatSession).filter(
+            DatasetChatSession.dataset_id.in_(dataset_ids)
+        ).delete(synchronize_session=False)
+        
+        # Delete other related data
+        deleted_counts['access_logs'] = db.query(DatasetAccessLog).filter(
+            DatasetAccessLog.dataset_id.in_(dataset_ids)
+        ).delete(synchronize_session=False)
+        
+        deleted_counts['downloads'] = db.query(DatasetDownload).filter(
+            DatasetDownload.dataset_id.in_(dataset_ids)
+        ).delete(synchronize_session=False)
+        
+        deleted_counts['models'] = db.query(DatasetModel).filter(
+            DatasetModel.dataset_id.in_(dataset_ids)
+        ).delete(synchronize_session=False)
+        
+        deleted_counts['share_accesses'] = db.query(DatasetShareAccess).filter(
+            DatasetShareAccess.dataset_id.in_(dataset_ids)
+        ).delete(synchronize_session=False)
+        
+        # Finally delete the datasets themselves
+        dataset_info = [
+            {"id": d.id, "name": d.name, "owner_id": d.owner_id}
+            for d in orphaned_datasets
+        ]
+        
+        deleted_datasets_count = db.query(Dataset).filter(
+            Dataset.id.in_(dataset_ids)
+        ).delete(synchronize_session=False)
+        
+        db.commit()
+        
+        return {
+            "message": f"Successfully deleted {deleted_datasets_count} orphaned datasets",
+            "deleted_count": deleted_datasets_count,
+            "deleted_datasets": dataset_info,
+            "related_data_deleted": deleted_counts
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error cleaning up orphaned datasets: {e}")
+        raise HTTPException(status_code=500, detail=f"Error cleaning up orphaned datasets: {str(e)}")
+
+
+@router.post("/cleanup/empty-organizations") 
+async def cleanup_empty_organizations(
+    confirm: bool = False,
+    current_user: User = Depends(get_current_superuser),
+    db: Session = Depends(get_db)
+):
+    """Clean up empty organizations (organizations with no users, excluding admin orgs)."""
+    try:
+        if not confirm:
+            raise HTTPException(
+                status_code=400,
+                detail="Must set confirm=true to perform cleanup"
+            )
+        
+        # Find empty organizations
+        empty_orgs_query = db.query(Organization).filter(
+            ~Organization.id.in_(
+                db.query(User.organization_id).filter(User.organization_id.isnot(None))
+            )
+        )
+        
+        # Filter out admin-related organizations
+        empty_orgs = []
+        for org in empty_orgs_query.all():
+            if not any(keyword in org.name.lower() for keyword in ['admin', 'system', 'default', 'super']):
+                empty_orgs.append(org)
+        
+        if not empty_orgs:
+            return {
+                "message": "No empty organizations found",
+                "deleted_count": 0,
+                "deleted_organizations": []
+            }
+        
+        org_ids = [o.id for o in empty_orgs]
+        
+        # Delete related data
+        from app.models.dataset import DatabaseConnector
+        
+        deleted_counts = {}
+        
+        # Delete database connectors
+        deleted_counts['connectors'] = db.query(DatabaseConnector).filter(
+            DatabaseConnector.organization_id.in_(org_ids)
+        ).delete(synchronize_session=False)
+        
+        # Get organization info before deletion
+        org_info = [
+            {"id": o.id, "name": o.name, "type": o.type}
+            for o in empty_orgs
+        ]
+        
+        # Delete the organizations themselves
+        deleted_orgs_count = db.query(Organization).filter(
+            Organization.id.in_(org_ids)
+        ).delete(synchronize_session=False)
+        
+        db.commit()
+        
+        return {
+            "message": f"Successfully deleted {deleted_orgs_count} empty organizations",
+            "deleted_count": deleted_orgs_count,
+            "deleted_organizations": org_info,
+            "related_data_deleted": deleted_counts
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error cleaning up empty organizations: {e}")
+        raise HTTPException(status_code=500, detail=f"Error cleaning up empty organizations: {str(e)}")
+
+
+@router.post("/cleanup/all")
+async def cleanup_all_orphaned_data(
+    confirm: bool = False,
+    current_user: User = Depends(get_current_superuser),
+    db: Session = Depends(get_db)
+):
+    """Clean up all orphaned data: datasets and empty organizations."""
+    try:
+        if not confirm:
+            raise HTTPException(
+                status_code=400,
+                detail="Must set confirm=true to perform cleanup"
+            )
+        
+        # Cleanup orphaned datasets first
+        datasets_result = await cleanup_orphaned_datasets(confirm=True, current_user=current_user, db=db)
+        
+        # Then cleanup empty organizations
+        orgs_result = await cleanup_empty_organizations(confirm=True, current_user=current_user, db=db)
+        
+        return {
+            "message": "Full cleanup completed successfully",
+            "orphaned_datasets": datasets_result,
+            "empty_organizations": orgs_result,
+            "total_deleted": {
+                "datasets": datasets_result["deleted_count"],
+                "organizations": orgs_result["deleted_count"]
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error performing full cleanup: {e}")
+        raise HTTPException(status_code=500, detail=f"Error performing full cleanup: {str(e)}")

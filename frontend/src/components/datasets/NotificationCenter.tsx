@@ -78,6 +78,24 @@ export function NotificationCenter({ className = '' }: NotificationCenterProps) 
     }
   };
 
+  const handleApprovalAction = async (notificationId: number, requestId: number, action: 'approve' | 'reject') => {
+    try {
+      await dataAccessAPI.approveAccessRequest(requestId, {
+        decision: action,
+        reason: action === 'reject' ? 'Rejected via notification center' : 'Approved via notification center'
+      });
+      
+      // Mark notification as read and remove it
+      await markAsRead(notificationId);
+      setNotifications(prev => prev.filter(notif => notif.id !== notificationId));
+      
+      // Show success message
+      console.log(`Access request ${action}ed successfully`);
+    } catch (error) {
+      console.error(`Error ${action}ing access request:`, error);
+    }
+  };
+
   const getNotificationIcon = (type: string) => {
     switch (type) {
       case 'success': return '✅';
@@ -232,6 +250,27 @@ export function NotificationCenter({ className = '' }: NotificationCenterProps) 
                     </div>
                   </div>
                   <div className="flex items-center space-x-2 ml-4">
+                    {/* Approval actions for access requests */}
+                    {notification.related_resource_type === 'access_request' && notification.related_resource_id && !notification.is_read && (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleApprovalAction(notification.id, notification.related_resource_id!, 'approve')}
+                          className="text-green-600 hover:text-green-700 border-green-300 hover:bg-green-50"
+                        >
+                          ✓ Approve
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleApprovalAction(notification.id, notification.related_resource_id!, 'reject')}
+                          className="text-red-600 hover:text-red-700 border-red-300 hover:bg-red-50"
+                        >
+                          ✗ Reject
+                        </Button>
+                      </>
+                    )}
                     {!notification.is_read && (
                       <Button
                         variant="outline"

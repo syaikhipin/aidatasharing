@@ -23,11 +23,17 @@ from clickhouse_driver import Client as ClickHouseClient
 # Import from main backend
 import sys
 import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from pathlib import Path
+
+# Add the parent directory to Python path dynamically
+parent_dir = Path(__file__).parent.parent.resolve()
+if str(parent_dir) not in sys.path:
+    sys.path.insert(0, str(parent_dir))
 
 from app.core.database import get_db
 from app.models.proxy_connector import ProxyConnector, SharedProxyLink
 from app.services.proxy_service import ProxyService
+from app.core.app_config import get_app_config
 
 # Configure logging
 logging.basicConfig(
@@ -36,16 +42,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Port configuration for different proxy types - all ports above 10100
-PROXY_PORTS = {
-    'mysql': 10101,
-    'postgresql': 10102,
-    'api': 10103,
-    'clickhouse': 10104,
-    'mongodb': 10105,
-    's3': 10106,
-    'shared_link': 10107
-}
+# Get configuration from centralized config
+app_config = get_app_config()
+PROXY_PORTS = app_config.proxy.get_proxy_ports()
 
 class MultiPortProxyService:
     """Multi-port proxy service for different database types"""
@@ -366,7 +365,7 @@ class MultiPortProxyService:
                 'user': real_credentials.get('username'),
                 'password': real_credentials.get('password'),
                 'database': real_config.get('database'),
-                'connect_timeout': 10,
+                'connect_timeout': app_config.integrations.CONNECTOR_CONNECTION_TIMEOUT,
                 'ssl_disabled': ssl_config.get('ssl_disabled', False)
             }
             
