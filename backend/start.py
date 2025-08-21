@@ -13,6 +13,19 @@ backend_dir = Path(__file__).parent.resolve()
 if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    # Load .env file from backend directory
+    env_path = backend_dir / ".env"
+    if env_path.exists():
+        load_dotenv(env_path)
+        print(f"✅ Loaded environment variables from {env_path}")
+    else:
+        print(f"⚠️  No .env file found at {env_path}")
+except ImportError:
+    print("⚠️  python-dotenv not installed, skipping .env file loading")
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -31,15 +44,20 @@ def main():
     # Step 1: Validate configuration
     print("\n🔍 Step 1: Validating configuration...")
     try:
-        from app.core.config_validator import validate_configuration
-        if not validate_configuration():
+        logger.info("Importing configuration validator...")
+        from app.core.config_validator import validate_and_exit_on_failure
+        logger.info("Configuration validator imported. Running validation...")
+        if not validate_and_exit_on_failure():
+            logger.critical("Configuration validation returned False. Halting startup.")
             print("\n❌ Configuration validation failed. Cannot start server.")
             print("Please fix the configuration errors above and try again.")
             sys.exit(1)
     except ImportError as e:
+        logger.critical(f"Failed to import configuration validator: {e}", exc_info=True)
         print(f"❌ Failed to import configuration validator: {e}")
         sys.exit(1)
     except Exception as e:
+        logger.critical(f"Unexpected error during configuration validation: {e}", exc_info=True)
         print(f"❌ Unexpected error during configuration validation: {e}")
         sys.exit(1)
     
@@ -48,11 +66,13 @@ def main():
     # Step 2: Initialize database
     print("\n💾 Step 2: Initializing database...")
     try:
+        logger.info("Importing database initializer...")
         from app.core.init_db import init_db
+        logger.info("Database initializer imported. Running initialization...")
         init_db()
         logger.info("✅ Database initialized successfully")
     except Exception as e:
-        logger.error(f"❌ Database initialization failed: {e}")
+        logger.error(f"❌ Database initialization failed: {e}", exc_info=True)
         print(f"⚠️ Database initialization warning: {e}")
         print("The server will start but some features may not work properly")
     
@@ -77,9 +97,12 @@ def main():
     print("=" * 80)
     
     try:
+        logger.info("Importing uvicorn and FastAPI app...")
         import uvicorn
         from main import app
+        logger.info("Uvicorn and FastAPI app imported successfully.")
         
+        logger.info("Starting Uvicorn server...")
         uvicorn.run(
             "main:app",
             host="0.0.0.0",
@@ -89,8 +112,10 @@ def main():
             log_level="info"
         )
     except KeyboardInterrupt:
+        logger.info("Server shutdown initiated by user (KeyboardInterrupt).")
         print("\n👋 Server stopped by user")
     except Exception as e:
+        logger.critical(f"Server startup failed: {e}", exc_info=True)
         print(f"\n❌ Server startup failed: {e}")
         sys.exit(1)
 

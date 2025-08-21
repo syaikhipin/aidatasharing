@@ -1,11 +1,6 @@
-name,age,city,salary,department
-John Doe,30,New York,75000,Engineering
-Jane Smith,25,Los Angeles,65000,Marketing
-Bob Johnson,35,Chicago,80000,Sales
-Alice Brown,28,Houston,70000,Engineering
-Charlie Wilson,32,Phoenix,72000,Marketing
-Diana Lee,29,Philadelphia,68000,Engineering
-Edward Davis,31,San Antonio,73000,Sales
-Fiona Miller,27,San Diego,66000,Marketing
-George Taylor,33,Dallas,78000,Engineering
-Helen Anderson,26,San Jose,69000,Marketing
+Name,Age,City,Country
+John Doe,30,New York,USA
+Jane Smith,25,London,UK
+Bob Johnson,35,Toronto,Canada
+Alice Brown,28,Sydney,Australia
+Charlie Wilson,32,Berlin,Germany

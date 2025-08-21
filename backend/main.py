@@ -1,3 +1,17 @@
+from pathlib import Path
+
+# Load environment variables first
+try:
+    from dotenv import load_dotenv
+    # Load .env file from backend directory
+    backend_dir = Path(__file__).parent.resolve()
+    env_path = backend_dir / ".env"
+    if env_path.exists():
+        load_dotenv(env_path)
+        print(f"✅ Loaded environment variables from {env_path}")
+except ImportError:
+    print("⚠️  python-dotenv not installed, skipping .env file loading")
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import auth, organizations, datasets, models, mindsdb, admin, analytics, data_access, data_sharing, file_handler, data_connectors, llm_configurations, environment, proxy_connectors, gateway
