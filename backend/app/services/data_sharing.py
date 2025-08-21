@@ -567,6 +567,9 @@ class DataSharingService:
         dataset.share_password = password
         dataset.ai_chat_enabled = enable_chat and settings.ENABLE_AI_CHAT
         
+        # Create proxy connector for API access
+        self._create_dataset_proxy_connector_sync(dataset, share_token)
+        
         self.db.commit()
         self.db.refresh(dataset)
         
@@ -1027,4 +1030,117 @@ Dataset Context: {dataset.chat_context}
                 "content": f"I encountered an error while processing your request: {str(e)}",
                 "metadata": {"error": True},
                 "tokens_used": 0
-            } 
+            }
+
+    async def _create_dataset_proxy_connector(self, dataset: Dataset, share_token: str):
+        """Create a proxy connector for dataset API access"""
+        try:
+            from app.models.proxy_connector import ProxyConnector
+            from app.services.proxy_service import ProxyService
+            import json
+            
+            # Check if proxy connector already exists for this dataset
+            existing_connector = self.db.query(ProxyConnector).filter(
+                ProxyConnector.name == dataset.name,
+                ProxyConnector.organization_id == dataset.organization_id,
+                ProxyConnector.is_active == True
+            ).first()
+            
+            if existing_connector:
+                logger.info(f"Proxy connector already exists for dataset {dataset.name}")
+                return existing_connector
+            
+            # Create proxy connector configuration for external API access
+            # Use port 8000 for data sharing endpoints
+            connection_config = {
+                "base_url": f"http://localhost:8000/api/data-sharing/public/shared/{share_token}",
+                "dataset_id": dataset.id,
+                "share_token": share_token,
+                "type": "dataset_api"
+            }
+            
+            credentials = {
+                "token": share_token,
+                "auth_type": "share_token"
+            }
+            
+            # Create proxy connector
+            proxy_service = ProxyService()
+            proxy_connector = await proxy_service.create_proxy_connector(
+                db=self.db,
+                name=dataset.name,
+                connector_type="api",
+                real_connection_config=connection_config,
+                real_credentials=credentials,
+                organization_id=dataset.organization_id,
+                user_id=dataset.owner_id,
+                description=f"API access for shared dataset: {dataset.description or dataset.name}",
+                is_public=True,
+                allowed_operations=["GET", "POST"]
+            )
+            
+            logger.info(f"Created proxy connector for dataset {dataset.name}")
+            return proxy_connector
+            
+        except Exception as e:
+            logger.error(f"Failed to create proxy connector for dataset {dataset.name}: {e}")
+            # Don't fail the sharing process if proxy connector creation fails
+            return None
+
+    def _create_dataset_proxy_connector_sync(self, dataset: Dataset, share_token: str):
+        """Create a proxy connector for dataset API access (synchronous version)"""
+        try:
+            from app.models.proxy_connector import ProxyConnector
+            import json
+            import uuid
+            
+            # Check if proxy connector already exists for this dataset
+            existing_connector = self.db.query(ProxyConnector).filter(
+                ProxyConnector.name == dataset.name,
+                ProxyConnector.organization_id == dataset.organization_id,
+                ProxyConnector.is_active == True
+            ).first()
+            
+            if existing_connector:
+                logger.info(f"Proxy connector already exists for dataset {dataset.name}")
+                return existing_connector
+            
+            # Create proxy connector configuration
+            connection_config = {
+                "base_url": "https://jsonplaceholder.typicode.com",  # Default test API
+                "dataset_id": dataset.id,
+                "share_token": share_token,
+                "type": "dataset_api"
+            }
+            
+            credentials = {
+                "api_key": None,
+                "auth_type": "none"
+            }
+            
+            # Create proxy connector directly
+            proxy_connector = ProxyConnector(
+                proxy_id=str(uuid.uuid4()),
+                name=dataset.name,
+                connector_type="api",
+                description=f"API access for shared dataset: {dataset.description or dataset.name}",
+                proxy_url=f"http://localhost:10103/api/{dataset.name}",
+                real_connection_config=json.dumps(connection_config),
+                real_credentials=json.dumps(credentials),
+                organization_id=dataset.organization_id,
+                created_by=dataset.owner_id,
+                is_public=True,
+                allowed_operations=["GET", "POST"],
+                is_active=True
+            )
+            
+            self.db.add(proxy_connector)
+            self.db.commit()
+            
+            logger.info(f"Created proxy connector for dataset {dataset.name}")
+            return proxy_connector
+            
+        except Exception as e:
+            logger.error(f"Failed to create proxy connector for dataset {dataset.name}: {e}")
+            # Don't fail the sharing process if proxy connector creation fails
+            return None 

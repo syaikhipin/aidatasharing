@@ -43,6 +43,7 @@ interface Dataset {
   public_share_enabled?: boolean;
   share_token?: string;
   share_url?: string;
+  share_expires_at?: string;
   view_count?: number;
 }
 
@@ -109,9 +110,9 @@ function UnifiedSharingContent() {
   // State for datasets
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   
-  // State for proxy connectors
-  const [proxyConnectors, setProxyConnectors] = useState<ProxyConnector[]>([]);
-  const [sharedLinks, setSharedLinks] = useState<SharedLink[]>([]);
+  // State for proxy connectors (currently using mock data)
+  const [, setProxyConnectors] = useState<ProxyConnector[]>([]);
+  const [, setSharedLinks] = useState<SharedLink[]>([]);
   
   // State for simplified connectors
   const [simplifiedConnectors, setSimplifiedConnectors] = useState<DatabaseConnector[]>([]);
@@ -165,10 +166,6 @@ function UnifiedSharingContent() {
     return new Date(dateString).toLocaleDateString();
   };
 
-  const isExpired = (expiresAt?: string) => {
-    if (!expiresAt) return false;
-    return new Date(expiresAt) < new Date();
-  };
 
   useEffect(() => {
     fetchAllData();
@@ -308,31 +305,37 @@ function UnifiedSharingContent() {
         enable_chat: true
       });
       
-      // Automatically create a proxy connector for the shared dataset
-      const dataset = datasets.find(d => d.id === datasetId);
-      if (dataset) {
-        try {
-          const proxyData = {
-            name: `${dataset.name} Proxy`,
-            description: `Secure proxy access for shared dataset: ${dataset.name}`,
-            connector_type: dataset.type.toLowerCase(), // mysql, postgresql, s3, etc.
-            dataset_id: datasetId,
-            share_token: response.share_token,
-            is_public: dataset.sharing_level === 'public',
-            allowed_operations: getDefaultOperationsForType(dataset.type),
-            generate_credentials: true
-          };
+      // Automatically refresh proxy connectors to include the new shared dataset
+      try {
+        const refreshResponse = await fetch('/api/data-sharing/refresh-proxy-connectors', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (refreshResponse.ok) {
+          const refreshData = await refreshResponse.json();
+          console.log('Proxy connectors refreshed:', refreshData);
           
-          // Create proxy connector (this would be a real API call)
-          console.log('Creating proxy connector for shared dataset:', proxyData);
-          
-          showToast("Success", "Share link and proxy connector created successfully");
-        } catch (proxyError) {
-          console.warn('Failed to create proxy connector:', proxyError);
-          showToast("Warning", "Share link created but proxy connector failed");
+          // Show proxy access information
+          const dataset = datasets.find(d => d.id === datasetId);
+          if (dataset) {
+            const proxyUrl = `http://localhost:10103/api/${encodeURIComponent(dataset.name)}?token=${response.share_token}`;
+            console.log('Proxy URL for dataset:', proxyUrl);
+            
+            showToast("Success", `Share link and proxy connector created! Proxy URL: ${proxyUrl}`);
+          } else {
+            showToast("Success", "Share link and proxy connector created successfully");
+          }
+        } else {
+          showToast("Warning", "Share link created but proxy connector refresh failed");
         }
-      } else {
-        showToast("Success", "Share link created successfully");
+        
+      } catch (proxyError) {
+        console.warn('Failed to refresh proxy connectors:', proxyError);
+        showToast("Warning", "Share link created but proxy connector refresh failed");
       }
       
       // Update local state
@@ -466,7 +469,7 @@ function UnifiedSharingContent() {
 
     try {
       setCreating(true);
-      const result = await dataConnectorsAPI.createDatasetFromConnector(connectorId, {
+      await dataConnectorsAPI.createDatasetFromConnector(connectorId, {
         dataset_name: datasetName,
         description: `Dataset created from ${connector.name} connector`,
         table_or_endpoint: tableName,
@@ -543,27 +546,26 @@ function UnifiedSharingContent() {
     }
   };
 
-  const generateProxyConnectionString = (dataset: Dataset, proxyConnector?: ProxyConnector): string => {
-    if (!proxyConnector) return '';
+  const generateProxyConnectionString = (dataset: Dataset): string => {
+    if (!dataset.share_token) return '';
     
-    const baseUrl = window.location.origin;
-    const proxyHost = baseUrl.replace(/:\d+$/, ':8000'); // Use backend port 8000
-    const proxyEndpoint = `${proxyHost}/proxy/${proxyConnector.proxy_id}`;
     const encodedDatasetName = encodeURIComponent(dataset.name);
     
     switch (dataset.type.toLowerCase()) {
       case 'mysql':
-        return `mysql://proxy_user:${dataset.share_token}@${proxyHost.replace(/^https?:\/\//, '')}:8000/${encodedDatasetName}`;
+        return `mysql://proxy_user:${dataset.share_token}@localhost:10101/${encodedDatasetName}`;
       case 'postgresql':
-        return `postgresql://proxy_user:${dataset.share_token}@${proxyHost.replace(/^https?:\/\//, '')}:8000/${encodedDatasetName}`;
+        return `postgresql://proxy_user:${dataset.share_token}@localhost:10102/${encodedDatasetName}`;
       case 'clickhouse':
-        return `clickhouse://proxy_user:${dataset.share_token}@${proxyHost.replace(/^https?:\/\//, '')}:8000/${encodedDatasetName}`;
+        return `clickhouse://proxy_user:${dataset.share_token}@localhost:10104/${encodedDatasetName}`;
       case 's3':
-        return `s3://${proxyEndpoint}/${encodedDatasetName}?access_key=proxy_user&secret_key=${dataset.share_token}`;
+        return `s3://localhost:10106/${encodedDatasetName}?access_key=proxy_user&secret_key=${dataset.share_token}`;
       case 'mongodb':
-        return `mongodb://proxy_user:${dataset.share_token}@${proxyHost.replace(/^https?:\/\//, '')}:8000/${encodedDatasetName}`;
+        return `mongodb://proxy_user:${dataset.share_token}@localhost:10105/${encodedDatasetName}`;
+      case 'api':
+        return `http://localhost:10103/api/${encodedDatasetName}?token=${dataset.share_token}`;
       default:
-        return `${proxyEndpoint}?token=${dataset.share_token}`;
+        return `http://localhost:10103/api/${encodedDatasetName}?token=${dataset.share_token}`;
     }
   };
 
@@ -571,9 +573,6 @@ function UnifiedSharingContent() {
     return datasets.filter(d => d.sharing_level === level).length;
   };
 
-  const getSharedDatasets = () => {
-    return datasets.filter(d => d.public_share_enabled);
-  };
 
   const getConnectorIcon = (type: string) => {
     switch (type) {
@@ -820,8 +819,7 @@ function UnifiedSharingContent() {
                               </button>
                               <button
                                 onClick={() => {
-                                  const proxyConnector = proxyConnectors.find(p => p.name === `${dataset.name} Proxy`);
-                                  const connectionString = generateProxyConnectionString(dataset, proxyConnector);
+                                  const connectionString = generateProxyConnectionString(dataset);
                                   if (connectionString) {
                                     copyToClipboard(connectionString);
                                     showToast("Success", "Proxy connection string copied to clipboard");
@@ -893,12 +891,16 @@ function UnifiedSharingContent() {
                             {dataset.share_url && (
                               <div className="p-3 bg-gray-50 border border-gray-200 rounded-md">
                                 <AccessInstructions
-                                  shareUrl={dataset.share_url}
+                                  shareLink={dataset.share_url}
                                   shareToken={dataset.share_token || ''}
-                                  isPublic={dataset.sharing_level === 'public'}
-                                  requiresAuth={dataset.sharing_level === 'organization'}
-                                  enableChat={true}
-                                  allowDownload={true}
+                                  accessType={dataset.sharing_level === 'public' ? 'public' : 'token'}
+                                  expiresAt={dataset.share_expires_at}
+                                  instructions={[
+                                    'Use the share link to access the dataset directly',
+                                    'Include the access token for API requests',
+                                    'Proxy connection strings are available for database clients',
+                                    'Chat functionality is enabled for this dataset'
+                                  ]}
                                 />
                               </div>
                             )}

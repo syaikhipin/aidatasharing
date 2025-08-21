@@ -1051,9 +1051,13 @@ async def _create_api_dataset(
             return await _create_api_dataset_fallback(connector, dataset_data, user_id)
         
         # Create dataset view from web connector
+        # Get table name from test result, or use 'data' as default
+        table_name = web_connector_result.get("test_result", {}).get("table_name", "data")
+        
         dataset_view_result = mindsdb_service.create_dataset_from_web_connector(
             connector_name=web_connector_result["connector_name"],
-            dataset_name=dataset_data.dataset_name
+            dataset_name=dataset_data.dataset_name,
+            table_name=table_name
         )
         
         if not dataset_view_result.get("success"):

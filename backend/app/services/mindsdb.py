@@ -629,9 +629,26 @@ class MindsDBService:
             if not self._ensure_connection():
                 return {"success": False, "error": "MindsDB connection not available"}
 
-            # For web connectors, try to query the default table (the URL endpoint)
-            # Web connectors in MindsDB typically create a single table representing the endpoint
-            test_query = f"SELECT * FROM {connector_name}.{connector_name} LIMIT 3"
+            # For web connectors, first check what tables are available
+            try:
+                show_tables_query = f"SHOW TABLES FROM {connector_name}"
+                logger.info(f"🔍 Checking available tables: {show_tables_query}")
+                tables_result = self.connection.query(show_tables_query)
+                
+                table_name = "data"  # Default table name for web connectors
+                if tables_result and hasattr(tables_result, 'fetch'):
+                    tables_df = tables_result.fetch()
+                    if not tables_df.empty and len(tables_df) > 0:
+                        # Use the first available table
+                        table_name = tables_df.iloc[0]['Tables_in_' + connector_name]
+                        logger.info(f"🎯 Found table: {table_name}")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Could not list tables, using default 'data': {e}")
+                table_name = "data"
+            
+            # Test the connector with the found table name
+            test_query = f"SELECT * FROM {connector_name}.{table_name} LIMIT 3"
             
             logger.info(f"🧪 Testing web connector: {test_query}")
             
@@ -645,13 +662,15 @@ class MindsDBService:
                         "success": True,
                         "rows_retrieved": len(df),
                         "columns": list(df.columns),
-                        "sample_data": df.head(3).to_dict('records')
+                        "sample_data": df.head(3).to_dict('records'),
+                        "table_name": table_name
                     }
                 else:
                     logger.warning(f"⚠️ Web connector test returned no data")
                     return {
                         "success": False,
-                        "error": "No data returned from web connector"
+                        "error": "No data returned from web connector",
+                        "table_name": table_name
                     }
             else:
                 logger.warning(f"⚠️ Web connector test failed - no result")

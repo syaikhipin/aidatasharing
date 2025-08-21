@@ -292,7 +292,7 @@ app.include_router(data_connectors.router, prefix="/api/connectors", tags=["data
 app.include_router(data_connectors.router, prefix="/api/data-connectors", tags=["data-connectors"])  # Alternative endpoint
 app.include_router(environment.router, prefix="/api/admin/environment", tags=["admin"])
 app.include_router(llm_configurations.router, prefix="/api/llm-configs", tags=["llm-configurations"])
-app.include_router(proxy_connectors.router, prefix="/api/proxy", tags=["proxy-connectors"])
+app.include_router(proxy_connectors.router, prefix="/api/proxy-connectors", tags=["proxy-connectors"])
 app.include_router(gateway.router, prefix="/api/gateway", tags=["gateway"])
 logger.info("✅ All API routes registered successfully")
 
@@ -303,6 +303,9 @@ async def startup_event():
     logger.info("📖 API Documentation available at: /docs")
     logger.info("🔍 ReDoc documentation available at: /redoc")
     logger.info("🏥 Health check available at: /health")
+    
+    # Log that proxy services should be started separately
+    logger.info("🔗 Use ./start-proxy.sh to start proxy services on separate ports")
 
 @app.on_event("shutdown")
 async def shutdown_event():

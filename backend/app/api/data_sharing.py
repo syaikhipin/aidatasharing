@@ -221,6 +221,46 @@ async def get_my_shared_datasets(
     ]
 
 
+@router.post("/refresh-proxy-connectors")
+async def refresh_proxy_connectors(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """Refresh proxy connectors for all shared datasets."""
+    if current_user.role not in ["owner", "admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions"
+        )
+    
+    service = DataSharingService(db)
+    
+    # Get all shared datasets in user's organization
+    shared_datasets = db.query(Dataset).filter(
+        Dataset.organization_id == current_user.organization_id,
+        Dataset.public_share_enabled == True,
+        Dataset.share_token.isnot(None),
+        Dataset.is_deleted == False
+    ).all()
+    
+    created_connectors = []
+    for dataset in shared_datasets:
+        try:
+            connector = await service._create_dataset_proxy_connector(dataset, dataset.share_token)
+            if connector:
+                created_connectors.append({
+                    "dataset_name": dataset.name,
+                    "proxy_id": connector.proxy_id,
+                    "connector_id": connector.id
+                })
+        except Exception as e:
+            logger.error(f"Failed to create connector for dataset {dataset.name}: {e}")
+    
+    return {
+        "message": f"Created {len(created_connectors)} proxy connectors",
+        "connectors": created_connectors
+    }
+
 @router.delete("/shared/{dataset_id}/disable")
 async def disable_sharing(
     dataset_id: int,
@@ -247,6 +287,16 @@ async def disable_sharing(
     dataset.share_expires_at = None
     dataset.share_password = None
     dataset.ai_chat_enabled = False
+    
+    # Also disable related proxy connector
+    from app.models.proxy_connector import ProxyConnector
+    proxy_connector = db.query(ProxyConnector).filter(
+        ProxyConnector.name == dataset.name,
+        ProxyConnector.organization_id == dataset.organization_id
+    ).first()
+    
+    if proxy_connector:
+        proxy_connector.is_active = False
     
     db.commit()
     

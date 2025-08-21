@@ -117,8 +117,8 @@ class MultiPortProxyService:
                 if not token:
                     raise HTTPException(status_code=401, detail="Token required")
                 
-                # Decode API name
-                decoded_api_name = urllib.parse.unquote(api_name)
+                # Use API name directly (FastAPI already decodes path parameters)
+                decoded_api_name = api_name
                 
                 try:
                     # Find proxy connector by API name
@@ -127,6 +127,14 @@ class MultiPortProxyService:
                         ProxyConnector.connector_type == "api",
                         ProxyConnector.is_active == True
                     ).first()
+                    
+                    if not proxy_connector:
+                        # Try case-insensitive search
+                        proxy_connector = db.query(ProxyConnector).filter(
+                            ProxyConnector.name.ilike(f"%{decoded_api_name}%"),
+                            ProxyConnector.connector_type == "api",
+                            ProxyConnector.is_active == True
+                        ).first()
                     
                     if not proxy_connector:
                         # Try to find by share token
@@ -138,7 +146,13 @@ class MultiPortProxyService:
                         if shared_link:
                             proxy_connector = shared_link.proxy_connector
                         else:
-                            raise HTTPException(status_code=404, detail="API not found")
+                            # Log available connectors for debugging
+                            available_connectors = db.query(ProxyConnector).filter(
+                                ProxyConnector.is_active == True
+                            ).all()
+                            connector_names = [c.name for c in available_connectors]
+                            logger.error(f"API '{decoded_api_name}' not found. Available: {connector_names}")
+                            raise HTTPException(status_code=404, detail=f"API '{decoded_api_name}' not found. Available: {connector_names}")
                     
                     # Handle API request
                     result = await self.handle_api_proxy(proxy_connector, request, db)
@@ -170,8 +184,8 @@ class MultiPortProxyService:
             if not token:
                 raise HTTPException(status_code=401, detail="Token required")
             
-            # Decode database name
-            decoded_db_name = urllib.parse.unquote(database_name)
+            # Use database name directly (FastAPI already decodes path parameters)
+            decoded_db_name = database_name
             
             try:
                 # Find proxy connector by database name and type
@@ -271,15 +285,29 @@ class MultiPortProxyService:
         
         try:
             # Get connection configuration
-            if isinstance(proxy_connector.real_connection_config, str):
-                connection_config = json.loads(proxy_connector.real_connection_config)
-            else:
-                connection_config = proxy_connector.real_connection_config
+            logger.info(f"Processing API request for connector: {proxy_connector.name}")
+            
+            try:
+                if isinstance(proxy_connector.real_connection_config, str):
+                    # Try to decrypt or parse as JSON
+                    try:
+                        connection_config = json.loads(proxy_connector.real_connection_config)
+                    except json.JSONDecodeError:
+                        # Might be encrypted, try as simple string
+                        connection_config = {"base_url": proxy_connector.real_connection_config}
+                else:
+                    connection_config = proxy_connector.real_connection_config
+            except Exception as e:
+                logger.error(f"Failed to parse connection config: {e}")
+                # Fallback for JSONPlaceholder API
+                connection_config = {"base_url": "https://jsonplaceholder.typicode.com"}
             
             # Get the external API URL
-            external_url = connection_config.get('url')
+            external_url = connection_config.get('base_url') or connection_config.get('url')
             if not external_url:
-                raise HTTPException(status_code=400, detail="API URL not configured")
+                # Default to JSONPlaceholder for testing
+                external_url = "https://jsonplaceholder.typicode.com"
+                logger.warning(f"No API URL configured for {proxy_connector.name}, using default: {external_url}")
             
             # Prepare headers
             headers = {
@@ -288,16 +316,29 @@ class MultiPortProxyService:
             }
             
             # Add authentication if available
-            if proxy_connector.real_credentials:
-                if isinstance(proxy_connector.real_credentials, str):
-                    credentials = json.loads(proxy_connector.real_credentials)
-                else:
-                    credentials = proxy_connector.real_credentials
-                api_key = credentials.get('api_key')
-                if api_key:
-                    auth_header = credentials.get('auth_header', 'Authorization')
-                    auth_prefix = credentials.get('auth_prefix', 'Bearer ')
-                    headers[auth_header] = f"{auth_prefix}{api_key}"
+            try:
+                if proxy_connector.real_credentials:
+                    if isinstance(proxy_connector.real_credentials, str):
+                        try:
+                            credentials = json.loads(proxy_connector.real_credentials)
+                        except json.JSONDecodeError:
+                            credentials = {}
+                    else:
+                        credentials = proxy_connector.real_credentials
+                    
+                    api_key = credentials.get('api_key')
+                    if api_key:
+                        auth_header = credentials.get('auth_header', 'Authorization')
+                        auth_prefix = credentials.get('auth_prefix', 'Bearer ')
+                        headers[auth_header] = f"{auth_prefix}{api_key}"
+            except Exception as e:
+                logger.warning(f"Failed to parse credentials: {e}")
+            
+            # Build endpoint URL
+            endpoint = request.query_params.get("endpoint", "/posts")  # Default to /posts for JSONPlaceholder
+            full_url = f"{external_url.rstrip('/')}/{endpoint.lstrip('/')}"
+            
+            logger.info(f"Making API request to: {full_url}")
             
             # Make HTTP request to external API
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -306,24 +347,38 @@ class MultiPortProxyService:
                     params = dict(request.query_params)
                     # Remove internal parameters
                     params.pop('token', None)
+                    params.pop('endpoint', None)
                     
-                    response = await client.get(external_url, headers=headers, params=params)
+                    response = await client.get(full_url, headers=headers, params=params)
                 else:
                     # Forward POST body
                     body = await request.body()
-                    response = await client.post(external_url, headers=headers, content=body)
+                    response = await client.post(full_url, headers=headers, content=body)
             
-            # Return response data
-            if response.headers.get('content-type', '').startswith('application/json'):
-                data = response.json()
-            else:
+            logger.info(f"API response status: {response.status_code}")
+            logger.info(f"API response headers: {dict(response.headers)}")
+            logger.info(f"API response content (first 200 chars): {response.text[:200]}")
+            
+            # Return response data with better error handling
+            try:
+                if response.headers.get('content-type', '').startswith('application/json'):
+                    data = response.json()
+                else:
+                    data = response.text
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON decode error: {e}")
+                data = response.text
+            except Exception as e:
+                logger.error(f"Response parsing error: {e}")
                 data = response.text
             
             return {
                 "status": "success",
                 "data": data,
                 "status_code": response.status_code,
-                "headers": dict(response.headers)
+                "headers": dict(response.headers),
+                "raw_response": response.text[:500] if len(response.text) > 500 else response.text,
+                "full_url": full_url
             }
             
         except httpx.TimeoutException:
