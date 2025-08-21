@@ -85,7 +85,7 @@ def main():
     logger.info("  📊 Root:        http://localhost:8000/")
     logger.info("-" * 80)
     logger.info("👤 DEMO ACCOUNTS:")
-    logger.info("  🔑 Admin:       admin@example.com / SuperAdmin123!")
+    logger.info("  🔑 Admin:       admin@example.com / admin123")
     logger.info("  👨‍💼 TechCorp:     alice@techcorp.com / Password123!")
     logger.info("  👩‍💻 DataAnalytics: bob@dataanalytics.com / Password123!")
     logger.info("=" * 80)

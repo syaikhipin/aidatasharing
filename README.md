@@ -23,7 +23,7 @@ python setup_fresh_install.py
 - **API Documentation**: http://localhost:8000/docs
 
 ### Default Admin Credentials
-- **Email**: admin@aishare.com
+- **Email**: admin@example.com
 - **Password**: admin123
 
 ## ✨ Key Features
