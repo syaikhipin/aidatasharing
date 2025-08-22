@@ -13,6 +13,7 @@ class ConfigCategory(str, enum.Enum):
     """Configuration categories"""
     SYSTEM = "system"
     DATABASE = "database"
+    STORAGE = "storage"
     MINDSDB = "mindsdb"
     AI_MODELS = "ai_models"
     FILE_UPLOAD = "file_upload"

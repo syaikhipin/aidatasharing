@@ -2,6 +2,7 @@
 
 import { useAuth } from '@/components/auth/AuthProvider';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import Link from 'next/link';
 
 export default function OrganizationsPage() {
   const { user } = useAuth();
@@ -58,27 +59,27 @@ export default function OrganizationsPage() {
                     Quick Actions
                   </h2>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <a
+                    <Link
                       href="/datasets"
                       className="block p-4 bg-blue-50 rounded-lg border border-blue-200 hover:bg-blue-100 transition-colors"
                     >
                       <h3 className="font-medium text-blue-900">View Datasets</h3>
                       <p className="text-sm text-blue-700">Browse organization datasets</p>
-                    </a>
-                    <a
+                    </Link>
+                    <Link
                       href="/models"
                       className="block p-4 bg-green-50 rounded-lg border border-green-200 hover:bg-green-100 transition-colors"
                     >
                       <h3 className="font-medium text-green-900">AI Models</h3>
                       <p className="text-sm text-green-700">Manage ML models</p>
-                    </a>
-                    <a
+                    </Link>
+                    <Link
                       href="/analytics"
                       className="block p-4 bg-purple-50 rounded-lg border border-purple-200 hover:bg-purple-100 transition-colors"
                     >
                       <h3 className="font-medium text-purple-900">Analytics</h3>
                       <p className="text-sm text-purple-700">View usage analytics</p>
-                    </a>
+                    </Link>
                   </div>
                 </div>
               </div>

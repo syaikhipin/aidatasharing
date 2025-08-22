@@ -27,8 +27,6 @@ const DownloadComponent: React.FC<DownloadComponentProps> = ({
   onDownloadComplete,
   onError
 }) => {
-  const [selectedFormat, setSelectedFormat] = useState<string>('original');
-  const [compression, setCompression] = useState<string>('none');
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
   const [downloadToken, setDownloadToken] = useState<string>('');
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
@@ -75,11 +73,7 @@ const DownloadComponent: React.FC<DownloadComponentProps> = ({
       setDownloadProgress(null);
       
       // Use the API client to initiate download
-      const downloadData = await datasetsAPI.initiateDownload(
-        dataset.id,
-        selectedFormat,
-        compression
-      );
+      const downloadData = await datasetsAPI.initiateDownload(dataset.id);
       
       const token = downloadData.download_token;
       setDownloadToken(token);
@@ -211,81 +205,18 @@ const DownloadComponent: React.FC<DownloadComponentProps> = ({
     setDownloadProgress(null);
   };
 
-  // Determine available formats based on dataset type
-  const getAvailableFormats = () => {
-    const formats = [{ value: 'original', label: 'Original Format' }];
-    
-    // Add format options based on dataset type
-    if (dataset.type?.toLowerCase() === 'csv') {
-      formats.push(
-        { value: 'csv', label: 'CSV' },
-        { value: 'json', label: 'JSON' },
-        { value: 'excel', label: 'Excel' }
-      );
-    } else if (dataset.type?.toLowerCase() === 'json') {
-      formats.push(
-        { value: 'json', label: 'JSON' },
-        { value: 'csv', label: 'CSV' }
-      );
-    } else if (dataset.type?.toLowerCase() === 'excel' || dataset.type?.toLowerCase() === 'xlsx') {
-      formats.push(
-        { value: 'excel', label: 'Excel' },
-        { value: 'csv', label: 'CSV' }
-      );
-    } else if (dataset.type?.toLowerCase() === 'pdf') {
-      formats.push(
-        { value: 'pdf', label: 'PDF' },
-        { value: 'txt', label: 'Text (Extracted)' },
-        { value: 'json', label: 'JSON (Structured)' }
-      );
-    }
-    
-    return formats;
-  };
-
   // Render download options
   const renderDownloadOptions = () => {
     return (
       <div className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Download Format
-          </label>
-          <select
-            value={selectedFormat}
-            onChange={(e) => setSelectedFormat(e.target.value)}
-            className="block w-full px-3 py-2.5 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900 transition-colors hover:border-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={isDownloading}
-          >
-            {getAvailableFormats().map((format) => (
-              <option key={format.value} value={format.value} className="text-gray-900">
-                📁 {format.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Compression
-          </label>
-          <select
-            value={compression}
-            onChange={(e) => setCompression(e.target.value)}
-            className="block w-full px-3 py-2.5 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900 transition-colors hover:border-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={isDownloading}
-          >
-            <option value="none" className="text-gray-900">📦 None</option>
-            <option value="zip" className="text-gray-900">🗜️ ZIP</option>
-            <option value="gzip" className="text-gray-900">📦 GZIP</option>
-          </select>
-        </div>
-
-        <div className="pt-2">
+        <div className="text-center py-4">
+          <p className="text-sm text-gray-600 mb-4">
+            Download the original file in its native format
+          </p>
           <button
             onClick={startDownload}
             disabled={isDownloading}
-            className="w-full flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300"
+            className="w-full flex items-center justify-center px-4 py-3 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 transition-colors"
           >
             <Download className="w-4 h-4 mr-2" />
             {isDownloading ? 'Preparing Download...' : 'Download Dataset'}
@@ -294,7 +225,7 @@ const DownloadComponent: React.FC<DownloadComponentProps> = ({
 
         {dataset.size_bytes && (
           <div className="text-xs text-gray-500 text-center">
-            File size: {formatFileSize(dataset.size_bytes)}
+            File size: {formatFileSize(dataset.size_bytes)} • {dataset.type?.toUpperCase() || 'Unknown'} format
           </div>
         )}
       </div>
@@ -411,7 +342,7 @@ const DownloadComponent: React.FC<DownloadComponentProps> = ({
               onClick={cancelDownload}
               className="flex-1 flex items-center justify-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
             >
-              Download Another Format
+              Start New Download
             </button>
           )}
           

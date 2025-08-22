@@ -178,35 +178,98 @@ class AdminConfigurationService:
                 "type": ConfigType.STRING,
                 "title": "Upload Path",
                 "description": "Local upload directory path",
-                "default": "./storage/uploads"
+                "default": "../storage/uploads"
             },
             
-            # AWS
+            # Storage Configuration
+            "STORAGE_TYPE": {
+                "category": ConfigCategory.STORAGE,
+                "type": ConfigType.STRING,
+                "title": "Storage Type",
+                "description": "Storage backend type (local, s3, s3_compatible)",
+                "default": "local",
+                "required": True,
+                "restart_required": True,
+                "options": ["local", "s3", "s3_compatible"]
+            },
+            "STORAGE_DIR": {
+                "category": ConfigCategory.STORAGE,
+                "type": ConfigType.STRING,
+                "title": "Local Storage Directory",
+                "description": "Local storage directory path (used when storage_type is local)",
+                "default": "../storage"
+            },
+            
+            # S3-Compatible Storage Configuration
+            "S3_ENDPOINT_URL": {
+                "category": ConfigCategory.STORAGE,
+                "type": ConfigType.URL,
+                "title": "S3 Endpoint URL",
+                "description": "S3-compatible endpoint URL (e.g., https://s3.amazonaws.com or custom endpoint)",
+                "placeholder": "https://g7h4.fra3.idrivee2-51.com"
+            },
+            "S3_ACCESS_KEY_ID": {
+                "category": ConfigCategory.STORAGE,
+                "type": ConfigType.STRING,
+                "title": "S3 Access Key ID",
+                "description": "S3-compatible access key ID"
+            },
+            "S3_SECRET_ACCESS_KEY": {
+                "category": ConfigCategory.STORAGE,
+                "type": ConfigType.PASSWORD,
+                "title": "S3 Secret Access Key",
+                "description": "S3-compatible secret access key",
+                "sensitive": True
+            },
+            "S3_BUCKET_NAME": {
+                "category": ConfigCategory.STORAGE,
+                "type": ConfigType.STRING,
+                "title": "S3 Bucket Name",
+                "description": "S3-compatible bucket name for file storage"
+            },
+            "S3_REGION": {
+                "category": ConfigCategory.STORAGE,
+                "type": ConfigType.STRING,
+                "title": "S3 Region",
+                "description": "S3-compatible region (some providers may not require this)",
+                "default": "us-east-1"
+            },
+            "S3_USE_SSL": {
+                "category": ConfigCategory.STORAGE,
+                "type": ConfigType.BOOLEAN,
+                "title": "Use SSL for S3",
+                "description": "Use SSL/TLS for S3 connections",
+                "default": "true"
+            },
+            "S3_ADDRESSING_STYLE": {
+                "category": ConfigCategory.STORAGE,
+                "type": ConfigType.STRING,
+                "title": "S3 Addressing Style",
+                "description": "S3 addressing style (path or virtual)",
+                "default": "path",
+                "options": ["path", "virtual"]
+            },
+            
+            # Legacy AWS Configuration (kept for backward compatibility)
             "AWS_ACCESS_KEY_ID": {
                 "category": ConfigCategory.AWS,
                 "type": ConfigType.STRING,
-                "title": "AWS Access Key ID",
-                "description": "AWS access key for S3 integration"
+                "title": "AWS Access Key ID (Legacy)",
+                "description": "AWS access key for S3 integration (legacy, use S3_ACCESS_KEY_ID instead)"
             },
             "AWS_SECRET_ACCESS_KEY": {
                 "category": ConfigCategory.AWS,
                 "type": ConfigType.PASSWORD,
-                "title": "AWS Secret Access Key",
-                "description": "AWS secret key for S3 integration",
+                "title": "AWS Secret Access Key (Legacy)",
+                "description": "AWS secret key for S3 integration (legacy, use S3_SECRET_ACCESS_KEY instead)",
                 "sensitive": True
             },
             "AWS_DEFAULT_REGION": {
                 "category": ConfigCategory.AWS,
                 "type": ConfigType.STRING,
-                "title": "AWS Region",
-                "description": "Default AWS region",
+                "title": "AWS Region (Legacy)",
+                "description": "Default AWS region (legacy, use S3_REGION instead)",
                 "default": "us-east-1"
-            },
-            "S3_BUCKET_NAME": {
-                "category": ConfigCategory.AWS,
-                "type": ConfigType.STRING,
-                "title": "S3 Bucket Name",
-                "description": "S3 bucket for file storage"
             },
             
             # Data Sharing

@@ -42,8 +42,16 @@ class BaseStorageBackend:
         raise NotImplementedError
     
     def get_file_url(self, file_path: str, expires_in: int = 3600) -> Optional[str]:
-        """Get a temporary URL for file access (if supported)"""
-        return None
+        """Get a temporary URL for file access (local files served via API)"""
+        try:
+            from app.core.config import settings
+            # For local storage, return an API endpoint URL
+            # This will be served by a dedicated file serving endpoint
+            base_url = getattr(settings, 'BASE_URL', 'http://localhost:8000')
+            return f"{base_url}/api/files/serve/{file_path}"
+        except Exception as e:
+            logger.error(f"Failed to generate local file URL: {str(e)}")
+            return None
 
 class LocalStorageBackend(BaseStorageBackend):
     """Local file system storage backend"""
@@ -138,30 +146,61 @@ class LocalStorageBackend(BaseStorageBackend):
         response.headers["Content-Length"] = str(file_size)
         
         return response
+    
+    def get_file_url(self, file_path: str, expires_in: int = 3600) -> Optional[str]:
+        """Generate URL for local file access via API endpoint"""
+        try:
+            # For local storage, return an API endpoint URL that can serve the file
+            # This will be handled by a dedicated file serving endpoint
+            from urllib.parse import quote
+            encoded_path = quote(file_path, safe='/')
+            return f"/api/files/serve/{encoded_path}"
+        except Exception as e:
+            logger.error(f"Failed to generate local file URL: {str(e)}")
+            return None
 
 class S3StorageBackend(BaseStorageBackend):
     """S3-compatible storage backend"""
     
     def __init__(self, bucket_name: str, access_key: str, secret_key: str, 
-                 endpoint_url: Optional[str] = None, region: str = "us-east-1"):
+                 endpoint_url: Optional[str] = None, region: str = "us-east-1",
+                 use_ssl: bool = True, addressing_style: str = "path"):
         if not S3_AVAILABLE:
             raise ImportError("boto3 is required for S3 storage backend")
         
         self.bucket_name = bucket_name
         self.region = region
+        self.endpoint_url = endpoint_url
+        self.use_ssl = use_ssl
+        self.addressing_style = addressing_style
         
-        # Configure S3 client
+        # Configure S3 client with advanced options
         session = boto3.Session(
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
             region_name=region
         )
         
-        # Use custom endpoint if provided (for MinIO, Backblaze, etc.)
+        # Prepare S3 client configuration
+        client_config = {
+            'config': boto3.session.Config(
+                s3={
+                    'addressing_style': addressing_style
+                },
+                signature_version='s3v4',
+                retries={'max_attempts': 3}
+            )
+        }
+        
+        # Add SSL configuration
+        if not use_ssl:
+            client_config['use_ssl'] = False
+        
+        # Use custom endpoint if provided (for MinIO, IDrive, etc.)
         if endpoint_url:
-            self.s3_client = session.client('s3', endpoint_url=endpoint_url)
-        else:
-            self.s3_client = session.client('s3')
+            client_config['endpoint_url'] = endpoint_url
+            
+        self.s3_client = session.client('s3', **client_config)
         
         # Verify bucket access
         try:
@@ -295,44 +334,65 @@ class StorageService:
         storage_type = os.getenv('STORAGE_TYPE', 'local').lower()
         
         if storage_type == 'local':
-            storage_dir = os.getenv('STORAGE_DIR', 
-                os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "storage"))
+            # Try to get from settings first, then fall back to environment, then default
+            try:
+                from app.core.config import settings
+                storage_dir = settings.STORAGE_BASE_PATH
+                logger.info(f"Using storage directory from settings: {storage_dir}")
+            except ImportError:
+                storage_dir = os.getenv('STORAGE_DIR', 
+                    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "storage"))
+                logger.info(f"Using storage directory from environment/default: {storage_dir}")
+            
             self.backend = LocalStorageBackend(storage_dir)
             logger.info("Initialized local storage backend")
             
-        elif storage_type == 's3':
-            # S3 configuration (AWS S3)
+        elif storage_type in ['s3', 's3_compatible']:
+            # Unified S3/S3-compatible storage configuration
             bucket_name = os.getenv('S3_BUCKET_NAME')
-            access_key = os.getenv('AWS_ACCESS_KEY_ID')
-            secret_key = os.getenv('AWS_SECRET_ACCESS_KEY')
-            endpoint_url = None  # Use default AWS S3
-            region = os.getenv('AWS_DEFAULT_REGION', 'us-east-1')
+            access_key = os.getenv('S3_ACCESS_KEY_ID') or os.getenv('AWS_ACCESS_KEY_ID')  # Support both new and legacy
+            secret_key = os.getenv('S3_SECRET_ACCESS_KEY') or os.getenv('AWS_SECRET_ACCESS_KEY')  # Support both new and legacy
+            endpoint_url = os.getenv('S3_ENDPOINT_URL')  # Custom endpoint for S3-compatible services
+            region = os.getenv('S3_REGION') or os.getenv('AWS_DEFAULT_REGION', 'us-east-1')
+            use_ssl = os.getenv('S3_USE_SSL', 'true').lower() == 'true'
+            addressing_style = os.getenv('S3_ADDRESSING_STYLE', 'path')
             
-        elif storage_type == 's3_compatible':
-            # S3-compatible storage configuration (MinIO, Backblaze, etc.)
-            bucket_name = os.getenv('S3_COMPATIBLE_BUCKET_NAME')
-            access_key = os.getenv('S3_COMPATIBLE_ACCESS_KEY')
-            secret_key = os.getenv('S3_COMPATIBLE_SECRET_KEY')
-            endpoint_url = os.getenv('S3_COMPATIBLE_ENDPOINT')  # For custom S3-compatible services
-            region = os.getenv('S3_COMPATIBLE_REGION', 'us-east-1')
-            
+            # For AWS S3, set endpoint_url to None to use default
+            if storage_type == 's3' and not endpoint_url:
+                endpoint_url = None
+                
             if not all([bucket_name, access_key, secret_key]):
                 logger.error("S3 configuration incomplete, falling back to local storage")
-                storage_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "storage")
+                logger.error(f"Missing: bucket_name={bucket_name is not None}, access_key={access_key is not None}, secret_key={secret_key is not None}")
+                try:
+                    from app.core.config import settings
+                    storage_dir = settings.STORAGE_BASE_PATH
+                except ImportError:
+                    storage_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "storage")
                 self.backend = LocalStorageBackend(storage_dir)
             else:
                 try:
+                    if not S3_AVAILABLE:
+                        raise ImportError("boto3 not available")
+                        
                     self.backend = S3StorageBackend(
                         bucket_name=bucket_name,
                         access_key=access_key,
                         secret_key=secret_key,
                         endpoint_url=endpoint_url,
-                        region=region
+                        region=region,
+                        use_ssl=use_ssl,
+                        addressing_style=addressing_style
                     )
-                    logger.info(f"Initialized S3 storage backend (bucket: {bucket_name})")
+                    endpoint_info = f" (endpoint: {endpoint_url})" if endpoint_url else ""
+                    logger.info(f"Initialized S3 storage backend (bucket: {bucket_name}){endpoint_info}")
                 except Exception as e:
                     logger.error(f"S3 initialization failed: {str(e)}, falling back to local storage")
-                    storage_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "storage")
+                    try:
+                        from app.core.config import settings
+                        storage_dir = settings.STORAGE_BASE_PATH
+                    except ImportError:
+                        storage_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "storage")
                     self.backend = LocalStorageBackend(storage_dir)
         else:
             logger.warning(f"Unknown storage type: {storage_type}, using local storage")
@@ -387,6 +447,14 @@ class StorageService:
     async def retrieve_dataset_file(self, file_path: str) -> Optional[bytes]:
         """Retrieve a dataset file using the configured backend"""
         return await self.backend.retrieve_file(file_path)
+    
+    def get_dataset_file_url(self, file_path: str, expires_in: int = 3600) -> Optional[str]:
+        """Get a publicly accessible URL for a dataset file (for MindsDB integration)"""
+        return self.backend.get_file_url(file_path, expires_in)
+    
+    async def get_dataset_file_stream(self, file_path: str):
+        """Get a streaming response for a dataset file"""
+        return await self.backend.get_file_stream(file_path)
     
     async def delete_dataset_file(self, file_path: str) -> bool:
         """Delete a dataset file using the configured backend"""

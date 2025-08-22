@@ -460,12 +460,8 @@ export const datasetsAPI = {
   },
 
   // Download functionality
-  initiateDownload: async (datasetId: number, fileFormat: string = 'original', compression?: string) => {
-    const params: any = { file_format: fileFormat };
-    if (compression) {
-      params.compression = compression;
-    }
-    const response = await apiClient.get(`/api/datasets/${datasetId}/download`, { params });
+  initiateDownload: async (datasetId: number) => {
+    const response = await apiClient.get(`/api/datasets/${datasetId}/download`);
     return response.data;
   },
 

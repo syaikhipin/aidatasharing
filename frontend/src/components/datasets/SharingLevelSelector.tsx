@@ -71,7 +71,7 @@ export function SharingLevelSelector({
     lg: 'h-5 w-5'
   };
 
-  // Calculate dropdown position and close on outside click
+  // Handle outside clicks and escape key
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node) &&
@@ -89,23 +89,24 @@ export function SharingLevelSelector({
     if (isOpen) {
       document.addEventListener('mousedown', handleClickOutside);
       document.addEventListener('keydown', handleEscape);
-      
-      // Calculate position
-      if (buttonRef.current) {
-        const buttonRect = buttonRef.current.getBoundingClientRect();
-        const viewportHeight = window.innerHeight;
-        const dropdownHeight = 320; // Approximate height of dropdown
-        const spaceBelow = viewportHeight - buttonRect.bottom;
-        const spaceAbove = buttonRect.top;
-        
-        setDropdownPosition(spaceBelow < dropdownHeight && spaceAbove > dropdownHeight ? 'top' : 'bottom');
-      }
     }
 
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleEscape);
     };
+  }, [isOpen]);
+
+  // Calculate dropdown position when opening
+  useEffect(() => {
+    if (isOpen && buttonRef.current) {
+      const buttonRect = buttonRef.current.getBoundingClientRect();
+      const viewportHeight = window.innerHeight;
+      const dropdownHeight = 280; // Approximate height of dropdown
+      const spaceBelow = viewportHeight - buttonRect.bottom;
+      
+      setDropdownPosition(spaceBelow < dropdownHeight ? 'top' : 'bottom');
+    }
   }, [isOpen]);
 
   const handleLevelSelect = (level: SharingLevel) => {
@@ -143,17 +144,10 @@ export function SharingLevelSelector({
         <div 
           ref={dropdownRef}
           className={`
-            fixed z-[99999] w-80 bg-white border border-gray-200 rounded-lg shadow-xl
+            absolute z-50 mt-2 w-80 bg-white border border-gray-200 rounded-lg shadow-xl
             animate-in fade-in-0 zoom-in-95 duration-200
+            ${dropdownPosition === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'}
           `}
-          style={{
-            top: dropdownPosition === 'bottom' 
-              ? (buttonRef.current?.getBoundingClientRect().bottom ?? 0) + 8 
-              : (buttonRef.current?.getBoundingClientRect().top ?? 0) - 320 - 8,
-            left: Math.max(8, (buttonRef.current?.getBoundingClientRect().right ?? 0) - 320),
-            maxHeight: '400px',
-            overflowY: 'auto'
-          }}
           role="listbox"
         >
           <div className="py-2">
@@ -166,8 +160,9 @@ export function SharingLevelSelector({
                   key={level.value}
                   onClick={() => handleLevelSelect(level.value)}
                   className={`
-                    w-full px-4 py-3 text-left hover:bg-gray-50 flex items-start space-x-3
+                    w-full px-4 py-4 text-left hover:bg-gray-50 flex items-start space-x-3
                     transition-colors duration-150 focus:outline-none focus:bg-blue-50
+                    cursor-pointer select-none
                     ${isSelected ? 'bg-blue-50 border-r-4 border-blue-500' : ''}
                   `}
                   role="option"

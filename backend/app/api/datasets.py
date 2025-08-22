@@ -1121,8 +1121,6 @@ async def upload_dataset_file(
 @router.get("/{dataset_id}/download")
 async def download_dataset(
     dataset_id: int,
-    file_format: str = "original",
-    compression: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -1134,9 +1132,7 @@ async def download_dataset(
     # Initiate download and get secure token
     download_info = await download_service.initiate_download(
         dataset_id=dataset_id,
-        user=current_user,
-        file_format=file_format,
-        compression=compression
+        user=current_user
     )
     
     return download_info
@@ -1700,9 +1696,6 @@ async def get_dataset_preview(
 @router.post("/{dataset_id}/download-token")
 async def generate_download_token(
     dataset_id: int,
-    file_format: str = "original",
-    compression: Optional[str] = None,
-    expires_in_hours: int = 24,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -1714,9 +1707,7 @@ async def generate_download_token(
     # Generate download token with custom expiration
     download_info = await download_service.initiate_download(
         dataset_id=dataset_id,
-        user=current_user,
-        file_format=file_format,
-        compression=compression
+        user=current_user
     )
     
     return {
@@ -1724,8 +1715,7 @@ async def generate_download_token(
         "download_token": download_info["download_token"],
         "expires_at": download_info["expires_at"],
         "dataset_id": dataset_id,
-        "file_format": file_format,
-        "compression": compression
+        "file_format": "original"
     }
 
 @router.post("/{dataset_id}/refresh-metadata")

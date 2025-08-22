@@ -14,7 +14,7 @@ except ImportError:
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth, organizations, datasets, models, mindsdb, admin, analytics, data_access, data_sharing, file_handler, data_connectors, llm_configurations, environment, proxy_connectors, gateway
+from app.api import auth, organizations, datasets, models, mindsdb, admin, analytics, data_access, data_sharing, file_handler, file_server, data_connectors, llm_configurations, environment, proxy_connectors, gateway
 from app.core.config import settings
 from app.core.config_validator import validate_and_exit_on_failure
 import logging
@@ -288,6 +288,7 @@ app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"]
 app.include_router(data_access.router, prefix="/api/data-access", tags=["data-access"])
 app.include_router(data_sharing.router, prefix="/api/data-sharing", tags=["data-sharing"])
 app.include_router(file_handler.router, prefix="/api/files", tags=["file-handler"])
+app.include_router(file_server.router, prefix="/api/files", tags=["file-server"])
 app.include_router(data_connectors.router, prefix="/api/connectors", tags=["data-connectors"])
 app.include_router(data_connectors.router, prefix="/api/data-connectors", tags=["data-connectors"])  # Alternative endpoint
 app.include_router(environment.router, prefix="/api/admin/environment", tags=["admin"])

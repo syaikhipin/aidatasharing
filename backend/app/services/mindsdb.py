@@ -534,6 +534,92 @@ class MindsDBService:
                 "source": "error"
             }
 
+    def create_dataset_connection(self, dataset_name: str, file_url: str, file_type: str = "csv") -> Dict[str, Any]:
+        """Create a dataset connection in MindsDB using a file URL."""
+        try:
+            if not self._ensure_connection():
+                return {"status": "error", "message": "MindsDB connection not available"}
+
+            # Sanitize dataset name for SQL
+            safe_dataset_name = dataset_name.replace(" ", "_").replace("-", "_")
+            safe_dataset_name = "".join(c for c in safe_dataset_name if c.isalnum() or c == "_")
+            
+            logger.info(f"🔗 Creating dataset connection: {safe_dataset_name} from {file_url}")
+            
+            # Create dataset from URL
+            if file_type.lower() in ["csv", "json"]:
+                create_query = f"""
+                CREATE OR REPLACE DATASOURCE {safe_dataset_name}_datasource (
+                    url '{file_url}',
+                    type '{file_type.lower()}'
+                )
+                """
+            else:
+                # For other file types, create a generic datasource
+                create_query = f"""
+                CREATE OR REPLACE DATASOURCE {safe_dataset_name}_datasource (
+                    url '{file_url}'
+                )
+                """
+            
+            logger.info(f"🔍 Executing dataset creation query: {create_query}")
+            result = self.connection.query(create_query)
+            
+            return {
+                "status": "success",
+                "message": f"Dataset connection created: {safe_dataset_name}_datasource",
+                "dataset_name": safe_dataset_name,
+                "datasource_name": f"{safe_dataset_name}_datasource",
+                "file_url": file_url
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Dataset connection creation failed: {str(e)}")
+            return {
+                "status": "error",
+                "message": f"Failed to create dataset connection: {str(e)}"
+            }
+
+    def query_dataset(self, dataset_name: str, query: str) -> Dict[str, Any]:
+        """Execute a query against a dataset in MindsDB."""
+        try:
+            if not self._ensure_connection():
+                return {"status": "error", "message": "MindsDB connection not available"}
+
+            safe_dataset_name = dataset_name.replace(" ", "_").replace("-", "_")
+            safe_dataset_name = "".join(c for c in safe_dataset_name if c.isalnum() or c == "_")
+            
+            # Replace dataset placeholders in query
+            formatted_query = query.replace("{dataset}", f"{safe_dataset_name}_datasource")
+            
+            logger.info(f"🔍 Executing dataset query: {formatted_query}")
+            result = self.connection.query(formatted_query)
+            
+            if result and hasattr(result, 'fetch'):
+                df = result.fetch()
+                if df is not None and hasattr(df, 'empty'):
+                    return {
+                        "status": "success",
+                        "rows": df.to_dict('records') if not df.empty else [],
+                        "columns": list(df.columns) if not df.empty else [],
+                        "row_count": len(df)
+                    }
+            
+            return {
+                "status": "success",
+                "message": "Query executed successfully",
+                "rows": [],
+                "columns": [],
+                "row_count": 0
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Dataset query failed: {str(e)}")
+            return {
+                "status": "error",
+                "message": f"Query failed: {str(e)}"
+            }
+
     def create_web_connector(
         self, 
         connector_name: str, 

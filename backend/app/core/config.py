@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     VERSION: str = "1.0.0"
     
     # Database - Single unified database location
-    DATABASE_URL: str = "sqlite:///../storage/aishare_platform.db"
+    DATABASE_URL: str = "sqlite:///./storage/aishare_platform.db"
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -76,15 +76,19 @@ class Settings(BaseSettings):
     AWS_DEFAULT_REGION: str = "us-east-1"
     S3_BUCKET_NAME: Optional[str] = None
     
-    # File Upload Configuration
+    # Unified Storage Configuration - Read from environment
+    STORAGE_BASE_PATH: str = "../storage"
+    UPLOAD_PATH: str = "../storage/uploads"
+    DOCUMENT_STORAGE_PATH: str = "../storage/documents"
+    IMAGE_STORAGE_PATH: str = "../storage/images"
+    DATASET_STORAGE_PATH: str = "../storage/datasets"
+    TEMPORARY_FILES_PATH: str = "../storage/temp"
     MAX_FILE_SIZE_MB: int = 100
     ALLOWED_FILE_TYPES: str = Field(default_factory=lambda: "csv,json,xlsx,xls,txt,pdf,docx,doc,rtf,odt,jpg,jpeg,png,gif,bmp,webp")
-    UPLOAD_PATH: str = "./storage/uploads"
     
     # Document Processing Configuration
     MAX_DOCUMENT_SIZE_MB: int = 50
     SUPPORTED_DOCUMENT_TYPES: str = "pdf,docx,doc,txt,rtf,odt"
-    DOCUMENT_STORAGE_PATH: str = "./storage/documents"
     
     # PDF Processing Configuration
     ENABLE_PDF_PROCESSING: bool = True
@@ -95,7 +99,6 @@ class Settings(BaseSettings):
     # Image Processing Configuration
     MAX_IMAGE_SIZE_MB: int = 25
     SUPPORTED_IMAGE_TYPES: str = "jpg,jpeg,png,gif,bmp,webp"
-    IMAGE_STORAGE_PATH: str = "./storage/images"
     ENABLE_IMAGE_PROCESSING: bool = True
     IMAGE_THUMBNAIL_SIZE: int = 300
     

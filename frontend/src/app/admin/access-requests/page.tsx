@@ -73,7 +73,7 @@ function AdminAccessRequestsContent() {
   const handleApproveRequest = async (requestId: number, reason?: string) => {
     try {
       await dataAccessAPI.approveAccessRequest(requestId, {
-        approved: true,
+        decision: 'approve',
         reason: reason || 'Request approved by administrator'
       });
       
@@ -90,7 +90,7 @@ function AdminAccessRequestsContent() {
   const handleRejectRequest = async (requestId: number, reason: string) => {
     try {
       await dataAccessAPI.approveAccessRequest(requestId, {
-        approved: false,
+        decision: 'reject',
         reason: reason
       });
       

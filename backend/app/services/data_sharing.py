@@ -996,15 +996,53 @@ class DataSharingService:
         self.db.commit()
 
     def _initialize_ai_context(self, dataset: Dataset):
-        """Initialize AI context for dataset chat."""
+        """Initialize AI context for dataset chat with file access."""
         if not dataset.chat_context:
+            # Get file URL for MindsDB access
+            file_url = None
+            if dataset.file_path or dataset.source_url:
+                from app.services.storage import storage_service
+                try:
+                    file_path = dataset.file_path or dataset.source_url
+                    file_url = storage_service.get_dataset_file_url(file_path, expires_in=86400)  # 24 hours
+                    if file_url and not file_url.startswith('http'):
+                        # Convert relative URL to absolute for external access
+                        from app.core.config import settings
+                        base_url = getattr(settings, 'BASE_URL', 'http://localhost:8000')
+                        file_url = f"{base_url}{file_url}"
+                except Exception as e:
+                    logger.warning(f"Failed to generate file URL for dataset {dataset.id}: {str(e)}")
+            
+            # Create MindsDB dataset connection if file URL is available
+            mindsdb_datasource = None
+            if file_url and dataset.type in ["csv", "json"]:
+                try:
+                    logger.info(f"Creating MindsDB dataset connection for {dataset.name}")
+                    connection_result = self.mindsdb_service.create_dataset_connection(
+                        dataset_name=dataset.name,
+                        file_url=file_url,
+                        file_type=dataset.type.value if hasattr(dataset.type, 'value') else str(dataset.type)
+                    )
+                    if connection_result.get("status") == "success":
+                        mindsdb_datasource = connection_result.get("datasource_name")
+                        logger.info(f"✅ MindsDB datasource created: {mindsdb_datasource}")
+                    else:
+                        logger.warning(f"⚠️ MindsDB datasource creation failed: {connection_result.get('message')}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to create MindsDB datasource: {str(e)}")
+
             context = {
                 "dataset_name": dataset.name,
                 "description": dataset.description,
                 "type": dataset.type,
                 "columns": dataset.schema_info.get("columns", []) if dataset.schema_info else [],
                 "row_count": dataset.row_count,
-                "summary": dataset.ai_summary
+                "summary": dataset.ai_summary,
+                "file_url": file_url,
+                "file_path": dataset.file_path,
+                "accessible_via_url": bool(file_url),
+                "mindsdb_datasource": mindsdb_datasource,
+                "mindsdb_available": bool(mindsdb_datasource)
             }
             dataset.chat_context = context
             dataset.chat_model_name = settings.DEFAULT_GEMINI_MODEL
@@ -1012,12 +1050,15 @@ class DataSharingService:
 
     def _generate_system_prompt(self, dataset: Dataset) -> str:
         """Generate system prompt for AI chat."""
+        # Handle dataset type properly
+        dataset_type = dataset.type.value if hasattr(dataset.type, 'value') else str(dataset.type)
+        
         prompt = f"""You are an AI assistant helping users understand and analyze the dataset "{dataset.name}".
 
 Dataset Information:
 - Name: {dataset.name}
 - Description: {dataset.description or 'No description provided'}
-- Type: {dataset.type}
+- Type: {dataset_type}
 - Rows: {dataset.row_count or 'Unknown'}
 - Columns: {dataset.column_count or 'Unknown'}
 
@@ -1032,12 +1073,29 @@ Dataset Information:
         if dataset.ai_summary:
             prompt += f"Dataset Summary: {dataset.ai_summary}\n\n"
         
+        # Add file access information if available
+        if dataset.chat_context and dataset.chat_context.get('file_url'):
+            file_url = dataset.chat_context.get('file_url')
+            prompt += f"""File Access:
+- Dataset is accessible via URL: {file_url}
+- You can reference this URL for analysis or suggest how users can access the data
+- File format: {dataset_type}
+
+"""
+        else:
+            prompt += """File Access:
+- Dataset file is not directly accessible via URL
+- Analysis is based on metadata and schema information only
+
+"""
+        
         prompt += """You can help users:
 1. Understand the dataset structure and content
 2. Answer questions about the data
-3. Suggest analysis approaches
+3. Suggest analysis approaches and SQL queries when file is accessible
 4. Explain data patterns and insights
 5. Help with data interpretation
+6. Provide guidance on accessing and analyzing the data
 
 Please provide helpful, accurate, and concise responses. If you're unsure about something, let the user know."""
         
@@ -1051,12 +1109,27 @@ Please provide helpful, accurate, and concise responses. If you're unsure about 
     ) -> Dict[str, Any]:
         """Get AI response using MindsDB Gemini integration."""
         try:
-            # Prepare context for AI
+            # Prepare enhanced context for AI with file access info
+            file_access_info = ""
+            if dataset.chat_context and dataset.chat_context.get('file_url'):
+                file_url = dataset.chat_context.get('file_url')
+                file_access_info = f"""
+File Access Available: YES
+File URL: {file_url}
+File Type: {dataset.type}
+Note: The AI can reference this URL for data analysis suggestions."""
+            else:
+                file_access_info = """
+File Access Available: NO
+Note: Analysis limited to metadata and schema information."""
+
             context = f"""Dataset: {dataset.name}
 User Question: {user_message}
 
 Dataset Context: {dataset.chat_context}
-"""
+{file_access_info}
+
+Instructions: When answering, consider whether the dataset file is accessible via URL. If accessible, you can suggest specific analysis methods, SQL queries, or data manipulation techniques that work with the actual file. If not accessible, focus on insights from metadata and schema."""
             
             # Use MindsDB service to get response
             response = self.mindsdb_service.ai_chat(

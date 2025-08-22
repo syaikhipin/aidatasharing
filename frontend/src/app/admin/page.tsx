@@ -370,7 +370,7 @@ function EnvironmentTab({
   environmentVariables: EnvironmentVariables | null; 
   onUpdate: () => void; 
 }) {
-  const [activeCategory, setActiveCategory] = useState('ai_models');
+  const [activeCategory, setActiveCategory] = useState('storage');
   const [editingVar, setEditingVar] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [showSensitive, setShowSensitive] = useState<{[key: string]: boolean}>({});
@@ -378,17 +378,19 @@ function EnvironmentTab({
   const [reloading, setReloading] = useState(false);
 
   const categoryIcons = {
+    storage: Cloud,
     database: Database,
     security: Shield,
     ai_models: Zap,
     data_sharing: Users,
     file_upload: FileText,
-    connectors: Cloud,
+    connectors: Users,
     admin: Key,
     other: Settings
   };
 
   const categoryNames = {
+    storage: 'Storage',
     database: 'Database',
     security: 'Security',
     ai_models: 'AI Models',
@@ -426,7 +428,7 @@ function EnvironmentTab({
     } catch (error) {
       console.error('❌ Failed to reload environment variables:', error);
       // Show more detailed error information
-      const errorMessage = error?.response?.data?.detail || error?.message || 'Unknown error';
+      const errorMessage = (error as any)?.response?.data?.detail || (error as any)?.message || 'Unknown error';
       alert(`Failed to reload environment variables: ${errorMessage}`);
     } finally {
       setReloading(false);

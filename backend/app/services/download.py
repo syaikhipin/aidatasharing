@@ -17,9 +17,7 @@ from app.services.data_sharing import DataSharingService
 from app.services.download_validator import DownloadValidator
 from app.services.error_handler import DownloadErrorHandler
 from app.services.download_progress import DownloadProgressTracker
-from app.services.format_converter import format_converter
 import logging
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +36,6 @@ class DownloadService:
         self,
         dataset_id: int,
         user: User,
-        file_format: str = "original",
-        compression: Optional[str] = None,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -49,8 +45,6 @@ class DownloadService:
         Args:
             dataset_id: ID of dataset to download
             user: User requesting download
-            file_format: Format for download (original, csv, json, excel)
-            compression: Compression type (zip, gzip, none)
             ip_address: Client IP address
             user_agent: Client user agent
             
@@ -62,8 +56,8 @@ class DownloadService:
             is_valid, error_details = self.validator.validate_download_request(
                 dataset_id=dataset_id,
                 user=user,
-                file_format=file_format,
-                compression=compression
+                file_format="original",
+                compression=None
             )
             
             if not is_valid:
@@ -110,8 +104,8 @@ class DownloadService:
                 dataset_id=dataset_id,
                 user_id=user.id,
                 download_token=download_token,
-                file_format=file_format,
-                compression=compression,
+                file_format="original",
+                compression=None,
                 original_filename=dataset.name,
                 file_size_bytes=dataset.size_bytes,
                 download_status="pending",
@@ -133,8 +127,7 @@ class DownloadService:
                 "download_token": download_token,
                 "dataset_id": dataset_id,
                 "dataset_name": dataset.name,
-                "file_format": file_format,
-                "compression": compression,
+                "file_format": "original",
                 "estimated_size": dataset.size_bytes,
                 "expires_at": download_record.expires_at.isoformat(),
                 "status": "pending"
@@ -290,44 +283,8 @@ class DownloadService:
             # Use the resolved file path for all subsequent operations
             file_path = resolved_file_path
             
-            # Handle format conversion if needed
+            # Use original file without conversion
             final_file_path = file_path
-            cleanup_converted_file = False
-            
-            if download_record.file_format and download_record.file_format.lower() != 'original' and download_record.file_format.lower() != dataset.type.value.lower():
-                try:
-                    # Convert file to requested format
-                    dataset_metadata = {
-                        "dataset_id": dataset.id,
-                        "dataset_name": dataset.name,
-                        "original_format": dataset.type.value,
-                        "requested_format": download_record.file_format
-                    }
-                    
-                    final_file_path = await format_converter.convert_file(
-                        source_path=file_path,
-                        source_format=dataset.type.value,
-                        target_format=download_record.file_format,
-                        dataset_metadata=dataset_metadata
-                    )
-                    cleanup_converted_file = True
-                    
-                    logger.info(f"📄 Format conversion completed: {dataset.type.value} -> {download_record.file_format}")
-                    
-                except Exception as e:
-                    download_record.download_status = "failed"
-                    download_record.error_message = f"Format conversion failed: {str(e)}"
-                    self.db.commit()
-                    
-                    logger.error(f"❌ Format conversion failed: {e}")
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail={
-                            "error_code": "FORMAT_CONVERSION_FAILED",
-                            "message": "Failed to convert file format",
-                            "details": {"error": str(e)}
-                        }
-                    )
             
             # Log download access
             if user:
@@ -374,19 +331,8 @@ class DownloadService:
                 else:
                     response = await storage_service.get_file_response(final_file_path)
                 
-                # Set appropriate filename for converted files
-                if cleanup_converted_file and download_record.file_format:
-                    original_filename = Path(dataset.name or "download").stem
-                    file_extension = {
-                        'txt': '.txt',
-                        'json': '.json',
-                        'csv': '.csv',
-                        'excel': '.xlsx',
-                        'pdf': '.pdf'
-                    }.get(download_record.file_format.lower(), '')
-                    
-                    converted_filename = f"{original_filename}_converted{file_extension}"
-                    response.headers["Content-Disposition"] = f'attachment; filename="{converted_filename}"'
+                # Set original filename
+                response.headers["Content-Disposition"] = f'attachment; filename="{dataset.name}"'
                 
                 # Update download completion
                 end_time = datetime.utcnow()
@@ -410,23 +356,9 @@ class DownloadService:
                 response.headers["X-Download-ID"] = str(download_record.id)
                 response.headers["X-Download-Time"] = str(int(duration))
                 
-                # Cleanup converted file after successful response
-                if cleanup_converted_file:
-                    try:
-                        format_converter.cleanup_temp_file(final_file_path)
-                    except Exception as cleanup_error:
-                        logger.warning(f"Failed to cleanup converted file: {cleanup_error}")
-                
                 return response
                 
             except Exception as e:
-                # Cleanup converted file on error
-                if cleanup_converted_file:
-                    try:
-                        format_converter.cleanup_temp_file(final_file_path)
-                    except Exception as cleanup_error:
-                        logger.warning(f"Failed to cleanup converted file on error: {cleanup_error}")
-                
                 # Check if it's a network interruption
                 is_network_error = "connection" in str(e).lower() or "network" in str(e).lower() or "timeout" in str(e).lower()
                 

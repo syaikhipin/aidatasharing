@@ -496,18 +496,26 @@ async def download_shared_dataset(
             session.last_activity_at = datetime.utcnow()
             db.commit()
     
-    # Construct file path - check multiple possible locations
+    # Check if this is a URL (external dataset) - cannot download
+    if dataset.source_url.startswith(('http://', 'https://')):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot download external URL datasets. This dataset is hosted externally."
+        )
+    
+    # Construct file path - files are stored in backend/storage/
     file_path = None
     possible_paths = [
-        dataset.source_url,  # Direct path
-        f"uploads/{dataset.source_url}",  # In uploads directory
-        f"data/{dataset.source_url}",  # In data directory
-        f"files/{dataset.source_url}",  # In files directory
+        f"storage/{dataset.source_url}",  # Main storage directory (backend/storage/)
+        f"../storage/{dataset.source_url}",  # Alternative storage path
+        dataset.source_url,  # Direct path (if absolute)
+        f"uploads/{dataset.source_url}",  # Legacy uploads directory
     ]
     
     for path in possible_paths:
-        if os.path.exists(path):
-            file_path = path
+        abs_path = os.path.abspath(path)
+        if os.path.exists(abs_path):
+            file_path = abs_path
             break
     
     if not file_path:
@@ -573,18 +581,26 @@ async def download_shared_dataset_authenticated(
             detail="Invalid password"
         )
     
-    # Construct file path - check multiple possible locations
+    # Check if this is a URL (external dataset) - cannot download
+    if dataset.source_url.startswith(('http://', 'https://')):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot download external URL datasets. This dataset is hosted externally."
+        )
+    
+    # Construct file path - files are stored in backend/storage/
     file_path = None
     possible_paths = [
-        dataset.source_url,  # Direct path
-        f"uploads/{dataset.source_url}",  # In uploads directory
-        f"data/{dataset.source_url}",  # In data directory
-        f"files/{dataset.source_url}",  # In files directory
+        f"storage/{dataset.source_url}",  # Main storage directory (backend/storage/)
+        f"../storage/{dataset.source_url}",  # Alternative storage path
+        dataset.source_url,  # Direct path (if absolute)
+        f"uploads/{dataset.source_url}",  # Legacy uploads directory
     ]
     
     for path in possible_paths:
-        if os.path.exists(path):
-            file_path = path
+        abs_path = os.path.abspath(path)
+        if os.path.exists(abs_path):
+            file_path = abs_path
             break
     
     if not file_path:

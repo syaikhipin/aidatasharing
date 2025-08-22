@@ -78,9 +78,9 @@ class PreviewService:
                     # Try relative to storage directories
                     potential_paths = [
                         Path(dataset.source_url),
+                        Path("../storage") / dataset.source_url,
                         Path("storage") / dataset.source_url,
-                        Path("backend/storage") / dataset.source_url,
-                        Path("storage/uploads") / dataset.source_url
+                        Path("../storage/uploads") / dataset.source_url
                     ]
                     for potential_path in potential_paths:
                         if potential_path.exists():
