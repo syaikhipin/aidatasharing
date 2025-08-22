@@ -20,6 +20,7 @@ from app.services.preview import PreviewService
 import json
 import logging
 import time
+import os
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -643,6 +644,41 @@ async def delete_dataset(
     except Exception as e:
         logger.warning(f"ML models cleanup failed: {e}")
     
+    # Clean up uploaded file (if it exists)
+    file_deletion_result = None
+    if dataset.file_path or dataset.source_url:
+        try:
+            file_path_to_delete = None
+            
+            # Determine which file path to use for deletion
+            if dataset.file_path and os.path.exists(dataset.file_path):
+                # Use absolute file path if it exists
+                file_path_to_delete = dataset.file_path
+                logger.info(f"Deleting file using absolute path: {file_path_to_delete}")
+                os.remove(file_path_to_delete)
+                file_deletion_result = {"success": True, "method": "direct_file_deletion", "path": file_path_to_delete}
+            elif dataset.source_url and not dataset.source_url.startswith('http'):
+                # Use relative path through storage service for uploaded files
+                file_path_to_delete = dataset.source_url
+                logger.info(f"Deleting file using storage service: {file_path_to_delete}")
+                success = await storage_service.delete_dataset_file(file_path_to_delete)
+                file_deletion_result = {"success": success, "method": "storage_service", "path": file_path_to_delete}
+            else:
+                logger.info(f"Dataset {dataset_id} has no local file to delete (connector-based or external URL)")
+                file_deletion_result = {"success": True, "method": "no_file", "message": "No local file to delete"}
+            
+            if file_deletion_result and file_deletion_result.get("success"):
+                logger.info(f"Successfully deleted file for dataset {dataset_id}: {file_deletion_result}")
+            else:
+                logger.warning(f"Failed to delete file for dataset {dataset_id}: {file_deletion_result}")
+                
+        except Exception as e:
+            logger.error(f"Error deleting file for dataset {dataset_id}: {e}")
+            file_deletion_result = {"success": False, "error": str(e)}
+    else:
+        logger.info(f"Dataset {dataset_id} has no file to delete")
+        file_deletion_result = {"success": True, "method": "no_file", "message": "No file to delete"}
+    
     if force_delete and current_user.is_superuser:
         # Hard delete (only for superusers) - need to clean up related records first
         logger.info(f"Performing hard delete of dataset {dataset_id}")
@@ -678,17 +714,45 @@ async def delete_dataset(
         return {
             "message": "Dataset permanently deleted",
             "dataset_id": dataset_id,
-            "deletion_type": "hard"
+            "deletion_type": "hard",
+            "file_deletion": file_deletion_result
         }
     else:
         # Soft delete
+        # Disable sharing when dataset is deleted
+        if dataset.public_share_enabled:
+            dataset.public_share_enabled = False
+            dataset.share_token = None
+            dataset.share_expires_at = None
+            dataset.share_password = None
+            dataset.ai_chat_enabled = False
+            logger.info(f"Disabled sharing for deleted dataset {dataset_id}")
+        
         dataset.soft_delete(current_user.id)
+        
+        # Also disable any related proxy connectors
+        try:
+            from app.models.proxy_connector import ProxyConnector
+            proxy_connectors = db.query(ProxyConnector).filter(
+                ProxyConnector.name == dataset.name,
+                ProxyConnector.organization_id == dataset.organization_id,
+                ProxyConnector.is_active == True
+            ).all()
+            
+            for proxy_connector in proxy_connectors:
+                proxy_connector.is_active = False
+                logger.info(f"Disabled proxy connector {proxy_connector.proxy_id} for deleted dataset {dataset_id}")
+                
+        except Exception as e:
+            logger.warning(f"Failed to disable proxy connectors for dataset {dataset_id}: {e}")
+        
         db.commit()
         return {
             "message": "Dataset deleted successfully",
             "dataset_id": dataset_id,
             "deletion_type": "soft",
-            "deleted_at": dataset.deleted_at
+            "deleted_at": dataset.deleted_at,
+            "file_deletion": file_deletion_result
         }
 
 

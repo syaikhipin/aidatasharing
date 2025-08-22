@@ -137,13 +137,16 @@ class Dataset(Base):
     chat_sessions = relationship("DatasetChatSession", back_populates="dataset")
     share_accesses = relationship("DatasetShareAccess", back_populates="dataset")
 
-    def soft_delete(self, user_id: int):
-        """Soft delete the dataset"""
+    def soft_delete(self, user_id: int, delete_file: bool = True):
+        """Soft delete the dataset with optional file cleanup"""
         self.is_deleted = True
         self.deleted_at = datetime.utcnow()
         self.deleted_by = user_id
         self.status = DatasetStatus.DELETED
         self.is_active = False
+        
+        # Note: File deletion is handled in the API layer since it requires
+        # async operations and access to the storage service
 
     def activate(self):
         """Activate the dataset"""

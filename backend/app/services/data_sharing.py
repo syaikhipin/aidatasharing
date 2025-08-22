@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import logging
 import secrets
 import hashlib
+import os
 import pandas as pd
 import numpy as np
 from fastapi import HTTPException, status
@@ -622,13 +623,15 @@ class DataSharingService:
         """Get dataset information via share token."""
         dataset = self.db.query(Dataset).filter(
             Dataset.share_token == share_token,
-            Dataset.public_share_enabled == True
+            Dataset.public_share_enabled == True,
+            Dataset.is_deleted == False,
+            Dataset.is_active == True
         ).first()
         
         if not dataset:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Shared dataset not found"
+                detail="Shared dataset not found or no longer available"
             )
         
         # Check expiration
@@ -643,6 +646,34 @@ class DataSharingService:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid password"
+            )
+        
+        # Check if dataset depends on a connector and validate connector status
+        if dataset.connector_id:
+            from app.models.dataset import DatabaseConnector
+            connector = self.db.query(DatabaseConnector).filter(
+                DatabaseConnector.id == dataset.connector_id,
+                DatabaseConnector.is_deleted == False,
+                DatabaseConnector.is_active == True
+            ).first()
+            
+            if not connector:
+                # Disable sharing if connector is gone
+                dataset.public_share_enabled = False
+                self.db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_410_GONE,
+                    detail="Dataset source is no longer available"
+                )
+        
+        # Check if uploaded file still exists (for non-connector datasets)
+        elif dataset.file_path and not os.path.exists(dataset.file_path):
+            # Disable sharing if file is gone
+            dataset.public_share_enabled = False
+            self.db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail="Dataset file is no longer available"
             )
         
         # Log access

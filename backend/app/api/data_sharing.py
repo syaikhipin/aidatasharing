@@ -190,21 +190,155 @@ async def get_dataset_analytics(
     return service.get_dataset_analytics(dataset_id, current_user.id)
 
 
+@router.post("/validate-shared-resources")
+async def validate_shared_resources(
+    resource_tokens: Dict[str, List[str]],  # e.g., {"share_tokens": ["token1", "token2"], "proxy_ids": ["id1", "id2"]}
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """Validate multiple shared resources at once for frontend validation."""
+    validation_results = {
+        "share_tokens": {},
+        "proxy_connectors": {},
+        "validation_timestamp": datetime.utcnow().isoformat()
+    }
+    
+    # Validate share tokens
+    if "share_tokens" in resource_tokens:
+        for token in resource_tokens["share_tokens"]:
+            try:
+                dataset = db.query(Dataset).filter(
+                    Dataset.share_token == token,
+                    Dataset.public_share_enabled == True,
+                    Dataset.is_deleted == False,
+                    Dataset.is_active == True
+                ).first()
+                
+                if dataset:
+                    # Check expiration
+                    is_expired = (dataset.share_expires_at and 
+                                dataset.share_expires_at < datetime.utcnow())
+                    
+                    # Check connector if exists
+                    connector_valid = True
+                    if dataset.connector_id:
+                        connector = db.query(Dataset.__table__.c.connector_id).filter(
+                            Dataset.id == dataset.id
+                        ).first()
+                        if connector:
+                            from app.models.dataset import DatabaseConnector
+                            connector_obj = db.query(DatabaseConnector).filter(
+                                DatabaseConnector.id == dataset.connector_id,
+                                DatabaseConnector.is_deleted == False,
+                                DatabaseConnector.is_active == True
+                            ).first()
+                            connector_valid = connector_obj is not None
+                    
+                    # Check file exists for uploaded datasets
+                    file_valid = True
+                    if dataset.file_path and not dataset.connector_id:
+                        file_valid = os.path.exists(dataset.file_path)
+                    
+                    validation_results["share_tokens"][token] = {
+                        "valid": not is_expired and connector_valid and file_valid,
+                        "dataset_name": dataset.name,
+                        "expires_at": dataset.share_expires_at.isoformat() if dataset.share_expires_at else None,
+                        "is_expired": is_expired,
+                        "connector_valid": connector_valid,
+                        "file_valid": file_valid,
+                        "dataset_type": dataset.type.value if dataset.type else None
+                    }
+                else:
+                    validation_results["share_tokens"][token] = {
+                        "valid": False,
+                        "error": "Dataset not found or sharing disabled"
+                    }
+            except Exception as e:
+                validation_results["share_tokens"][token] = {
+                    "valid": False,
+                    "error": f"Validation error: {str(e)}"
+                }
+    
+    # Validate proxy connectors
+    if "proxy_ids" in resource_tokens:
+        for proxy_id in resource_tokens["proxy_ids"]:
+            try:
+                from app.models.proxy_connector import ProxyConnector
+                proxy = db.query(ProxyConnector).filter(
+                    ProxyConnector.proxy_id == proxy_id,
+                    ProxyConnector.is_active == True
+                ).first()
+                
+                if proxy:
+                    validation_results["proxy_connectors"][proxy_id] = {
+                        "valid": True,
+                        "name": proxy.name,
+                        "connector_type": proxy.connector_type,
+                        "is_public": proxy.is_public,
+                        "proxy_url": proxy.proxy_url
+                    }
+                else:
+                    validation_results["proxy_connectors"][proxy_id] = {
+                        "valid": False,
+                        "error": "Proxy connector not found or inactive"
+                    }
+            except Exception as e:
+                validation_results["proxy_connectors"][proxy_id] = {
+                    "valid": False,
+                    "error": f"Validation error: {str(e)}"
+                }
+    
+    return validation_results
+
+
 @router.get("/my-shared-datasets")
 async def get_my_shared_datasets(
+    include_invalid: bool = False,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ) -> List[Dict[str, Any]]:
-    """Get all datasets shared by the current user."""
+    """Get all datasets shared by the current user with validity checks."""
     from app.models.dataset import Dataset
     
     datasets = db.query(Dataset).filter(
         Dataset.owner_id == current_user.id,
-        Dataset.public_share_enabled == True
+        Dataset.public_share_enabled == True,
+        Dataset.is_deleted == False,
+        Dataset.is_active == True
     ).all()
     
-    return [
-        {
+    result = []
+    
+    for dataset in datasets:
+        # Check validity
+        is_expired = (dataset.share_expires_at and 
+                     dataset.share_expires_at < datetime.utcnow())
+        
+        # Check connector validity
+        connector_valid = True
+        if dataset.connector_id:
+            from app.models.dataset import DatabaseConnector
+            connector = db.query(DatabaseConnector).filter(
+                DatabaseConnector.id == dataset.connector_id,
+                DatabaseConnector.is_deleted == False,
+                DatabaseConnector.is_active == True
+            ).first()
+            connector_valid = connector is not None
+        
+        # Check file validity
+        file_valid = True
+        if dataset.file_path and not dataset.connector_id:
+            file_valid = os.path.exists(dataset.file_path)
+        
+        is_valid = not is_expired and connector_valid and file_valid
+        
+        # If dataset is invalid, automatically disable sharing
+        if not is_valid and not include_invalid:
+            dataset.public_share_enabled = False
+            db.commit()
+            logger.info(f"Auto-disabled sharing for invalid dataset {dataset.id}")
+            continue
+        
+        dataset_info = {
             "id": dataset.id,
             "name": dataset.name,
             "description": dataset.description,
@@ -218,10 +352,18 @@ async def get_my_shared_datasets(
             "last_accessed": dataset.last_accessed,
             "sharing_level": dataset.sharing_level.value if dataset.sharing_level else "private",
             "type": dataset.type.value if dataset.type else None,
-            "size_bytes": dataset.size_bytes
+            "size_bytes": dataset.size_bytes,
+            "is_valid": is_valid,
+            "validation_details": {
+                "is_expired": is_expired,
+                "connector_valid": connector_valid,
+                "file_valid": file_valid
+            } if include_invalid else None
         }
-        for dataset in datasets
-    ]
+        
+        result.append(dataset_info)
+    
+    return result
 
 
 @router.post("/refresh-proxy-connectors")

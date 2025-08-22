@@ -53,6 +53,7 @@ export function SharingLevelSelector({
 }: SharingLevelSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [dropdownPosition, setDropdownPosition] = useState<'bottom' | 'top'>('bottom');
+  const [isAnimating, setIsAnimating] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   
@@ -61,14 +62,14 @@ export function SharingLevelSelector({
   
   const sizeClasses = {
     sm: 'px-2 py-1 text-xs',
-    md: 'px-3 py-2 text-sm',
-    lg: 'px-4 py-3 text-base'
+    md: 'px-2.5 py-1.5 text-sm',
+    lg: 'px-3 py-2 text-base'
   };
   
   const iconSizes = {
     sm: 'h-3 w-3',
-    md: 'h-4 w-4',
-    lg: 'h-5 w-5'
+    md: 'h-3.5 w-3.5',
+    lg: 'h-4 w-4'
   };
 
   // Handle outside clicks and escape key
@@ -83,6 +84,7 @@ export function SharingLevelSelector({
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setIsOpen(false);
+        buttonRef.current?.focus();
       }
     };
 
@@ -110,8 +112,19 @@ export function SharingLevelSelector({
   }, [isOpen]);
 
   const handleLevelSelect = (level: SharingLevel) => {
+    if (isAnimating || level === currentLevel) return;
+    
+    setIsAnimating(true);
     onLevelChange(level);
     setIsOpen(false);
+    
+    // Reset animation state after transition
+    setTimeout(() => setIsAnimating(false), 200);
+  };
+
+  const handleToggle = () => {
+    if (disabled || isAnimating) return;
+    setIsOpen(!isOpen);
   };
 
   return (
@@ -119,19 +132,25 @@ export function SharingLevelSelector({
       <button
         ref={buttonRef}
         type="button"
-        onClick={() => !disabled && setIsOpen(!isOpen)}
-        disabled={disabled}
+        onClick={handleToggle}
+        disabled={disabled || isAnimating}
         className={`
           ${sizeClasses[size]} 
           ${currentLevelData?.bgColor} 
           ${currentLevelData?.borderColor}
-          ${disabled ? 'opacity-50 cursor-not-allowed' : currentLevelData?.hoverColor + ' cursor-pointer'}
-          inline-flex items-center space-x-2 rounded-lg border
-          font-medium transition-all duration-200 focus:outline-none focus:ring-2 
-          focus:ring-blue-500 focus:border-blue-500 shadow-sm
+          ${disabled || isAnimating ? 'opacity-50 cursor-not-allowed' : currentLevelData?.hoverColor + ' cursor-pointer'}
+          inline-flex items-center space-x-1.5 rounded-md border
+          font-medium transition-all duration-150 focus:outline-none focus:ring-1 
+          focus:ring-blue-400 focus:border-blue-400 shadow-sm min-w-0
         `}
         aria-expanded={isOpen}
         aria-haspopup="listbox"
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            handleToggle();
+          }
+        }}
       >
         <CurrentIcon className={`${iconSizes[size]} ${currentLevelData?.color}`} />
         <span className={`${currentLevelData?.color} font-medium`}>{currentLevelData?.label}</span>
@@ -150,7 +169,7 @@ export function SharingLevelSelector({
           `}
           role="listbox"
         >
-          <div className="py-2">
+          <div className="py-1">
             {SHARING_LEVELS.map((level) => {
               const Icon = level.icon;
               const isSelected = level.value === currentLevel;
@@ -167,18 +186,24 @@ export function SharingLevelSelector({
                   `}
                   role="option"
                   aria-selected={isSelected}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handleLevelSelect(level.value);
+                    }
+                  }}
                 >
-                  <Icon className={`${iconSizes.md} mt-0.5 ${level.color} flex-shrink-0`} />
+                  <Icon className={`h-3.5 w-3.5 mt-0.5 ${level.color} flex-shrink-0`} />
                   <div className="flex-1 min-w-0">
-                    <div className={`font-medium ${level.color} flex items-center gap-2`}>
+                    <div className={`font-medium text-sm ${level.color} flex items-center gap-1.5`}>
                       {level.label}
                       {isSelected && (
-                        <span className="text-xs text-blue-600 font-normal bg-blue-100 px-2 py-0.5 rounded-full">
-                          Current
+                        <span className="text-xs text-blue-600 font-normal bg-blue-100 px-1.5 py-0.5 rounded">
+                          ✓
                         </span>
                       )}
                     </div>
-                    <div className="text-sm text-gray-600 mt-1 leading-relaxed">
+                    <div className="text-xs text-gray-600 mt-0.5 leading-relaxed">
                       {level.description}
                     </div>
                   </div>
@@ -188,9 +213,9 @@ export function SharingLevelSelector({
           </div>
           
           {/* Footer */}
-          <div className="border-t border-gray-100 px-4 py-3 bg-gray-50 rounded-b-lg">
-            <p className="text-xs text-gray-600 leading-relaxed">
-              💡 Changes take effect immediately. Public datasets can be accessed by anyone with the share link.
+          <div className="border-t border-gray-100 px-3 py-2 bg-gray-50 rounded-b-md">
+            <p className="text-xs text-gray-600 leading-snug">
+              💡 Changes take effect immediately
             </p>
           </div>
         </div>
@@ -208,16 +233,16 @@ export function SharingLevelBadge({ level, size = 'sm' }: { level: SharingLevel;
   
   const sizeVariants = {
     sm: {
-      container: 'px-2 py-1 text-xs',
+      container: 'px-1.5 py-0.5 text-xs',
       icon: 'h-3 w-3'
     },
     md: {
-      container: 'px-3 py-1.5 text-sm',
-      icon: 'h-4 w-4'
+      container: 'px-2 py-1 text-sm',
+      icon: 'h-3.5 w-3.5'
     },
     lg: {
-      container: 'px-4 py-2 text-base',
-      icon: 'h-5 w-5'
+      container: 'px-2.5 py-1.5 text-sm',
+      icon: 'h-4 w-4'
     }
   };
   
@@ -226,7 +251,7 @@ export function SharingLevelBadge({ level, size = 'sm' }: { level: SharingLevel;
   return (
     <span className={`
       ${variant.container} ${levelData.bgColor} ${levelData.color} ${levelData.borderColor}
-      inline-flex items-center space-x-1.5 rounded-full font-medium border shadow-sm
+      inline-flex items-center space-x-1 rounded-md font-medium border shadow-sm
     `}>
       <Icon className={variant.icon} />
       <span>{levelData.label}</span>

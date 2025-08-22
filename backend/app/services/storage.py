@@ -496,6 +496,73 @@ class StorageService:
         
         return True
     
+    async def cleanup_orphaned_files(self, db_session) -> Dict[str, Any]:
+        """Clean up files that no longer have corresponding dataset records"""
+        try:
+            from app.models.dataset import Dataset
+            
+            cleanup_result = {
+                "deleted_files": [],
+                "errors": [],
+                "total_cleaned": 0,
+                "total_errors": 0
+            }
+            
+            # Get all datasets with file paths
+            datasets_with_files = db_session.query(Dataset).filter(
+                (Dataset.file_path.isnot(None)) | (Dataset.source_url.isnot(None))
+            ).all()
+            
+            # Create a set of valid file paths from existing datasets
+            valid_paths = set()
+            for dataset in datasets_with_files:
+                if dataset.file_path:
+                    valid_paths.add(dataset.file_path)
+                if dataset.source_url and not dataset.source_url.startswith('http'):
+                    valid_paths.add(dataset.source_url)
+            
+            # For local storage, scan the storage directory
+            if isinstance(self.backend, LocalStorageBackend):
+                storage_dir = self.backend.storage_dir
+                
+                if os.path.exists(storage_dir):
+                    for root, dirs, files in os.walk(storage_dir):
+                        for file in files:
+                            full_path = os.path.join(root, file)
+                            relative_path = os.path.relpath(full_path, storage_dir)
+                            
+                            # Check if this file is referenced by any dataset
+                            is_orphaned = True
+                            for valid_path in valid_paths:
+                                if (full_path == valid_path or 
+                                    relative_path == valid_path or
+                                    file in valid_path):
+                                    is_orphaned = False
+                                    break
+                            
+                            if is_orphaned:
+                                try:
+                                    os.remove(full_path)
+                                    cleanup_result["deleted_files"].append(full_path)
+                                    cleanup_result["total_cleaned"] += 1
+                                    logger.info(f"Deleted orphaned file: {full_path}")
+                                except Exception as e:
+                                    error_msg = f"Failed to delete {full_path}: {str(e)}"
+                                    cleanup_result["errors"].append(error_msg)
+                                    cleanup_result["total_errors"] += 1
+                                    logger.error(error_msg)
+            
+            logger.info(f"Cleanup completed: {cleanup_result['total_cleaned']} files deleted, {cleanup_result['total_errors']} errors")
+            return cleanup_result
+            
+        except Exception as e:
+            logger.error(f"Orphaned file cleanup failed: {str(e)}")
+            return {
+                "error": str(e),
+                "total_cleaned": 0,
+                "total_errors": 1
+            }
+
     def get_backend_info(self) -> Dict[str, Any]:
         """Get information about the current storage backend"""
         backend_type = type(self.backend).__name__

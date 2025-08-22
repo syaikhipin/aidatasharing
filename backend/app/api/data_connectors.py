@@ -13,7 +13,7 @@ from datetime import datetime
 from app.core.database import get_db
 from app.core.auth import get_current_user
 from app.models.user import User
-from app.models.dataset import DatabaseConnector
+from app.models.dataset import DatabaseConnector, Dataset
 from app.models.organization import DataSharingLevel
 from app.services.mindsdb import MindsDBService
 from app.services.connector_service import ConnectorService
@@ -574,6 +574,43 @@ async def delete_connector(
             detail="Connector not found"
         )
     
+    # Disable sharing and proxy connectors for datasets that depend on this connector
+    affected_datasets = db.query(Dataset).filter(
+        Dataset.connector_id == connector_id,
+        Dataset.is_deleted == False
+    ).all()
+    
+    disabled_sharing_count = 0
+    disabled_proxy_count = 0
+    
+    for dataset in affected_datasets:
+        # Disable sharing if enabled
+        if dataset.public_share_enabled:
+            dataset.public_share_enabled = False
+            dataset.share_token = None
+            dataset.share_expires_at = None
+            dataset.share_password = None
+            dataset.ai_chat_enabled = False
+            disabled_sharing_count += 1
+            logger.info(f"Disabled sharing for dataset {dataset.id} due to connector deletion")
+        
+        # Disable related proxy connectors
+        try:
+            from app.models.proxy_connector import ProxyConnector
+            proxy_connectors = db.query(ProxyConnector).filter(
+                ProxyConnector.name == dataset.name,
+                ProxyConnector.organization_id == dataset.organization_id,
+                ProxyConnector.is_active == True
+            ).all()
+            
+            for proxy_connector in proxy_connectors:
+                proxy_connector.is_active = False
+                disabled_proxy_count += 1
+                logger.info(f"Disabled proxy connector {proxy_connector.proxy_id} due to connector deletion")
+                
+        except Exception as e:
+            logger.warning(f"Failed to disable proxy connectors for dataset {dataset.id}: {e}")
+
     if force_delete and current_user.is_superuser:
         # Hard delete
         db.delete(connector)
@@ -583,7 +620,12 @@ async def delete_connector(
     
     db.commit()
     
-    return {"message": "Connector deleted successfully"}
+    return {
+        "message": "Connector deleted successfully",
+        "affected_datasets": len(affected_datasets),
+        "disabled_sharing": disabled_sharing_count,
+        "disabled_proxy_connectors": disabled_proxy_count
+    }
 
 
 @router.post("/{connector_id}/test")
