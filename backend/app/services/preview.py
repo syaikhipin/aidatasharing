@@ -102,6 +102,8 @@ class PreviewService:
                     return await self._generate_excel_preview(file_path, dataset, rows, include_stats)
                 elif dataset.type.value.lower() == 'pdf':
                     return await self._generate_pdf_preview(file_path, dataset, rows, include_stats)
+                elif dataset.type.value.lower() == 'image':
+                    return await self._generate_image_preview(file_path, dataset, rows, include_stats)
             else:
                 logger.warning(f"⚠️ File not found for dataset {dataset.id}: {dataset.source_url}")
                 
@@ -339,6 +341,78 @@ class PreviewService:
             
         except Exception as e:
             logger.error(f"❌ Excel preview generation failed: {e}")
+            return convert_numpy_types(self._get_error_preview(dataset, str(e)))
+    
+    async def _generate_image_preview(
+        self, 
+        file_path: Path, 
+        dataset: Dataset, 
+        rows: int,
+        include_stats: bool,
+        page: int = 1
+    ) -> Dict[str, Any]:
+        """Generate preview for image files"""
+        try:
+            preview_data = {
+                "type": "image",
+                "format": "image",
+                "file_size_bytes": file_path.stat().st_size,
+                "generated_at": datetime.utcnow().isoformat()
+            }
+            
+            try:
+                from PIL import Image
+                with Image.open(file_path) as img:
+                    preview_data.update({
+                        "dimensions": {
+                            "width": img.width,
+                            "height": img.height
+                        },
+                        "image_format": img.format,
+                        "color_mode": img.mode,
+                        "has_transparency": img.mode in ('RGBA', 'LA') or 'transparency' in img.info
+                    })
+                    
+                    # Extract EXIF data if available
+                    exif_data = {}
+                    if hasattr(img, '_getexif') and img._getexif():
+                        try:
+                            raw_exif = img._getexif()
+                            if raw_exif:
+                                # Convert only basic EXIF data to avoid serialization issues
+                                for key, value in raw_exif.items():
+                                    if isinstance(value, (str, int, float)) and len(str(value)) < 100:
+                                        exif_data[str(key)] = str(value)
+                        except Exception:
+                            pass  # EXIF extraction can fail
+                    
+                    if exif_data:
+                        preview_data["exif_data"] = exif_data
+                
+                # Add image metadata summary
+                preview_data["image_metadata"] = {
+                    "format": preview_data.get("image_format", "unknown"),
+                    "dimensions": preview_data.get("dimensions", {}),
+                    "color_mode": preview_data.get("color_mode", "unknown"),
+                    "file_size_mb": round(preview_data["file_size_bytes"] / (1024 * 1024), 2)
+                }
+                
+            except ImportError:
+                preview_data.update({
+                    "error": "Image processing not available",
+                    "note": "PIL library not installed",
+                    "basic_info_only": True
+                })
+            except Exception as e:
+                preview_data.update({
+                    "error": f"Failed to process image: {str(e)}",
+                    "basic_info_only": True
+                })
+            
+            return convert_numpy_types(preview_data)
+            
+        except Exception as e:
+            logger.error(f"❌ Image preview generation failed: {e}")
             return convert_numpy_types(self._get_error_preview(dataset, str(e)))
     
     async def _generate_pdf_preview(
@@ -663,7 +737,7 @@ class PreviewService:
             return self._get_cached_preview(dataset, rows)
     async def _get_file_upload_preview(self, dataset: Dataset, rows: int, include_stats: bool) -> Dict[str, Any]:
         """Generate preview from FileUpload metadata (universal upload system)"""
-        from app.models.dataset import FileUpload
+        from app.models.file_handler import FileUpload
         
         # Get the FileUpload record for this dataset
         file_upload = self.db.query(FileUpload).filter(
@@ -683,37 +757,73 @@ class PreviewService:
             "estimated_total_rows": metadata.get("rows", metadata.get("data_rows", 0)),
             "total_columns": len(metadata.get("headers", [])) if metadata.get("headers") else metadata.get("columns", 0),
             "source": "file_upload_metadata",
-            "generated_at": datetime.utcnow().isoformat()
+            "generated_at": datetime.utcnow().isoformat(),
+            "file_upload_id": file_upload.id,
+            "original_filename": file_upload.original_filename
         }
         
-        # Handle different file types
-        if metadata.get("type") == "spreadsheet":
+        # Handle different file types based on enhanced metadata
+        if metadata.get("type") == "spreadsheet" or file_upload.file_type == "spreadsheet":
             preview_data.update(self._create_spreadsheet_preview(metadata, rows))
-        elif metadata.get("type") == "document":
+        elif metadata.get("type") == "image" or file_upload.file_type == "image":
+            preview_data.update(self._create_image_preview(metadata, file_upload))
+        elif metadata.get("type") == "document" or file_upload.file_type == "document":
             preview_data.update(self._create_document_preview(metadata, rows))
-        elif file_upload.file_type == "other" and metadata.get("structure_type"):
+        elif metadata.get("type") == "json" or metadata.get("structure_type"):
             preview_data.update(self._create_json_preview(metadata, rows))
         else:
             preview_data.update(self._create_basic_preview(metadata, rows))
             
         # Add basic statistics if requested
-        if include_stats and metadata.get("column_statistics"):
-            preview_data["basic_stats"] = {
-                "row_count": metadata.get("data_rows", metadata.get("rows", 0)),
-                "column_count": len(metadata.get("headers", [])) if metadata.get("headers") else 0,
+        if include_stats:
+            stats = {
+                "row_count": metadata.get("rows", metadata.get("data_rows", 0)),
+                "column_count": len(metadata.get("headers", [])) if metadata.get("headers") else metadata.get("columns", 0),
                 "numeric_columns": [],
                 "text_columns": []
             }
             
-            # Categorize columns by type
-            for col, stats in metadata.get("column_statistics", {}).items():
-                col_type = stats.get("inferred_type", "unknown")
-                if col_type in ["numeric", "integer", "float"]:
-                    preview_data["basic_stats"]["numeric_columns"].append(col)
-                else:
-                    preview_data["basic_stats"]["text_columns"].append(col)
+            # Enhanced statistics from metadata
+            if metadata.get("estimated_data_types"):
+                for col, dtype in metadata.get("estimated_data_types", {}).items():
+                    if "int" in str(dtype).lower() or "float" in str(dtype).lower():
+                        stats["numeric_columns"].append(col)
+                    else:
+                        stats["text_columns"].append(col)
+            elif metadata.get("column_statistics"):
+                # Categorize columns by type from column statistics
+                for col, col_stats in metadata.get("column_statistics", {}).items():
+                    col_type = col_stats.get("inferred_type", "unknown")
+                    if col_type in ["numeric", "integer", "float"]:
+                        stats["numeric_columns"].append(col)
+                    else:
+                        stats["text_columns"].append(col)
+                        
+            preview_data["basic_stats"] = stats
                     
         return preview_data
+    
+    def _create_image_preview(self, metadata: Dict[str, Any], file_upload) -> Dict[str, Any]:
+        """Create preview for image data from metadata"""
+        preview = {
+            "content_type": "image",
+            "image_metadata": metadata.get("image_info", {})
+        }
+        
+        # Add specific image fields from file_upload if available
+        if file_upload:
+            preview["dimensions"] = {
+                "width": file_upload.image_width,
+                "height": file_upload.image_height
+            }
+            preview["format"] = file_upload.image_format
+            preview["color_mode"] = file_upload.color_mode
+            
+        # Add EXIF data if available
+        if metadata.get("exif"):
+            preview["exif_data"] = metadata["exif"]
+            
+        return preview
     
     def _create_spreadsheet_preview(self, metadata: Dict[str, Any], rows: int) -> Dict[str, Any]:
         """Create preview for spreadsheet data from metadata"""

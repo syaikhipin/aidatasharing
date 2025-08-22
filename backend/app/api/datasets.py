@@ -144,9 +144,11 @@ async def create_dataset(
     dataset_type = DatasetType.CSV if data_format.upper() == "CSV" else DatasetType.JSON
     
     # Extract sharing level
-    sharing_level_str = dataset_data.get("sharing_level", "PRIVATE")
+    sharing_level_str = dataset_data.get("sharing_level", "private")
     try:
-        sharing_level = DataSharingLevel(sharing_level_str)
+        # Handle both 'private' and 'PRIVATE' formats
+        normalized_level = sharing_level_str.lower() if isinstance(sharing_level_str, str) else "private"
+        sharing_level = DataSharingLevel(normalized_level)
     except ValueError:
         sharing_level = DataSharingLevel.PRIVATE
     
@@ -232,17 +234,22 @@ async def get_dataset(
     current_user: User = Depends(get_current_user)
 ):
     """Get a specific dataset if accessible to the user."""
+    logger.info(f"🔍 GET dataset {dataset_id} called by user {current_user.id}")
     data_service = DataSharingService(db)
     
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
     if not dataset:
+        logger.warning(f"❌ Dataset {dataset_id} not found in database")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Dataset not found"
         )
     
+    logger.info(f"✅ Found dataset {dataset_id}: name='{dataset.name}', type={dataset.type}, status={dataset.status}")
+    
     # Check access permissions
     if not data_service.can_access_dataset(current_user, dataset):
+        logger.warning(f"❌ User {current_user.id} denied access to dataset {dataset_id}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied to this dataset"
@@ -255,6 +262,7 @@ async def get_dataset(
         access_type="view"
     )
     
+    logger.info(f"📤 Returning dataset {dataset_id} to user {current_user.id}")
     return dataset
 
 @router.put("/{dataset_id}", response_model=DatasetResponse)
@@ -299,10 +307,15 @@ async def update_dataset_metadata(
     updated_fields = []
     for field, value in metadata_update.items():
         if field in allowed_fields:
-            if field == 'sharing_level' and isinstance(value, str):
-                # Convert string to enum
+            if field == 'sharing_level':
+                # Convert string to enum properly
                 try:
-                    value = DataSharingLevel(value.upper())
+                    if isinstance(value, str):
+                        # Handle both 'private' and 'PRIVATE' formats
+                        normalized_value = value.lower()
+                        value = DataSharingLevel(normalized_value)
+                    elif not isinstance(value, DataSharingLevel):
+                        continue
                 except ValueError:
                     continue
             
@@ -570,12 +583,17 @@ async def update_dataset(
     # Update fields with proper type conversion
     updated_fields = []
     for field, value in dataset_update.dict(exclude_unset=True).items():
-        if field == 'sharing_level' and isinstance(value, str):
-            # Convert string to enum
+        if field == 'sharing_level':
+            # Convert string to enum properly
             try:
-                original_value = value
-                value = DataSharingLevel(value.lower())
-                logger.info(f"Converted sharing_level from '{original_value}' to {value}")
+                if isinstance(value, str):
+                    # Handle both 'private' and 'PRIVATE' formats
+                    normalized_value = value.lower()
+                    value = DataSharingLevel(normalized_value)
+                    logger.info(f"Converted sharing_level '{value}' to enum {value}")
+                elif not isinstance(value, DataSharingLevel):
+                    logger.warning(f"Invalid sharing level type: {type(value)}")
+                    continue
             except ValueError:
                 logger.warning(f"Invalid sharing level value: {value}")
                 continue
@@ -749,7 +767,7 @@ async def upload_dataset_file(
     file: UploadFile = File(...),
     name: str = None,
     description: str = None,
-    sharing_level: DataSharingLevel = DataSharingLevel.PRIVATE,
+    sharing_level: str = "private",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -760,6 +778,14 @@ async def upload_dataset_file(
             detail="Must be part of an organization to upload datasets"
         )
     
+    # Convert sharing level string to enum
+    try:
+        # Handle both 'private' and 'PRIVATE' formats
+        normalized_level = sharing_level.lower() if isinstance(sharing_level, str) else "private"
+        sharing_level_enum = DataSharingLevel(normalized_level)
+    except ValueError:
+        sharing_level_enum = DataSharingLevel.PRIVATE
+    
     # Validate file type
     if not file.filename:
         raise HTTPException(
@@ -768,10 +794,13 @@ async def upload_dataset_file(
         )
     
     file_extension = file.filename.split('.')[-1].lower()
-    if file_extension not in ['csv', 'json', 'xlsx', 'xls', 'txt', 'pdf']:
+    from app.core.config import settings
+    allowed_extensions = settings.get_allowed_file_types()
+    
+    if file_extension not in allowed_extensions:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported file type. Supported formats: CSV, JSON, Excel, TXT, PDF"
+            detail=f"Unsupported file type '{file_extension}'. Supported formats: {', '.join(allowed_extensions).upper()}"
         )
     
     # Read file content
@@ -789,7 +818,7 @@ async def upload_dataset_file(
         status=DatasetStatus.PROCESSING,
         owner_id=current_user.id,
         organization_id=current_user.organization_id,
-        sharing_level=sharing_level,
+        sharing_level=sharing_level_enum,
         size_bytes=file_size,
         allow_download=True,
         allow_api_access=True
@@ -829,8 +858,10 @@ async def upload_dataset_file(
         dataset_type = DatasetType.EXCEL
     elif file_extension == 'pdf':
         dataset_type = DatasetType.PDF
+    elif file_extension.lower() in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tiff', 'svg']:
+        dataset_type = DatasetType.IMAGE
     else:
-        dataset_type = DatasetType.CSV  # Default fallback
+        dataset_type = DatasetType.TXT  # Better fallback for unknown types
     
     # Process file content and extract metadata
     file_metadata = {}
@@ -2042,6 +2073,15 @@ async def _get_file_type_preview(dataset: Dataset) -> Dict[str, Any]:
             "extractable": dataset.file_metadata.get("extractable", True) if dataset.file_metadata else True
         })
     
+    elif dataset.type == DatasetType.IMAGE:
+        # Image specific preview
+        file_preview.update({
+            "dimensions": dataset.file_metadata.get("dimensions", {}) if dataset.file_metadata else {},
+            "image_format": dataset.file_metadata.get("image_format", "unknown") if dataset.file_metadata else "unknown",
+            "color_mode": dataset.file_metadata.get("color_mode", "unknown") if dataset.file_metadata else "unknown",
+            "has_exif": bool(dataset.file_metadata.get("exif_data")) if dataset.file_metadata else False
+        })
+    
     return file_preview
 
 
@@ -2129,10 +2169,12 @@ async def reupload_dataset_file(
         )
     
     file_extension = file.filename.split('.')[-1].lower()
-    if file_extension not in ['csv', 'json', 'xlsx', 'xls', 'txt', 'pdf']:
+    from app.core.config import settings
+    allowed_extensions = settings.get_allowed_file_types()
+    if file_extension not in allowed_extensions:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported file type. Supported formats: CSV, JSON, Excel, TXT, PDF"
+            detail=f"Unsupported file type. Supported formats: {', '.join(allowed_extensions).upper()}"
         )
     
     try:
@@ -2174,8 +2216,10 @@ async def reupload_dataset_file(
             new_dataset_type = DatasetType.EXCEL
         elif file_extension == 'pdf':
             new_dataset_type = DatasetType.PDF
+        elif file_extension.lower() in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tiff', 'svg']:
+            new_dataset_type = DatasetType.IMAGE
         else:
-            new_dataset_type = DatasetType.CSV  # Default fallback
+            new_dataset_type = DatasetType.TXT  # Better fallback for unknown types
         
         # Process new file content and extract metadata
         file_metadata = {}

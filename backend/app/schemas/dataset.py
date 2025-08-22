@@ -61,6 +61,47 @@ class DatasetResponse(DatasetBase):
     updated_at: datetime
     last_accessed: Optional[datetime] = None
     
+    # Enhanced metadata fields
+    file_metadata: Optional[Dict[str, Any]] = None
+    content_preview: Optional[str] = None
+    file_path: Optional[str] = None
+    preview_data: Optional[Dict[str, Any]] = None
+    schema_metadata: Optional[Dict[str, Any]] = None
+    quality_metrics: Optional[Dict[str, Any]] = None
+    column_statistics: Optional[Dict[str, Any]] = None
+    
+    # AI processing fields
+    ai_processing_status: Optional[str] = None
+    ai_summary: Optional[str] = None
+    ai_insights: Optional[Dict[str, Any]] = None
+    ai_recommendations: Optional[Dict[str, Any]] = None
+    ai_processed_at: Optional[datetime] = None
+    
+    # Data sharing fields
+    public_share_enabled: Optional[bool] = None
+    share_token: Optional[str] = None
+    share_expires_at: Optional[datetime] = None
+    share_view_count: Optional[int] = None
+    
+    # AI chat fields
+    ai_chat_enabled: Optional[bool] = None
+    chat_model_name: Optional[str] = None
+    chat_context: Optional[Dict[str, Any]] = None
+    
+    # Access control fields
+    allow_ai_chat: Optional[bool] = None
+    allow_model_training: Optional[bool] = None
+    
+    # Download tracking
+    download_count: Optional[int] = None
+    last_downloaded_at: Optional[datetime] = None
+    
+    # Soft delete fields
+    is_active: Optional[bool] = None
+    is_deleted: Optional[bool] = None
+    deleted_at: Optional[datetime] = None
+    deleted_by: Optional[int] = None
+    
     owner: Optional[DatasetOwner] = None
     
     class Config:

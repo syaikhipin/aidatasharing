@@ -121,7 +121,25 @@ function DatasetDetailContent() {
     try {
       setIsLoading(true);
       setError(null);
+      console.log('Fetching dataset with ID:', datasetId);
       const response = await datasetsAPI.getDataset(datasetId);
+      console.log('Dataset API response:', response);
+      
+      // Check if response contains validation error objects (Pydantic errors have type, loc, msg fields)
+      if (response && typeof response === 'object' && 
+          ('type' in response && 'loc' in response && 'msg' in response)) {
+        console.error('Received validation error as dataset:', response);
+        setError('Invalid dataset data received. Please try refreshing the page.');
+        return;
+      }
+      
+      // Check if response is empty object
+      if (!response || (typeof response === 'object' && Object.keys(response).length === 0)) {
+        console.error('Received empty response for dataset:', response);
+        setError('Dataset not found or no data returned. Please check if the dataset exists.');
+        return;
+      }
+      
       setDataset(response);
     } catch (error: any) {
       console.error('Failed to fetch dataset:', error);
@@ -148,6 +166,17 @@ function DatasetDetailContent() {
     try {
       setIsLoadingPreview(true);
       const response = await datasetsAPI.getDatasetPreview(datasetId);
+      
+      // Check if response contains validation error objects
+      if (response && typeof response === 'object' && ('type' in response || 'loc' in response || 'msg' in response)) {
+        console.error('Received validation error as preview:', response);
+        setEnhancedPreview({
+          type: 'error',
+          message: 'Invalid preview data received',
+          error: 'Validation error in response'
+        });
+        return;
+      }
       
       // The backend returns the response structure with preview data nested inside
       console.log('Preview API response:', response);
@@ -938,6 +967,79 @@ function DatasetDetailContent() {
                           </div>
                         </div>
                       ))}
+                    </div>
+                  )}
+
+                  {/* Image Preview */}
+                  {(enhancedPreview.type === 'image' || enhancedPreview.content_type === 'image') && (
+                    <div>
+                      <h4 className="text-md font-medium text-gray-900 mb-3 flex items-center">
+                        <FileText className="w-4 h-4 mr-2 text-purple-600" />
+                        Image Preview
+                      </h4>
+                      
+                      {enhancedPreview.dimensions && (
+                        <div className="bg-purple-50 border border-purple-200 rounded-md p-4 mb-4">
+                          <h5 className="text-sm font-medium text-purple-800 mb-2">Image Information</h5>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                            <div>
+                              <span className="font-medium text-purple-700">Dimensions:</span>
+                              <p className="text-purple-900">{enhancedPreview.dimensions.width} × {enhancedPreview.dimensions.height}</p>
+                            </div>
+                            {enhancedPreview.format && (
+                              <div>
+                                <span className="font-medium text-purple-700">Format:</span>
+                                <p className="text-purple-900">{enhancedPreview.format}</p>
+                              </div>
+                            )}
+                            {enhancedPreview.color_mode && (
+                              <div>
+                                <span className="font-medium text-purple-700">Color Mode:</span>
+                                <p className="text-purple-900">{enhancedPreview.color_mode}</p>
+                              </div>
+                            )}
+                            {enhancedPreview.file_size_bytes && (
+                              <div>
+                                <span className="font-medium text-purple-700">File Size:</span>
+                                <p className="text-purple-900">{formatFileSize(enhancedPreview.file_size_bytes)}</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {enhancedPreview.image_metadata && (
+                        <div className="bg-gray-50 rounded-md p-4 mb-4">
+                          <h5 className="text-sm font-medium text-gray-900 mb-2">Technical Details</h5>
+                          <div className="grid grid-cols-2 gap-3 text-sm">
+                            {Object.entries(enhancedPreview.image_metadata).map(([key, value]: [string, any]) => (
+                              <div key={key}>
+                                <span className="font-medium text-gray-700 capitalize">{key.replace('_', ' ')}:</span>
+                                <p className="text-gray-900">{String(value)}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {enhancedPreview.exif_data && Object.keys(enhancedPreview.exif_data).length > 0 && (
+                        <div className="bg-gray-50 rounded-md p-4">
+                          <h5 className="text-sm font-medium text-gray-900 mb-2">EXIF Data</h5>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs max-h-32 overflow-y-auto">
+                            {Object.entries(enhancedPreview.exif_data).slice(0, 10).map(([key, value]: [string, any]) => (
+                              <div key={key} className="flex justify-between">
+                                <span className="font-medium text-gray-600">{key}:</span>
+                                <span className="text-gray-800 truncate ml-2">{String(value)}</span>
+                              </div>
+                            ))}
+                          </div>
+                          {Object.keys(enhancedPreview.exif_data).length > 10 && (
+                            <p className="text-xs text-gray-500 mt-2">
+                              ... and {Object.keys(enhancedPreview.exif_data).length - 10} more EXIF fields
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
 

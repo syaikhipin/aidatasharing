@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi.responses import FileResponse
 from fastapi.security import HTTPBearer
 from sqlalchemy.orm import Session
 from typing import Dict, Any, List, Optional
@@ -6,6 +7,8 @@ from pydantic import BaseModel
 from datetime import datetime, timedelta
 import uuid
 import logging
+import os
+import mimetypes
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
@@ -360,34 +363,13 @@ async def access_shared_dataset_public(
     ip_address = request.client.host if request else None
     user_agent = request.headers.get("user-agent") if request else None
     
-    # Create anonymous session
-    session_token = str(uuid.uuid4())
-    expires_at = datetime.utcnow() + timedelta(hours=24)  # 24 hour session
-    
-    # Get dataset info first
+    # Get dataset info directly without creating sessions
     dataset_info = await service.get_shared_dataset(
         share_token=share_token,
         password=password,
         ip_address=ip_address,
         user_agent=user_agent
     )
-    
-    # Create session record
-    session = ShareAccessSession(
-        session_token=session_token,
-        dataset_id=dataset_info["dataset_id"],
-        share_token=share_token,
-        ip_address=ip_address,
-        user_agent=user_agent,
-        expires_at=expires_at
-    )
-    
-    db.add(session)
-    db.commit()
-    
-    # Add session info to response
-    dataset_info["session_token"] = session_token
-    dataset_info["session_expires_at"] = expires_at
     
     return dataset_info
 
@@ -514,13 +496,46 @@ async def download_shared_dataset(
             session.last_activity_at = datetime.utcnow()
             db.commit()
     
-    # Return download info (would be actual file in production)
-    return {
-        "download_url": f"/files/{dataset.source_url}",
-        "filename": f"{dataset.name}.{dataset.type}",
-        "size_bytes": dataset.size_bytes,
-        "mime_type": f"application/{dataset.type}"
-    }
+    # Construct file path - check multiple possible locations
+    file_path = None
+    possible_paths = [
+        dataset.source_url,  # Direct path
+        f"uploads/{dataset.source_url}",  # In uploads directory
+        f"data/{dataset.source_url}",  # In data directory
+        f"files/{dataset.source_url}",  # In files directory
+    ]
+    
+    for path in possible_paths:
+        if os.path.exists(path):
+            file_path = path
+            break
+    
+    if not file_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found on server"
+        )
+    
+    # Determine MIME type
+    mime_type, _ = mimetypes.guess_type(file_path)
+    if not mime_type:
+        mime_type = f"application/{dataset.type}" if dataset.type else "application/octet-stream"
+    
+    # Create appropriate filename
+    filename = f"{dataset.name}.{dataset.type}" if dataset.type else dataset.name
+    
+    # Return file response
+    return FileResponse(
+        path=file_path,
+        filename=filename,
+        media_type=mime_type,
+        headers={
+            "Content-Disposition": f"attachment; filename=\"{filename}\"",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        }
+    )
 @router.get("/shared/{share_token}/download")
 async def download_shared_dataset_authenticated(
     share_token: str,
@@ -558,11 +573,44 @@ async def download_shared_dataset_authenticated(
             detail="Invalid password"
         )
     
-    # Return download info (would be actual file in production)
-    return {
-        "download_url": f"/files/{dataset.source_url}",
-        "filename": f"{dataset.name}.{dataset.type}",
-        "size_bytes": dataset.size_bytes,
-        "mime_type": f"application/{dataset.type}"
-    }
+    # Construct file path - check multiple possible locations
+    file_path = None
+    possible_paths = [
+        dataset.source_url,  # Direct path
+        f"uploads/{dataset.source_url}",  # In uploads directory
+        f"data/{dataset.source_url}",  # In data directory
+        f"files/{dataset.source_url}",  # In files directory
+    ]
+    
+    for path in possible_paths:
+        if os.path.exists(path):
+            file_path = path
+            break
+    
+    if not file_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found on server"
+        )
+    
+    # Determine MIME type
+    mime_type, _ = mimetypes.guess_type(file_path)
+    if not mime_type:
+        mime_type = f"application/{dataset.type}" if dataset.type else "application/octet-stream"
+    
+    # Create appropriate filename
+    filename = f"{dataset.name}.{dataset.type}" if dataset.type else dataset.name
+    
+    # Return file response
+    return FileResponse(
+        path=file_path,
+        filename=filename,
+        media_type=mime_type,
+        headers={
+            "Content-Disposition": f"attachment; filename=\"{filename}\"",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        }
+    )
 

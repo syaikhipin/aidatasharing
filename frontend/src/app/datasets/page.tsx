@@ -306,7 +306,7 @@ function DatasetsContent() {
                             <h3 className="text-lg font-semibold text-gray-900 mr-3">
                               {dataset.name}
                             </h3>
-                            <SharingLevelBadge level={dataset.sharing_level || 'private'} />
+                            <SharingLevelBadge level={(dataset.sharing_level?.toLowerCase() || 'private') as 'private' | 'organization' | 'public'} />
                           </div>
                           <p className="text-gray-600 mb-3">
                             {dataset.description || 'No description provided'}
@@ -330,7 +330,7 @@ function DatasetsContent() {
                         </div>
                         <div className="flex flex-col items-end space-y-3 ml-4">
                           <SharingLevelSelector
-                            currentLevel={dataset.sharing_level || 'private'}
+                            currentLevel={(dataset.sharing_level?.toLowerCase() || 'private') as 'private' | 'organization' | 'public'}
                             onLevelChange={(level) => handleSharingLevelChange(dataset.id, level)}
                             size="sm"
                           />

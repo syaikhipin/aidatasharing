@@ -39,19 +39,24 @@ class DataSharingService:
         if dataset.owner_id == user.id:
             return True
         
-        # Check sharing level
-        sharing_level_str = dataset.sharing_level.value if hasattr(dataset.sharing_level, 'value') else str(dataset.sharing_level)
-        sharing_level_str = sharing_level_str.upper()
+        # Normalize sharing level to DataSharingLevel enum
+        if isinstance(dataset.sharing_level, str):
+            try:
+                sharing_level = DataSharingLevel(dataset.sharing_level.lower())
+            except ValueError:
+                sharing_level = DataSharingLevel.PRIVATE
+        else:
+            sharing_level = dataset.sharing_level or DataSharingLevel.PRIVATE
         
-        if sharing_level_str == "PUBLIC":
+        if sharing_level == DataSharingLevel.PUBLIC:
             # PUBLIC datasets are accessible to all users
             return True
         
-        elif sharing_level_str == "ORGANIZATION":
+        elif sharing_level == DataSharingLevel.ORGANIZATION:
             # ORGANIZATION datasets are accessible within the same organization
             return user.organization_id and user.organization_id == dataset.organization_id
         
-        elif sharing_level_str == "PRIVATE":
+        elif sharing_level == DataSharingLevel.PRIVATE:
             # PRIVATE datasets are only accessible to owners (already checked above)
             return False
         
@@ -416,14 +421,23 @@ class DataSharingService:
         
         # Count by sharing level
         sharing_stats = {
+            DataSharingLevel.PRIVATE: 0,
             DataSharingLevel.ORGANIZATION: 0,
-            DataSharingLevel.DEPARTMENT: 0,
-            DataSharingLevel.PRIVATE: 0
+            DataSharingLevel.PUBLIC: 0
         }
         
         total_size = 0
         for dataset in datasets:
-            sharing_stats[dataset.sharing_level] += 1
+            # Normalize sharing level
+            if isinstance(dataset.sharing_level, str):
+                try:
+                    level = DataSharingLevel(dataset.sharing_level.lower())
+                except ValueError:
+                    level = DataSharingLevel.PRIVATE
+            else:
+                level = dataset.sharing_level or DataSharingLevel.PRIVATE
+            
+            sharing_stats[level] += 1
             if dataset.size_bytes:
                 total_size += dataset.size_bytes
         
@@ -484,17 +498,24 @@ class DataSharingService:
             "total_datasets": len(datasets),
             "by_sharing_level": {
                 "private": 0,
-                "department": 0,
-                "organization": 0
+                "organization": 0,
+                "public": 0
             },
             "by_type": {},
             "total_access_logs": 0,
             "unique_users_accessed": 0
         }
         
-        # Count by sharing level (no public level)
+        # Count by sharing level
         for dataset in datasets:
-            level = dataset.sharing_level.value if dataset.sharing_level else "private"
+            # Normalize sharing level to string value
+            if isinstance(dataset.sharing_level, str):
+                level = dataset.sharing_level.lower()
+            elif dataset.sharing_level:
+                level = dataset.sharing_level.value
+            else:
+                level = "private"
+            
             if level in stats["by_sharing_level"]:
                 stats["by_sharing_level"][level] += 1
             
@@ -567,8 +588,11 @@ class DataSharingService:
         dataset.share_password = password
         dataset.ai_chat_enabled = enable_chat and settings.ENABLE_AI_CHAT
         
-        # Create proxy connector for API access
-        self._create_dataset_proxy_connector_sync(dataset, share_token)
+        # Create proxy connector for API access (skip for image files)
+        if dataset.type.value.lower() not in ['image']:
+            self._create_dataset_proxy_connector_sync(dataset, share_token)
+        else:
+            logger.info(f"Skipping proxy connector creation for {dataset.type.value} file: {dataset.name}")
         
         self.db.commit()
         self.db.refresh(dataset)
@@ -670,6 +694,24 @@ class DataSharingService:
         except Exception as e:
             logger.warning(f"Failed to generate preview for shared dataset {dataset.id}: {e}")
             
+        # Determine if this is an uploaded file or a connector dataset
+        is_uploaded_file = bool(
+            dataset.source_url and 
+            not dataset.source_url.startswith('http')
+        )
+        
+        # Only include proxy connection info for connector datasets, not uploaded files
+        proxy_connection_info = None
+        if not is_uploaded_file:
+            # For connector datasets, provide basic connection info
+            proxy_connection_info = {
+                "connection_type": dataset.type.value,
+                "proxy_url": f"http://localhost:10103",
+                "access_token": share_token,
+                "database_name": dataset.name,
+                "supports_sql": dataset.type.value in ['csv', 'database', 'api']
+            }
+
         return {
             "dataset_id": dataset.id,
             "dataset_name": dataset.name,
@@ -691,7 +733,10 @@ class DataSharingService:
             "owner_name": dataset.owner.full_name if dataset.owner else None,
             "organization_name": dataset.organization.name if dataset.organization else None,
             "shared_at": dataset.created_at,
-            "preview_data": preview_data
+            "preview_data": preview_data,
+            "is_uploaded_file": is_uploaded_file,
+            "has_proxy_connection": bool(proxy_connection_info),
+            "proxy_connection_info": proxy_connection_info
         }
 
     def create_chat_session(

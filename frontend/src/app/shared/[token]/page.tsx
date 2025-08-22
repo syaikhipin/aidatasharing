@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { dataSharingAPI } from '@/lib/api';
 import { Eye, Download, MessageSquare, Lock, Calendar, User, Database, Shield, Copy } from 'lucide-react';
@@ -21,6 +21,15 @@ interface SharedDataset {
   requires_password: boolean;
   enable_chat: boolean;
   preview_data?: any;
+  is_uploaded_file?: boolean;
+  has_proxy_connection?: boolean;
+  proxy_connection_info?: {
+    connection_type: string;
+    proxy_url: string;
+    access_token: string;
+    database_name: string;
+    supports_sql: boolean;
+  };
 }
 
 export default function SharedDatasetPage() {
@@ -38,59 +47,37 @@ export default function SharedDatasetPage() {
   const [chatHistory, setChatHistory] = useState<any[]>([]);
   const [isChatting, setIsChatting] = useState(false);
 
-  useEffect(() => {
-    if (token) {
-      fetchSharedDataset();
-    }
-  }, [token]);
-
-  const fetchSharedDataset = async () => {
+  const fetchSharedDataset = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
       
-      // First try public access (no authentication required)
-      try {
-        const response = await dataSharingAPI.getPublicSharedDataset(token);
-        setDataset(response);
-        
-        if (response.requires_password && !response.access_allowed) {
-          setShowPasswordForm(true);
-        }
-        return;
-      } catch (publicError: any) {
-        // If public access fails, try authenticated access
-        console.log('Public access failed, trying authenticated access:', publicError.response?.status);
-        
-        if (publicError.response?.status === 401 || publicError.response?.status === 403) {
-          // This might be an organization-level dataset requiring authentication
-          try {
-            const response = await dataSharingAPI.getSharedDataset(token);
-            setDataset(response);
-            
-            if (response.requires_password && !response.access_allowed) {
-              setShowPasswordForm(true);
-            }
-            return;
-          } catch (authError: any) {
-            // If authenticated access also fails, show appropriate error
-            if (authError.response?.status === 401) {
-              setError('This dataset requires you to be logged in. Please login and try again.');
-            } else {
-              throw authError;
-            }
-          }
-        } else {
-          throw publicError;
-        }
+      // Try public access first
+      const response = await dataSharingAPI.getPublicSharedDataset(token);
+      setDataset(response);
+      
+      if (response.requires_password && !response.access_allowed) {
+        setShowPasswordForm(true);
       }
     } catch (error: any) {
       console.error('Failed to fetch shared dataset:', error);
-      setError(error.response?.data?.detail || 'Failed to access shared dataset');
+      if (error.response?.status === 404) {
+        setError('Shared dataset not found or has expired');
+      } else if (error.response?.status === 401) {
+        setError('Access denied. This dataset may require authentication.');
+      } else {
+        setError(error.response?.data?.detail || 'Failed to access shared dataset');
+      }
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [token]);
+
+  useEffect(() => {
+    if (token) {
+      fetchSharedDataset();
+    }
+  }, [token, fetchSharedDataset]);
 
   const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,22 +86,10 @@ export default function SharedDatasetPage() {
       setIsAuthenticating(true);
       setError(null);
       
-      // First try public access with password
-      try {
-        const response = await dataSharingAPI.accessPublicSharedDatasetWithPassword(token, password);
-        setDataset(response);
-        setShowPasswordForm(false);
-        return;
-      } catch (publicError: any) {
-        // If public access fails, try authenticated access with password
-        if (publicError.response?.status === 401 || publicError.response?.status === 403) {
-          const response = await dataSharingAPI.accessSharedDatasetWithPassword(token, password);
-          setDataset(response);
-          setShowPasswordForm(false);
-        } else {
-          throw publicError;
-        }
-      }
+      // Try public access with password
+      const response = await dataSharingAPI.getPublicSharedDataset(token, password);
+      setDataset(response);
+      setShowPasswordForm(false);
     } catch (error: any) {
       console.error('Password authentication failed:', error);
       setError(error.response?.data?.detail || 'Invalid password');
@@ -125,14 +100,26 @@ export default function SharedDatasetPage() {
 
   const handleDownload = async () => {
     try {
-      // Create download URL
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const downloadUrl = `${API_BASE_URL}/api/data-sharing/shared/${token}/download`;
       
-      // Open download in new window
-      window.open(downloadUrl, '_blank');
+      // Build download URL with password if needed
+      let downloadUrl = `${API_BASE_URL}/api/data-sharing/public/shared/${token}/download`;
+      
+      // Add password as query parameter if dataset requires it
+      if (dataset?.requires_password && password) {
+        downloadUrl += `?password=${encodeURIComponent(password)}`;
+      }
+      
+      // Create a temporary link element for download
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = dataset?.dataset_name || 'dataset';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     } catch (error) {
       console.error('Download failed:', error);
+      setError('Download failed. Please try again.');
     }
   };
 
@@ -429,17 +416,76 @@ export default function SharedDatasetPage() {
           </div>
         </div>
 
-        {/* Proxy Connection Details */}
-        <div className="bg-white shadow rounded-lg mb-6">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <div className="flex items-center">
-              <Shield className="h-5 w-5 text-blue-600 mr-2" />
-              <h2 className="text-lg font-medium text-gray-900">Third-Party Database Access</h2>
+        {/* File Information - Only show for uploaded files */}
+        {dataset.is_uploaded_file && (
+          <div className="bg-white shadow rounded-lg mb-6">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <div className="flex items-center">
+                <Database className="h-5 w-5 text-green-600 mr-2" />
+                <h2 className="text-lg font-medium text-gray-900">File Information</h2>
+              </div>
+              <p className="mt-1 text-sm text-gray-600">
+                This is a shared file that you can download and analyze
+              </p>
             </div>
-            <p className="mt-1 text-sm text-gray-600">
-              Connect to this dataset using your preferred database client or BI tool
-            </p>
+            <div className="px-6 py-4">
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center">
+                    <Database className="h-5 w-5 text-green-600 mr-2" />
+                    <span className="font-medium text-green-900">
+                      {dataset.file_type?.toUpperCase() || 'FILE'} File
+                    </span>
+                  </div>
+                  <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">
+                    Shared File
+                  </span>
+                </div>
+                
+                <div className="text-sm text-green-800">
+                  <p className="mb-2">
+                    This dataset is a shared file that contains {dataset.file_type} data. 
+                    You can download the file to analyze it locally with your preferred tools.
+                  </p>
+                  
+                  {dataset.row_count && dataset.column_count && (
+                    <div className="flex items-center space-x-4 text-sm">
+                      <span>
+                        <strong>Rows:</strong> {dataset.row_count.toLocaleString()}
+                      </span>
+                      <span>
+                        <strong>Columns:</strong> {dataset.column_count.toLocaleString()}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Download Instructions */}
+                <div className="mt-3 pt-3 border-t border-green-200">
+                  <h4 className="font-medium text-green-900 mb-2">How to Access This File</h4>
+                  <div className="text-sm text-green-700 space-y-1">
+                    <p>• Click the "Download" button above to get the file</p>
+                    <p>• Open the file in your preferred application (Excel, text editor, etc.)</p>
+                    {dataset.enable_chat && <p>• Use the Chat feature above to ask questions about the data</p>}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
+        )}
+
+        {/* Proxy Connection Details - Only show for connector datasets */}
+        {!dataset.is_uploaded_file && dataset.has_proxy_connection && (
+          <div className="bg-white shadow rounded-lg mb-6">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <div className="flex items-center">
+                <Shield className="h-5 w-5 text-blue-600 mr-2" />
+                <h2 className="text-lg font-medium text-gray-900">Third-Party Database Access</h2>
+              </div>
+              <p className="mt-1 text-sm text-gray-600">
+                Connect to this dataset using your preferred database client or BI tool
+              </p>
+            </div>
           <div className="px-6 py-4">
             <div className="grid gap-4">
               {/* Connection Details */}
@@ -559,6 +605,7 @@ export default function SharedDatasetPage() {
             </div>
           </div>
         </div>
+        )}
 
         {/* Preview Section */}
         {dataset.preview_data && (
@@ -682,7 +729,7 @@ export default function SharedDatasetPage() {
                       type="text"
                       value={chatMessage}
                       onChange={(e) => setChatMessage(e.target.value)}
-                      onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleChat()}
+                      onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleChat()}
                       placeholder="What insights can you provide about this dataset?"
                       className="flex-1 border border-gray-300 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       disabled={isChatting}

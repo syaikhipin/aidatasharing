@@ -275,7 +275,7 @@ function SharedDatasetsContent() {
                           <h3 className="text-lg font-medium text-gray-900 truncate">
                             {dataset.name}
                           </h3>
-                          <SharingLevelBadge level={dataset.sharing_level || 'private'} />
+                          <SharingLevelBadge level={(dataset.sharing_level?.toLowerCase() || 'private') as 'private' | 'organization' | 'public'} />
                           <div className="flex space-x-2">
                             {dataset.chat_enabled && (
                               <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">

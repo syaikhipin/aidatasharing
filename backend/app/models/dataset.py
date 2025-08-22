@@ -21,6 +21,7 @@ class DatasetType(str, enum.Enum):
     TXT = "txt"
     RTF = "rtf"
     ODT = "odt"
+    IMAGE = "image"
 
 
 class DatasetStatus(str, enum.Enum):

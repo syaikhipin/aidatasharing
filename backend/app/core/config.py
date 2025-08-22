@@ -1,5 +1,6 @@
 import secrets
 from typing import List, Optional, Dict, Any
+from pydantic import Field
 from pydantic_settings import BaseSettings
 from .app_config import get_app_config
 
@@ -77,7 +78,7 @@ class Settings(BaseSettings):
     
     # File Upload Configuration
     MAX_FILE_SIZE_MB: int = 100
-    ALLOWED_FILE_TYPES: str = "csv,json,xlsx,xls,txt,pdf,docx,doc,rtf,odt"
+    ALLOWED_FILE_TYPES: str = Field(default_factory=lambda: "csv,json,xlsx,xls,txt,pdf,docx,doc,rtf,odt,jpg,jpeg,png,gif,bmp,webp")
     UPLOAD_PATH: str = "./storage/uploads"
     
     # Document Processing Configuration
@@ -90,6 +91,13 @@ class Settings(BaseSettings):
     PDF_PREVIEW_MAX_WIDTH: int = 400
     PDF_TEXT_EXTRACTION_MAX_PAGES: int = 10
     PDF_PROCESSING_LIBRARIES: str = "PyPDF2,PyMuPDF"  # Required libraries for PDF processing
+    
+    # Image Processing Configuration
+    MAX_IMAGE_SIZE_MB: int = 25
+    SUPPORTED_IMAGE_TYPES: str = "jpg,jpeg,png,gif,bmp,webp"
+    IMAGE_STORAGE_PATH: str = "./storage/images"
+    ENABLE_IMAGE_PROCESSING: bool = True
+    IMAGE_THUMBNAIL_SIZE: int = 300
     
     # Data Connector Configuration
     CONNECTOR_TIMEOUT: int = 30

@@ -488,7 +488,7 @@ async def upload_universal_file(
         dataset_type_mapping = {
             FileType.SPREADSHEET: DatasetType.CSV,  # Default CSV for spreadsheets
             FileType.DOCUMENT: DatasetType.PDF,     # Default PDF for documents
-            FileType.IMAGE: DatasetType.TXT,        # No IMAGE type, use TXT as fallback
+            FileType.IMAGE: DatasetType.IMAGE,      # Now we have IMAGE type
             FileType.ARCHIVE: DatasetType.TXT,      # No ARCHIVE type, use TXT as fallback
             FileType.OTHER: DatasetType.TXT         # Use TXT as fallback for other types
         }
