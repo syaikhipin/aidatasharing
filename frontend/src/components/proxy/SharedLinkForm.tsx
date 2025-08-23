@@ -18,7 +18,6 @@ interface SharedLinkData {
   is_public: boolean;
   requires_authentication: boolean;
   allowed_users: string[];
-  expires_in_hours: number | null;
   max_uses: number | null;
 }
 
@@ -36,7 +35,6 @@ export default function SharedLinkForm({
     is_public: false,
     requires_authentication: true,
     allowed_users: [],
-    expires_in_hours: null,
     max_uses: null
   });
 
@@ -269,25 +267,7 @@ export default function SharedLinkForm({
             Expiration & Limits
           </h4>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                <Calendar className="w-4 h-4 inline mr-1" />
-                Expires in (hours)
-              </label>
-              <input
-                type="number"
-                value={form.expires_in_hours || ''}
-                onChange={(e) => setForm(prev => ({ 
-                  ...prev, 
-                  expires_in_hours: e.target.value ? parseInt(e.target.value) : null 
-                }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-                placeholder="24"
-                min="1"
-              />
-              <p className="mt-1 text-xs text-gray-500">Leave empty for no expiration</p>
-            </div>
+          <div className="grid grid-cols-1 gap-4">
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -319,9 +299,6 @@ export default function SharedLinkForm({
             <p><strong>Authentication:</strong> {form.requires_authentication ? 'Required' : 'Not Required'}</p>
             {!form.is_public && (
               <p><strong>Allowed Users:</strong> {form.allowed_users.length} user(s)</p>
-            )}
-            {form.expires_in_hours && (
-              <p><strong>Expires:</strong> In {form.expires_in_hours} hours</p>
             )}
             {form.max_uses && (
               <p><strong>Usage Limit:</strong> {form.max_uses} uses</p>

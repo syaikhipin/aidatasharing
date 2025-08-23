@@ -62,6 +62,10 @@ class Dataset(Base):
     connection_params = Column(JSON, nullable=True)  # Connection parameters
     connector_id = Column(Integer, ForeignKey("database_connectors.id"), nullable=True)  # Link to connector
     
+    # Multiple files support for uploaded datasets
+    is_multi_file_dataset = Column(Boolean, default=False, nullable=False)  # True if dataset contains multiple files
+    primary_file_path = Column(String, nullable=True)  # Main/primary file path for multi-file datasets
+    
     # Organization and sharing - ORGANIZATION IS REQUIRED (no cross-org sharing)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)  # Required!
@@ -88,7 +92,6 @@ class Dataset(Base):
     # Data Sharing Features
     public_share_enabled = Column(Boolean, default=False)
     share_token = Column(String, nullable=True, unique=True)  # For public sharing
-    share_expires_at = Column(DateTime, nullable=True)
     share_password = Column(String, nullable=True)
     share_view_count = Column(Integer, default=0)
     
@@ -116,6 +119,10 @@ class Dataset(Base):
     quality_metrics = Column(JSON, nullable=True)  # Enhanced data quality metrics
     column_statistics = Column(JSON, nullable=True)  # Per-column statistical analysis
     
+    # Multiple files metadata
+    files_metadata = Column(JSON, nullable=True)  # Metadata for all files in multi-file dataset
+    total_files_count = Column(Integer, default=1)  # Total number of files in dataset
+    
     # Download tracking
     download_count = Column(Integer, default=0)  # Total number of downloads
     last_downloaded_at = Column(DateTime, nullable=True)  # Last download timestamp
@@ -136,6 +143,7 @@ class Dataset(Base):
     models = relationship("DatasetModel", back_populates="dataset")
     chat_sessions = relationship("DatasetChatSession", back_populates="dataset")
     share_accesses = relationship("DatasetShareAccess", back_populates="dataset")
+    files = relationship("DatasetFile", back_populates="dataset", cascade="all, delete-orphan")
 
     def soft_delete(self, user_id: int, delete_file: bool = True):
         """Soft delete the dataset with optional file cleanup"""
@@ -516,6 +524,42 @@ class ShareAccessSession(Base):
     # Relationships
     dataset = relationship("Dataset")
 
+
+class DatasetFile(Base):
+    """Individual files within a dataset (for multi-file datasets)"""
+    __tablename__ = "dataset_files"
+
+    id = Column(Integer, primary_key=True, index=True)
+    dataset_id = Column(Integer, ForeignKey("datasets.id"), nullable=False)
+    
+    # File information
+    filename = Column(String, nullable=False)  # Original filename
+    file_path = Column(String, nullable=False)  # Storage path
+    relative_path = Column(String, nullable=True)  # Relative path for serving
+    file_size = Column(Integer, nullable=True)  # File size in bytes
+    file_type = Column(String, nullable=True)  # File extension/type
+    mime_type = Column(String, nullable=True)  # MIME type
+    
+    # File metadata
+    file_metadata = Column(JSON, nullable=True)  # File-specific metadata
+    is_primary = Column(Boolean, default=False)  # Primary file in the dataset
+    file_order = Column(Integer, default=0)  # Display order
+    
+    # Status flags
+    is_processed = Column(Boolean, default=False)  # Processing status
+    is_deleted = Column(Boolean, default=False)  # Soft delete flag
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    dataset = relationship("Dataset", back_populates="files")
+    
+    def soft_delete(self):
+        """Mark file as deleted"""
+        self.is_deleted = True
+        self.updated_at = datetime.utcnow()
 
 # Add to User model relationship
 # Note: This would need to be added to the User model in user.py

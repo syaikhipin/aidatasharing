@@ -19,11 +19,12 @@ export default function UploadDatasetPage() {
 
 function UploadDatasetContent() {
   const router = useRouter();
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [isMultiFileMode, setIsMultiFileMode] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -46,35 +47,74 @@ function UploadDatasetContent() {
     
     const droppedFiles = Array.from(e.dataTransfer.files);
     if (droppedFiles.length > 0) {
-      handleFileSelect(droppedFiles[0]);
+      if (isMultiFileMode) {
+        handleMultipleFileSelect(droppedFiles);
+      } else {
+        handleSingleFileSelect(droppedFiles[0]);
+      }
     }
-  }, []);
+  }, [isMultiFileMode]);
 
-  const handleFileSelect = (selectedFile: File) => {
+  const handleSingleFileSelect = (selectedFile: File) => {
     // Reset error state
     setError(null);
     
-    // Check file size (50MB limit)
-    const maxSize = 50 * 1024 * 1024; // 50MB
-    if (selectedFile.size > maxSize) {
-      setError('File size exceeds 50MB limit');
-      return;
-    }
+    if (!validateFile(selectedFile)) return;
     
-    // Check file type
-    const extension = selectedFile.name.split('.').pop()?.toLowerCase();
-    const supportedTypes = ['csv', 'json', 'xlsx', 'xls', 'pdf', 'txt', 'docx', 'doc', 'rtf', 'odt', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
-    
-    if (!extension || !supportedTypes.includes(extension)) {
-      setError(`Unsupported file type. Supported formats: ${supportedTypes.join(', ')}`);
-      return;
-    }
-    
-    setFile(selectedFile);
+    setFiles([selectedFile]);
     setFormData(prev => ({
       ...prev,
       name: prev.name || selectedFile.name.replace(/\.[^/.]+$/, '')
     }));
+  };
+  
+  const handleMultipleFileSelect = (selectedFiles: File[]) => {
+    // Reset error state
+    setError(null);
+    
+    // Validate all files
+    const validFiles: File[] = [];
+    const errors: string[] = [];
+    
+    for (const file of selectedFiles) {
+      if (validateFile(file, false)) {
+        validFiles.push(file);
+      } else {
+        errors.push(`${file.name}: Invalid file`);
+      }
+    }
+    
+    if (errors.length > 0) {
+      setError(`Some files were rejected: ${errors.join(', ')}`);
+    }
+    
+    if (validFiles.length > 0) {
+      setFiles(validFiles);
+      setFormData(prev => ({
+        ...prev,
+        name: prev.name || `Multi-file dataset (${validFiles.length} files)`
+      }));
+    }
+  };
+  
+  const validateFile = (file: File, showError: boolean = true): boolean => {
+    // Check file size (50MB limit per file)
+    const maxSize = 50 * 1024 * 1024; // 50MB
+    if (file.size > maxSize) {
+      if (showError) setError(`File ${file.name} exceeds 50MB limit`);
+      return false;
+    }
+    
+    // Check file type
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    const supportedTypes = ['csv', 'json', 'xlsx', 'xls', 'pdf', 'txt', 'docx', 'doc', 'rtf', 'odt', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
+    
+    if (!extension || !supportedTypes.includes(extension)) {
+      if (showError) setError(`Unsupported file type in ${file.name}. Supported formats: ${supportedTypes.join(', ')}`);
+      return false;
+    }
+    
+    return true;
   };
   
   const formatFileSize = (bytes: number): string => {
@@ -144,8 +184,8 @@ function UploadDatasetContent() {
   };
   
   const handleUpload = async () => {
-    if (!file || !formData.name.trim()) {
-      setError('Please select a file and provide a name');
+    if (files.length === 0 || !formData.name.trim()) {
+      setError('Please select file(s) and provide a name');
       return;
     }
     
@@ -154,11 +194,17 @@ function UploadDatasetContent() {
       setError(null);
       setUploadProgress(0);
       
-      const response = await datasetsAPI.uploadDataset(file, {
-        name: formData.name,
-        description: formData.description,
-        sharing_level: formData.sharing_level
-      });
+      const response = files.length === 1 
+        ? await datasetsAPI.uploadDataset(files[0], {
+            name: formData.name,
+            description: formData.description,
+            sharing_level: formData.sharing_level
+          })
+        : await datasetsAPI.uploadMultipleDatasets(files, {
+            name: formData.name,
+            description: formData.description,
+            sharing_level: formData.sharing_level
+          });
       
       // Check if response contains validation error objects
       if (response && typeof response === 'object' && ('type' in response || 'loc' in response || 'msg' in response)) {
@@ -186,10 +232,24 @@ function UploadDatasetContent() {
     }
   };
   
-  const clearFile = () => {
-    setFile(null);
+  const clearFiles = () => {
+    setFiles([]);
     setError(null);
     setUploadProgress(0);
+  };
+  
+  const removeFile = (index: number) => {
+    const updatedFiles = files.filter((_, i) => i !== index);
+    setFiles(updatedFiles);
+    
+    if (updatedFiles.length === 0) {
+      setFormData(prev => ({ ...prev, name: '' }));
+    } else if (updatedFiles.length === 1) {
+      setFormData(prev => ({
+        ...prev,
+        name: prev.name.includes('Multi-file') ? updatedFiles[0].name.replace(/\.[^/.]+$/, '') : prev.name
+      }));
+    }
   };
 
   return (
@@ -207,8 +267,34 @@ function UploadDatasetContent() {
 
         <div className="bg-white shadow rounded-lg">
           <div className="p-6">
+            {/* Upload Mode Toggle */}
+            <div className="mb-6 flex items-center justify-center space-x-4">
+              <button
+                type="button"
+                onClick={() => { setIsMultiFileMode(false); clearFiles(); }}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  !isMultiFileMode 
+                    ? 'bg-blue-600 text-white' 
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                📁 Single File
+              </button>
+              <button
+                type="button"
+                onClick={() => { setIsMultiFileMode(true); clearFiles(); }}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  isMultiFileMode 
+                    ? 'bg-blue-600 text-white' 
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                📁 Multiple Files
+              </button>
+            </div>
+
             {/* File Upload Area */}
-            {!file ? (
+            {files.length === 0 ? (
               <div
                 className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
                   isDragOver 
@@ -221,20 +307,30 @@ function UploadDatasetContent() {
               >
                 <Upload className="mx-auto h-12 w-12 text-gray-400 mb-4" />
                 <h3 className="text-lg font-medium text-gray-900 mb-2">
-                  Drag and drop your file here
+                  {isMultiFileMode ? 'Drag and drop your files here' : 'Drag and drop your file here'}
                 </h3>
                 <p className="text-gray-600 mb-4">
-                  or click to browse and select a file
+                  {isMultiFileMode 
+                    ? 'or click to browse and select multiple files'
+                    : 'or click to browse and select a file'
+                  }
                 </p>
                 <input
                   type="file"
                   onChange={(e) => {
-                    const selectedFile = e.target.files?.[0];
-                    if (selectedFile) handleFileSelect(selectedFile);
+                    const selectedFiles = Array.from(e.target.files || []);
+                    if (selectedFiles.length > 0) {
+                      if (isMultiFileMode) {
+                        handleMultipleFileSelect(selectedFiles);
+                      } else {
+                        handleSingleFileSelect(selectedFiles[0]);
+                      }
+                    }
                   }}
                   className="hidden"
                   id="file-upload"
                   accept=".csv,.json,.xlsx,.xls,.pdf,.txt,.docx,.doc,.rtf,.odt,.jpg,.jpeg,.png,.gif,.bmp,.webp"
+                  multiple={isMultiFileMode}
                 />
                 <label
                   htmlFor="file-upload"
@@ -243,31 +339,59 @@ function UploadDatasetContent() {
                   Select File
                 </label>
                 <p className="text-xs text-gray-500 mt-4">
-                  Supported formats: CSV, JSON, Excel, PDF, Text, Word, Images, and more (max 50MB)
+                  Supported formats: CSV, JSON, Excel, PDF, Text, Word, Images, and more<br/>
+                  {isMultiFileMode ? 'Each file max 50MB • Multiple files will be grouped as one dataset' : 'Max file size: 50MB'}
                 </p>
               </div>
             ) : (
-              /* File Selected */
+              /* Files Selected */
               <div className="space-y-6">
-                {/* File Info */}
-                <div className="flex items-start justify-between p-4 border border-gray-200 rounded-lg bg-gray-50">
-                  <div className="flex items-start space-x-3">
-                    <div className="text-2xl">
-                      {getFileTypeIcon(file.name)}
+                {/* Files Info */}
+                <div className="space-y-3">
+                  {files.map((file, index) => (
+                    <div key={`${file.name}-${index}`} className="flex items-start justify-between p-4 border border-gray-200 rounded-lg bg-gray-50">
+                      <div className="flex items-start space-x-3">
+                        <div className="text-2xl">
+                          {getFileTypeIcon(file.name)}
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-2">
+                            <h3 className="text-sm font-medium text-gray-900">{file.name}</h3>
+                            {index === 0 && files.length > 1 && (
+                              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                Primary
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-gray-600">{getFileTypeLabel(file.name)}</p>
+                          <p className="text-xs text-gray-500">{formatFileSize(file.size)}</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => removeFile(index)}
+                        className="text-gray-400 hover:text-gray-600"
+                        disabled={isUploading}
+                        title={`Remove ${file.name}`}
+                      >
+                        <X className="h-5 w-5" />
+                      </button>
                     </div>
-                    <div>
-                      <h3 className="text-sm font-medium text-gray-900">{file.name}</h3>
-                      <p className="text-sm text-gray-600">{getFileTypeLabel(file.name)}</p>
-                      <p className="text-xs text-gray-500">{formatFileSize(file.size)}</p>
+                  ))}
+                  
+                  {/* Multi-file Summary */}
+                  {files.length > 1 && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                      <div className="flex items-center space-x-2 text-sm text-blue-800">
+                        <span className="font-medium">📊 Dataset Summary:</span>
+                        <span>{files.length} files</span>
+                        <span>•</span>
+                        <span>{formatFileSize(files.reduce((total, file) => total + file.size, 0))}</span>
+                      </div>
+                      <p className="text-xs text-blue-600 mt-1">
+                        The first file will be used as the primary file for previews and AI analysis
+                      </p>
                     </div>
-                  </div>
-                  <button
-                    onClick={clearFile}
-                    className="text-gray-400 hover:text-gray-600"
-                    disabled={isUploading}
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
+                  )}
                 </div>
 
                 {/* Form Fields */}
@@ -346,11 +470,11 @@ function UploadDatasetContent() {
                 {/* Action Buttons */}
                 <div className="flex justify-between pt-4">
                   <button
-                    onClick={clearFile}
+                    onClick={clearFiles}
                     disabled={isUploading}
                     className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
                   >
-                    Choose Different File
+                    {files.length > 1 ? 'Clear All Files' : 'Choose Different File'}
                   </button>
                   <button
                     onClick={handleUpload}
@@ -365,7 +489,7 @@ function UploadDatasetContent() {
                     ) : (
                       <>
                         <Upload className="h-4 w-4 mr-2" />
-                        Upload Dataset
+                        Upload {files.length > 1 ? `${files.length} Files` : 'Dataset'}
                       </>
                     )}
                   </button>

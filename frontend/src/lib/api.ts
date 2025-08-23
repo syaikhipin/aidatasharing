@@ -441,6 +441,34 @@ export const datasetsAPI = {
     });
     return response.data;
   },
+  
+  // Upload multiple files as a single dataset
+  uploadMultipleDatasets: async (files: File[], metadata: {
+    name: string;
+    description?: string;
+    sharing_level?: string;
+  }) => {
+    const formData = new FormData();
+    
+    // Append all files to the 'files' field
+    files.forEach((file) => {
+      formData.append('files', file);
+    });
+    
+    // Append metadata
+    Object.entries(metadata).forEach(([key, value]) => {
+      if (value !== undefined) {
+        formData.append(key, value.toString());
+      }
+    });
+    
+    const response = await apiClient.post('/api/datasets/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  },
 
   chatWithDataset: async (datasetId: number, message: string) => {
     const response = await apiClient.post(`/api/datasets/${datasetId}/chat`, {
@@ -497,7 +525,6 @@ export const datasetsAPI = {
 export const dataSharingAPI = {
   createShareLink: async (data: {
     dataset_id: number;
-    expires_in_hours?: number;
     password?: string;
     enable_chat?: boolean;
   }) => {
@@ -559,6 +586,69 @@ export const dataSharingAPI = {
       session_token: sessionToken
     });
     return response.data;
+  },
+  
+  // File management for shared datasets
+  getSharedDatasetFiles: async (shareToken: string, password?: string) => {
+    const params = password ? { password } : {};
+    const response = await apiClient.get(`/api/data-sharing/public/shared/${shareToken}/files`, { params });
+    return response.data;
+  },
+  
+  downloadIndividualFile: async (shareToken: string, fileId: number, password?: string) => {
+    const params = password ? { password } : {};
+    const response = await apiClient.get(`/api/data-sharing/public/shared/${shareToken}/files/${fileId}/download`, {
+      params,
+      responseType: 'blob'
+    });
+    
+    // Create download link
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    
+    // Extract filename from content-disposition header
+    const contentDisposition = response.headers['content-disposition'];
+    const filename = contentDisposition 
+      ? contentDisposition.split('filename="')[1]?.split('"')[0] 
+      : `file_${fileId}`;
+      
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+    
+    return { success: true, filename };
+  },
+  
+  downloadSelectedFiles: async (shareToken: string, fileIds: number[], password?: string) => {
+    const data = { file_ids: fileIds };
+    const params = password ? { password } : {};
+    
+    const response = await apiClient.post(`/api/data-sharing/public/shared/${shareToken}/files/download-selected`, data, {
+      params,
+      responseType: 'blob'
+    });
+    
+    // Create download link
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    
+    // Extract filename from content-disposition header
+    const contentDisposition = response.headers['content-disposition'];
+    const filename = contentDisposition 
+      ? contentDisposition.split('filename="')[1]?.split('"')[0] 
+      : `selected_files.zip`;
+      
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+    
+    return { success: true, filename, fileCount: fileIds.length };
   },
 };
 
@@ -999,7 +1089,6 @@ export const sharedLinksAPI = {
     is_public?: boolean;
     requires_authentication?: boolean;
     allowed_users?: string[];
-    expires_in_hours?: number;
     max_uses?: number;
   }) => {
     const response = await apiClient.post('/api/shared-links', linkData);

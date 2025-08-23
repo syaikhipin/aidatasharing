@@ -12,7 +12,6 @@ import {
   Download, 
   Share2, 
   Link as LinkIcon, 
-  Clock, 
   Eye, 
   MessageSquare, 
   Shield, 
@@ -74,7 +73,6 @@ function DatasetDetailContent() {
   const [shareLinks, setShareLinks] = useState<any[]>([]);
   const [showCreateShareModal, setShowCreateShareModal] = useState(false);
   const [shareForm, setShareForm] = useState({
-    expires_in_hours: 24,
     password: '',
     enable_chat: true
   });
@@ -243,16 +241,14 @@ function DatasetDetailContent() {
   const handleCreateShareLink = async () => {
     try {
       setIsCreatingShare(true);
-      const response = await dataSharingAPI.createShareLink({
+      await dataSharingAPI.createShareLink({
         dataset_id: datasetId,
-        expires_in_hours: shareForm.expires_in_hours || undefined,
         password: shareForm.password || undefined,
         enable_chat: shareForm.enable_chat
       });
       
       setShowCreateShareModal(false);
       setShareForm({
-        expires_in_hours: 24,
         password: '',
         enable_chat: true
       });
@@ -1362,12 +1358,6 @@ function DatasetDetailContent() {
                       </button>
                     </div>
 
-                    {dataset.share_expires_at && (
-                      <div className="text-xs text-gray-500 flex items-center">
-                        <Clock className="w-3 h-3 mr-1" />
-                        Expires: {new Date(dataset.share_expires_at).toLocaleString()}
-                      </div>
-                    )}
 
                     {dataset.share_view_count > 0 && (
                       <div className="text-xs text-gray-500 flex items-center">
@@ -1468,20 +1458,6 @@ function DatasetDetailContent() {
                 <h3 className="text-lg font-medium text-gray-900 mb-4">Create Share Link</h3>
                 
                 <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Expires in (hours)
-                    </label>
-                    <input
-                      type="number"
-                      value={shareForm.expires_in_hours}
-                      onChange={(e) => setShareForm({...shareForm, expires_in_hours: parseInt(e.target.value) || 0})}
-                      placeholder="24"
-                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">Leave empty for no expiration</p>
-                  </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Password (optional)

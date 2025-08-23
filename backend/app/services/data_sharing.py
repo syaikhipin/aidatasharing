@@ -556,7 +556,6 @@ class DataSharingService:
         self,
         dataset_id: int,
         user_id: int,
-        expires_in_hours: Optional[int] = None,
         password: Optional[str] = None,
         enable_chat: bool = True
     ) -> Dict[str, Any]:
@@ -575,17 +574,9 @@ class DataSharingService:
         # Generate unique share token
         share_token = self._generate_share_token(dataset_id, user_id)
         
-        # Set expiration
-        expires_at = None
-        if expires_in_hours:
-            expires_at = datetime.utcnow() + timedelta(hours=expires_in_hours)
-        elif settings.SHARE_LINK_EXPIRY_HOURS > 0:
-            expires_at = datetime.utcnow() + timedelta(hours=settings.SHARE_LINK_EXPIRY_HOURS)
-        
         # Update dataset with sharing information
         dataset.public_share_enabled = True
         dataset.share_token = share_token
-        dataset.share_expires_at = expires_at
         dataset.share_password = password
         dataset.ai_chat_enabled = enable_chat and settings.ENABLE_AI_CHAT
         
@@ -607,7 +598,6 @@ class DataSharingService:
         return {
             "share_token": share_token,
             "share_url": share_url,
-            "expires_at": expires_at,
             "chat_enabled": dataset.ai_chat_enabled,
             "password_protected": bool(password),
             "dataset_name": dataset.name
@@ -632,13 +622,6 @@ class DataSharingService:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Shared dataset not found or no longer available"
-            )
-        
-        # Check expiration
-        if dataset.share_expires_at and dataset.share_expires_at < datetime.utcnow():
-            raise HTTPException(
-                status_code=status.HTTP_410_GONE,
-                detail="Share link has expired"
             )
         
         # Check password if required
@@ -666,15 +649,36 @@ class DataSharingService:
                     detail="Dataset source is no longer available"
                 )
         
-        # Check if uploaded file still exists (for non-connector datasets)
-        elif dataset.file_path and not os.path.exists(dataset.file_path):
-            # Disable sharing if file is gone
-            dataset.public_share_enabled = False
-            self.db.commit()
-            raise HTTPException(
-                status_code=status.HTTP_410_GONE,
-                detail="Dataset file is no longer available"
-            )
+        # Check if uploaded file(s) still exist (for non-connector datasets)
+        elif dataset.file_path or dataset.is_multi_file_dataset:
+            file_exists = False
+            
+            if dataset.is_multi_file_dataset:
+                # Check if any files exist for multi-file dataset
+                from app.models.dataset import DatasetFile
+                existing_files = self.db.query(DatasetFile).filter(
+                    DatasetFile.dataset_id == dataset.id,
+                    DatasetFile.is_deleted == False
+                ).all()
+                
+                file_exists = any(os.path.exists(f.file_path) for f in existing_files if f.file_path)
+                
+                if not file_exists:
+                    # Disable sharing if no files exist
+                    dataset.public_share_enabled = False
+                    self.db.commit()
+                    raise HTTPException(
+                        status_code=status.HTTP_410_GONE,
+                        detail="Dataset files are no longer available"
+                    )
+            elif dataset.file_path and not os.path.exists(dataset.file_path):
+                # Single file check
+                dataset.public_share_enabled = False
+                self.db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_410_GONE,
+                    detail="Dataset file is no longer available"
+                )
         
         # Log access
         self._log_share_access(dataset, share_token, ip_address, user_agent)
@@ -687,15 +691,73 @@ class DataSharingService:
         # Get preview data if available
         preview_data = None
         try:
-            # Use direct SQL query to get preview data
             import pandas as pd
             import os
             
-            if dataset.file_path and os.path.exists(dataset.file_path):
+            # Handle multi-file datasets
+            if dataset.is_multi_file_dataset:
+                from app.models.dataset import DatasetFile
+                
+                # Get primary file or first file for preview
+                dataset_files = self.db.query(DatasetFile).filter(
+                    DatasetFile.dataset_id == dataset.id,
+                    DatasetFile.is_deleted == False
+                ).order_by(DatasetFile.is_primary.desc(), DatasetFile.file_order.asc()).all()
+                
+                if dataset_files:
+                    primary_file = dataset_files[0]  # First file (primary or first by order)
+                    
+                    preview_data = {
+                        "type": "multi_file",
+                        "total_files": len(dataset_files),
+                        "files_list": [{
+                            "filename": f.filename,
+                            "file_type": f.file_type,
+                            "file_size": f.file_size,
+                            "is_primary": f.is_primary
+                        } for f in dataset_files[:5]],  # Show first 5 files
+                        "primary_file": {
+                            "filename": primary_file.filename,
+                            "file_type": primary_file.file_type
+                        }
+                    }
+                    
+                    # Try to preview primary file if it's CSV
+                    if (primary_file.file_type and primary_file.file_type.lower() == 'csv' 
+                        and primary_file.file_path and os.path.exists(primary_file.file_path)):
+                        try:
+                            df = pd.read_csv(primary_file.file_path, nrows=10)
+                            headers = df.columns.tolist()
+                            rows = []
+                            for row in df.values:
+                                converted_row = []
+                                for val in row:
+                                    if pd.isna(val):
+                                        converted_row.append(None)
+                                    elif isinstance(val, (np.integer, int)):
+                                        converted_row.append(int(val))
+                                    elif isinstance(val, (np.floating, float)):
+                                        converted_row.append(float(val))
+                                    elif isinstance(val, np.bool_):
+                                        converted_row.append(bool(val))
+                                    else:
+                                        converted_row.append(str(val))
+                                converted_row.append(converted_row)
+                            
+                            preview_data.update({
+                                "headers": headers,
+                                "rows": rows,
+                                "total_rows": len(rows),
+                                "preview_source": "primary_file"
+                            })
+                        except Exception as e:
+                            logger.warning(f"Failed to preview primary file {primary_file.filename}: {e}")
+                            
+            # Handle single file datasets
+            elif dataset.file_path and os.path.exists(dataset.file_path):
                 if dataset.type.value.lower() == 'csv':
                     df = pd.read_csv(dataset.file_path, nrows=10)
                     headers = df.columns.tolist()
-                    rows = df.values.tolist()
                     
                     # Convert to native Python types
                     rows = []
@@ -718,17 +780,19 @@ class DataSharingService:
                         "headers": headers,
                         "rows": rows,
                         "total_rows": len(rows),
-                        "type": "csv"
+                        "type": "csv",
+                        "preview_source": "single_file"
                     }
                     
-            logger.info(f"Generated preview data for shared dataset {dataset.id}: {len(preview_data['rows'] if preview_data else [])} rows")
+            logger.info(f"Generated preview data for shared dataset {dataset.id}: {preview_data.get('type', 'none')} preview")
         except Exception as e:
             logger.warning(f"Failed to generate preview for shared dataset {dataset.id}: {e}")
             
         # Determine if this is an uploaded file or a connector dataset
         is_uploaded_file = bool(
-            dataset.source_url and 
-            not dataset.source_url.startswith('http')
+            (dataset.source_url and not dataset.source_url.startswith('http')) or
+            dataset.is_multi_file_dataset or
+            dataset.file_path
         )
         
         # Only include proxy connection info for connector datasets, not uploaded files
@@ -757,7 +821,6 @@ class DataSharingService:
             "enable_chat": dataset.ai_chat_enabled,
             "allow_download": dataset.allow_download,
             "created_at": dataset.created_at,
-            "expires_at": dataset.share_expires_at,
             "share_token": share_token,
             "access_allowed": True,
             "requires_password": bool(dataset.share_password),

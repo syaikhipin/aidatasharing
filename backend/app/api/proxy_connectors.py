@@ -55,7 +55,6 @@ class SharedLinkCreate(BaseModel):
     is_public: bool = False
     requires_authentication: bool = True
     allowed_users: Optional[List[str]] = None
-    expires_in_hours: Optional[int] = None
     max_uses: Optional[int] = None
 
 
@@ -67,7 +66,7 @@ class SharedLinkResponse(BaseModel):
     public_url: str
     is_public: bool
     requires_authentication: bool
-    expires_at: Optional[datetime]
+    # Expiration functionality removed
     max_uses: Optional[int]
     current_uses: int
     created_at: datetime
@@ -253,7 +252,6 @@ async def create_shared_link(
             is_public=link_data.is_public,
             requires_authentication=link_data.requires_authentication,
             allowed_users=link_data.allowed_users,
-            expires_in_hours=link_data.expires_in_hours,
             max_uses=link_data.max_uses
         )
         
@@ -265,7 +263,7 @@ async def create_shared_link(
             public_url=shared_link.public_url,
             is_public=shared_link.is_public,
             requires_authentication=shared_link.requires_authentication,
-            expires_at=shared_link.expires_at,
+            # Expiration functionality removed
             max_uses=shared_link.max_uses,
             current_uses=shared_link.current_uses,
             created_at=shared_link.created_at
@@ -300,7 +298,7 @@ async def get_shared_links(
             public_url=link.public_url,
             is_public=link.is_public,
             requires_authentication=link.requires_authentication,
-            expires_at=link.expires_at,
+            # Expiration functionality removed
             max_uses=link.max_uses,
             current_uses=link.current_uses,
             created_at=link.created_at

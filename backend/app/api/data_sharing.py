@@ -26,7 +26,6 @@ security = HTTPBearer()
 # Pydantic models for request/response
 class CreateShareLinkRequest(BaseModel):
     dataset_id: int
-    expires_in_hours: Optional[int] = None
     password: Optional[str] = None
     enable_chat: bool = True
 
@@ -49,6 +48,10 @@ class ShareChatRequest(BaseModel):
     session_token: Optional[str] = None
 
 
+class DownloadSelectedFilesRequest(BaseModel):
+    file_ids: List[int]
+
+
 # Data sharing endpoints
 @router.post("/create-share-link")
 async def create_share_link(
@@ -62,7 +65,6 @@ async def create_share_link(
     return service.create_share_link(
         dataset_id=request.dataset_id,
         user_id=current_user.id,
-        expires_in_hours=request.expires_in_hours,
         password=request.password,
         enable_chat=request.enable_chat
     )
@@ -214,9 +216,8 @@ async def validate_shared_resources(
                 ).first()
                 
                 if dataset:
-                    # Check expiration
-                    is_expired = (dataset.share_expires_at and 
-                                dataset.share_expires_at < datetime.utcnow())
+                    # No longer checking expiration - share links don't expire
+                    is_expired = False
                     
                     # Check connector if exists
                     connector_valid = True
@@ -241,7 +242,6 @@ async def validate_shared_resources(
                     validation_results["share_tokens"][token] = {
                         "valid": not is_expired and connector_valid and file_valid,
                         "dataset_name": dataset.name,
-                        "expires_at": dataset.share_expires_at.isoformat() if dataset.share_expires_at else None,
                         "is_expired": is_expired,
                         "connector_valid": connector_valid,
                         "file_valid": file_valid,
@@ -309,9 +309,8 @@ async def get_my_shared_datasets(
     result = []
     
     for dataset in datasets:
-        # Check validity
-        is_expired = (dataset.share_expires_at and 
-                     dataset.share_expires_at < datetime.utcnow())
+        # No longer checking expiration - share links don't expire
+        is_expired = False
         
         # Check connector validity
         connector_valid = True
@@ -344,7 +343,6 @@ async def get_my_shared_datasets(
             "description": dataset.description,
             "share_token": dataset.share_token,
             "share_url": f"/shared/{dataset.share_token}",
-            "expires_at": dataset.share_expires_at,
             "view_count": dataset.share_view_count,
             "chat_enabled": dataset.ai_chat_enabled,
             "password_protected": bool(dataset.share_password),
@@ -429,7 +427,7 @@ async def disable_sharing(
     # Disable sharing
     dataset.public_share_enabled = False
     dataset.share_token = None
-    dataset.share_expires_at = None
+    # Expiration functionality removed - share links no longer expire
     dataset.share_password = None
     dataset.ai_chat_enabled = False
     
@@ -469,7 +467,8 @@ async def get_shared_dataset_info(
         )
     
     # Check expiration
-    if dataset.share_expires_at and dataset.share_expires_at < datetime.utcnow():
+    # No longer checking expiration - share links don't expire
+    if False:
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
             detail="Share link has expired"
@@ -486,7 +485,7 @@ async def get_shared_dataset_info(
         "chat_enabled": dataset.ai_chat_enabled,
         "allow_download": dataset.allow_download,
         "created_at": dataset.created_at,
-        "expires_at": dataset.share_expires_at,
+        # Expiration functionality removed
         "view_count": dataset.share_view_count
     }
 
@@ -539,7 +538,8 @@ async def chat_with_shared_dataset(
         )
     
     # Check expiration
-    if dataset.share_expires_at and dataset.share_expires_at < datetime.utcnow():
+    # No longer checking expiration - share links don't expire
+    if False:
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
             detail="Share link has expired"
@@ -612,7 +612,8 @@ async def download_shared_dataset(
         )
     
     # Check expiration
-    if dataset.share_expires_at and dataset.share_expires_at < datetime.utcnow():
+    # No longer checking expiration - share links don't expire
+    if False:
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
             detail="Share link has expired"
@@ -710,7 +711,8 @@ async def download_shared_dataset_authenticated(
         )
     
     # Check expiration
-    if dataset.share_expires_at and dataset.share_expires_at < datetime.utcnow():
+    # No longer checking expiration - share links don't expire
+    if False:
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
             detail="Share link has expired"

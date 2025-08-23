@@ -35,7 +35,6 @@ interface Dataset {
   public_share_enabled?: boolean;
   share_token?: string;
   share_url?: string;
-  share_expires_at?: string;
   view_count?: number;
 }
 
@@ -561,7 +560,6 @@ function DatasetSharingContent() {
                                   shareLink={dataset.share_url}
                                   shareToken={dataset.share_token || ''}
                                   accessType={dataset.sharing_level === 'public' ? 'public' : 'token'}
-                                  expiresAt={dataset.share_expires_at}
                                   instructions={[
                                     'Use the share link to access the dataset directly',
                                     'Include the access token for API requests',

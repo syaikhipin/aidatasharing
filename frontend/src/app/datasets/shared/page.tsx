@@ -29,7 +29,6 @@ interface SharedDataset {
   description: string;
   share_token: string;
   share_url: string;
-  expires_at?: string;
   view_count: number;
   chat_enabled: boolean;
   password_protected: boolean;
@@ -342,12 +341,6 @@ function SharedDatasetsContent() {
                             <Calendar className="w-4 h-4 mr-1" />
                             <span>Created {new Date(dataset.created_at).toLocaleDateString()}</span>
                           </div>
-                          {dataset.expires_at && (
-                            <div className="flex items-center">
-                              <Clock className="w-4 h-4 mr-1" />
-                              <span>Expires {new Date(dataset.expires_at).toLocaleDateString()}</span>
-                            </div>
-                          )}
                           {dataset.last_accessed && (
                             <div className="flex items-center">
                               <Users className="w-4 h-4 mr-1" />

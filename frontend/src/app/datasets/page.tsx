@@ -313,8 +313,13 @@ function DatasetsContent() {
                           </p>
                           <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500">
                             <span className="flex items-center">
-                              <span className="mr-1">📁</span>
+                              <span className="mr-1">{dataset.is_multi_file_dataset ? '📁' : '📄'}</span>
                               {dataset.type?.toUpperCase() || 'Unknown'}
+                              {dataset.is_multi_file_dataset && (
+                                <span className="ml-1 px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
+                                  {dataset.total_files_count || 'Multi'} files
+                                </span>
+                              )}
                             </span>
                             {dataset.size_bytes && (
                               <span className="flex items-center">

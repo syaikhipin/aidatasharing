@@ -397,7 +397,7 @@ async def get_detailed_dataset_metadata(
             "sharing_level": dataset.sharing_level,
             "public_share_enabled": dataset.public_share_enabled,
             "share_token": dataset.share_token if dataset.public_share_enabled else None,
-            "share_expires_at": dataset.share_expires_at,
+            # Expiration functionality removed
             "share_view_count": dataset.share_view_count,
             "allow_download": dataset.allow_download
         },
@@ -723,7 +723,7 @@ async def delete_dataset(
         if dataset.public_share_enabled:
             dataset.public_share_enabled = False
             dataset.share_token = None
-            dataset.share_expires_at = None
+            # Expiration functionality removed - share links no longer expire
             dataset.share_password = None
             dataset.ai_chat_enabled = False
             logger.info(f"Disabled sharing for deleted dataset {dataset_id}")
@@ -828,19 +828,36 @@ async def deactivate_dataset(
 
 @router.post("/upload")
 async def upload_dataset_file(
-    file: UploadFile = File(...),
+    file: UploadFile = File(None),
+    files: List[UploadFile] = File(None),
     name: str = None,
     description: str = None,
     sharing_level: str = "private",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Upload a dataset file."""
+    """Upload single or multiple dataset files."""
     if not current_user.organization_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Must be part of an organization to upload datasets"
         )
+    
+    # Determine if single or multiple file upload
+    upload_files = []
+    if files:  # Multiple files
+        upload_files = files
+        if file:  # Also include single file if provided
+            upload_files.append(file)
+    elif file:  # Single file only
+        upload_files = [file]
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No files provided"
+        )
+    
+    is_multi_file = len(upload_files) > 1
     
     # Convert sharing level string to enum
     try:
@@ -850,57 +867,118 @@ async def upload_dataset_file(
     except ValueError:
         sharing_level_enum = DataSharingLevel.PRIVATE
     
-    # Validate file type
-    if not file.filename:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No file provided"
-        )
+    # Validate all files
+    total_size = 0
+    for upload_file in upload_files:
+        if not upload_file.filename:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="All files must have valid names"
+            )
+        
+        file_extension = upload_file.filename.split('.')[-1].lower()
+        from app.core.config import settings
+        allowed_extensions = settings.get_allowed_file_types()
+        
+        if file_extension not in allowed_extensions:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported file type '{file_extension}' in '{upload_file.filename}'. Supported formats: {', '.join(allowed_extensions).upper()}"
+            )
+        
+        # Get file size (will be read later)
+        content = await upload_file.read()
+        await upload_file.seek(0)  # Reset file pointer
+        total_size += len(content)
     
-    file_extension = file.filename.split('.')[-1].lower()
-    from app.core.config import settings
-    allowed_extensions = settings.get_allowed_file_types()
+    # Determine dataset name and primary file info
+    primary_file = upload_files[0]
+    dataset_name = name or (
+        primary_file.filename.rsplit('.', 1)[0] if len(upload_files) == 1 
+        else f"Multi-file dataset ({len(upload_files)} files)"
+    )
     
-    if file_extension not in allowed_extensions:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported file type '{file_extension}'. Supported formats: {', '.join(allowed_extensions).upper()}"
-        )
-    
-    # Read file content
-    content = await file.read()
-    file_size = len(content)
+    # Determine dataset type from primary file
+    primary_extension = primary_file.filename.split('.')[-1].lower()
+    if primary_extension == 'csv':
+        dataset_type = DatasetType.CSV
+    elif primary_extension == 'json':
+        dataset_type = DatasetType.JSON
+    elif primary_extension in ['xlsx', 'xls']:
+        dataset_type = DatasetType.EXCEL
+    elif primary_extension == 'pdf':
+        dataset_type = DatasetType.PDF
+    elif primary_extension.lower() in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tiff', 'svg']:
+        dataset_type = DatasetType.IMAGE
+    else:
+        dataset_type = DatasetType.TXT
     
     # Create dataset record first to get ID for storage
-    dataset_name = name or file.filename.rsplit('.', 1)[0]
-    
-    # Create temporary dataset to get ID
     temp_dataset = Dataset(
         name=dataset_name,
         description=description,
-        type=DatasetType.CSV,  # Temporary, will be updated
+        type=dataset_type,
         status=DatasetStatus.PROCESSING,
         owner_id=current_user.id,
         organization_id=current_user.organization_id,
         sharing_level=sharing_level_enum,
-        size_bytes=file_size,
+        size_bytes=total_size,
         allow_download=True,
-        allow_api_access=True
+        allow_api_access=True,
+        is_multi_file_dataset=is_multi_file,
+        total_files_count=len(upload_files)
     )
     
     db.add(temp_dataset)
     db.commit()
     db.refresh(temp_dataset)
     
-    # Store file using storage service
+    # Store files using storage service
+    stored_files = []
     try:
-        storage_result = await storage_service.store_dataset_file(
-            file_content=content,
-            original_filename=file.filename,
-            dataset_id=temp_dataset.id,
-            organization_id=current_user.organization_id
-        )
-        logger.info(f"✅ File stored successfully: {storage_result['filename']}")
+        from app.models.dataset import DatasetFile
+        
+        for i, upload_file in enumerate(upload_files):
+            # Read file content
+            content = await upload_file.read()
+            file_size = len(content)
+            
+            # Store file
+            storage_result = await storage_service.store_dataset_file(
+                file_content=content,
+                original_filename=upload_file.filename,
+                dataset_id=temp_dataset.id,
+                organization_id=current_user.organization_id
+            )
+            
+            # Create DatasetFile record
+            file_extension = upload_file.filename.split('.')[-1].lower()
+            dataset_file = DatasetFile(
+                dataset_id=temp_dataset.id,
+                filename=upload_file.filename,
+                file_path=storage_result['file_path'],
+                relative_path=storage_result['relative_path'],
+                file_size=file_size,
+                file_type=file_extension,
+                mime_type=upload_file.content_type,
+                is_primary=(i == 0),  # First file is primary
+                file_order=i,
+                is_processed=False
+            )
+            
+            db.add(dataset_file)
+            stored_files.append({
+                'file_record': dataset_file,
+                'storage_result': storage_result,
+                'content': content,
+                'upload_file': upload_file
+            })
+        
+        # Commit file records
+        db.commit()
+        
+        logger.info(f"✅ {len(stored_files)} files stored successfully for dataset {temp_dataset.id}")
+        
     except Exception as e:
         # Clean up dataset record if storage fails
         db.delete(temp_dataset)
@@ -908,24 +986,14 @@ async def upload_dataset_file(
         logger.error(f"❌ File storage failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to store file: {str(e)}"
+            detail=f"Failed to store files: {str(e)}"
         )
     
-    dataset_name = name or file.filename.rsplit('.', 1)[0]
-    
-    # Determine dataset type
-    if file_extension == 'csv':
-        dataset_type = DatasetType.CSV
-    elif file_extension == 'json':
-        dataset_type = DatasetType.JSON
-    elif file_extension in ['xlsx', 'xls']:
-        dataset_type = DatasetType.EXCEL
-    elif file_extension == 'pdf':
-        dataset_type = DatasetType.PDF
-    elif file_extension.lower() in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tiff', 'svg']:
-        dataset_type = DatasetType.IMAGE
-    else:
-        dataset_type = DatasetType.TXT  # Better fallback for unknown types
+    # Process primary file for metadata (if it's processable)
+    primary_file_info = stored_files[0]
+    primary_content = primary_file_info['content']
+    primary_upload_file = primary_file_info['upload_file']
+    primary_extension = primary_file_info['file_record'].file_type
     
     # Process file content and extract metadata
     file_metadata = {}
@@ -1119,11 +1187,14 @@ async def upload_dataset_file(
         max_retries = 2
         for attempt in range(max_retries):
             try:
+                # For multi-file datasets, use primary file content for ML model
+                model_content = content_preview or f"Multi-file dataset with {len(stored_files)} files"
+                
                 ml_model_result = mindsdb_service.create_dataset_ml_model(
                     dataset_id=db_dataset.id,
                     dataset_name=dataset_name,
                     dataset_type=dataset_type.value,
-                    dataset_content=content_preview
+                    dataset_content=model_content
                 )
                 
                 if ml_model_result.get("success"):

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { dataSharingAPI } from '@/lib/api';
-import { Eye, Download, MessageSquare, Lock, Calendar, User, Database, Shield, Copy } from 'lucide-react';
+import { Eye, Download, MessageSquare, Lock, User, Database, Shield, Copy } from 'lucide-react';
 
 interface SharedDataset {
   dataset_id: number;
@@ -16,7 +16,6 @@ interface SharedDataset {
   owner_name?: string;
   organization_name?: string;
   shared_at?: string;
-  expires_at?: string;
   access_allowed: boolean;
   requires_password: boolean;
   enable_chat: boolean;
@@ -46,6 +45,12 @@ export default function SharedDatasetPage() {
   const [chatMessage, setChatMessage] = useState('');
   const [chatHistory, setChatHistory] = useState<any[]>([]);
   const [isChatting, setIsChatting] = useState(false);
+  
+  // File manager state
+  const [files, setFiles] = useState<any[]>([]);
+  const [selectedFiles, setSelectedFiles] = useState<Set<number>>(new Set());
+  const [isLoadingFiles, setIsLoadingFiles] = useState(false);
+  const [isDownloadingFiles, setIsDownloadingFiles] = useState(false);
 
   const fetchSharedDataset = useCallback(async () => {
     try {
@@ -62,7 +67,7 @@ export default function SharedDatasetPage() {
     } catch (error: any) {
       console.error('Failed to fetch shared dataset:', error);
       if (error.response?.status === 404) {
-        setError('Shared dataset not found or has expired');
+        setError('Shared dataset not found or no longer available');
       } else if (error.response?.status === 401) {
         setError('Access denied. This dataset may require authentication.');
       } else {
@@ -196,6 +201,70 @@ export default function SharedDatasetPage() {
 
   const clearChat = () => {
     setChatHistory([]);
+  };
+  
+  // Fetch files list for multi-file datasets
+  const fetchFiles = useCallback(async () => {
+    if (!dataset?.preview_data?.type || dataset.preview_data.type !== 'multi_file') return;
+    
+    try {
+      setIsLoadingFiles(true);
+      const response = await dataSharingAPI.getSharedDatasetFiles(token, password);
+      setFiles(response.files || []);
+    } catch (error: any) {
+      console.error('Failed to fetch files:', error);
+      // Don't show error here as it might be expected for non-multi-file datasets
+    } finally {
+      setIsLoadingFiles(false);
+    }
+  }, [token, password, dataset?.preview_data?.type]);
+  
+  useEffect(() => {
+    if (dataset?.preview_data?.type === 'multi_file') {
+      fetchFiles();
+    }
+  }, [dataset?.preview_data?.type, fetchFiles]);
+  
+  const handleFileSelect = (fileId: number) => {
+    const newSelected = new Set(selectedFiles);
+    if (newSelected.has(fileId)) {
+      newSelected.delete(fileId);
+    } else {
+      newSelected.add(fileId);
+    }
+    setSelectedFiles(newSelected);
+  };
+  
+  const handleSelectAll = () => {
+    if (selectedFiles.size === files.length) {
+      setSelectedFiles(new Set());
+    } else {
+      setSelectedFiles(new Set(files.map(f => f.id)));
+    }
+  };
+  
+  const handleDownloadIndividualFile = async (fileId: number) => {
+    try {
+      await dataSharingAPI.downloadIndividualFile(token, fileId, password);
+    } catch (error) {
+      console.error('Individual file download failed:', error);
+      setError('File download failed. Please try again.');
+    }
+  };
+  
+  const handleDownloadSelectedFiles = async () => {
+    if (selectedFiles.size === 0) return;
+    
+    try {
+      setIsDownloadingFiles(true);
+      const fileIds = Array.from(selectedFiles);
+      await dataSharingAPI.downloadSelectedFiles(token, fileIds, password);
+    } catch (error) {
+      console.error('Selected files download failed:', error);
+      setError('Download failed. Please try again.');
+    } finally {
+      setIsDownloadingFiles(false);
+    }
   };
 
   const generateConnectionString = (dataset: SharedDataset, token: string): string => {
@@ -383,7 +452,7 @@ export default function SharedDatasetPage() {
 
           {/* Dataset Info */}
           <div className="px-6 py-4">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               <div className="flex items-center">
                 <Database className="h-5 w-5 text-gray-400 mr-2" />
                 <div>
@@ -405,18 +474,11 @@ export default function SharedDatasetPage() {
                   <div className="text-sm text-gray-600">{dataset.owner_name || 'Unknown'}</div>
                 </div>
               </div>
-              <div className="flex items-center">
-                <Calendar className="h-5 w-5 text-gray-400 mr-2" />
-                <div>
-                  <div className="text-sm font-medium text-gray-900">Expires</div>
-                  <div className="text-sm text-gray-600">{formatDate(dataset.expires_at)}</div>
-                </div>
-              </div>
             </div>
           </div>
         </div>
 
-        {/* File Information - Only show for uploaded files */}
+        {/* File Information - Show for uploaded files (single or multi-file) */}
         {dataset.is_uploaded_file && (
           <div className="bg-white shadow rounded-lg mb-6">
             <div className="px-6 py-4 border-b border-gray-200">
@@ -444,29 +506,73 @@ export default function SharedDatasetPage() {
                 
                 <div className="text-sm text-green-800">
                   <p className="mb-2">
-                    This dataset is a shared file that contains {dataset.file_type} data. 
-                    You can download the file to analyze it locally with your preferred tools.
+                    {dataset.preview_data?.type === 'multi_file' 
+                      ? `This dataset contains ${dataset.preview_data.total_files} files with various data formats. You can download the files to analyze them locally with your preferred tools.`
+                      : `This dataset is a shared file that contains ${dataset.file_type} data. You can download the file to analyze it locally with your preferred tools.`
+                    }
                   </p>
                   
-                  {dataset.row_count && dataset.column_count && (
-                    <div className="flex items-center space-x-4 text-sm">
-                      <span>
-                        <strong>Rows:</strong> {dataset.row_count.toLocaleString()}
-                      </span>
-                      <span>
-                        <strong>Columns:</strong> {dataset.column_count.toLocaleString()}
-                      </span>
+                  {/* Multi-file details */}
+                  {dataset.preview_data?.type === 'multi_file' && dataset.preview_data.files_list && (
+                    <div className="mt-3 mb-3">
+                      <h5 className="font-medium text-green-900 mb-2">Files in this dataset:</h5>
+                      <div className="space-y-1">
+                        {dataset.preview_data.files_list.map((file: any, index: number) => (
+                          <div key={index} className="flex items-center text-sm text-green-700">
+                            <span className="mr-2">{file.is_primary ? '🔹' : '▫️'}</span>
+                            <span className="font-medium">{file.filename}</span>
+                            <span className="ml-2 text-green-600">({file.file_type?.toUpperCase()})</span>
+                            {file.file_size && (
+                              <span className="ml-2 text-green-600">- {formatFileSize(file.file_size)}</span>
+                            )}
+                            {file.is_primary && (
+                              <span className="ml-2 px-2 py-1 bg-green-200 text-green-800 rounded-full text-xs">
+                                Primary
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                        {dataset.preview_data.total_files > dataset.preview_data.files_list.length && (
+                          <div className="text-sm text-green-600 italic">
+                            ... and {dataset.preview_data.total_files - dataset.preview_data.files_list.length} more files
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
+                  
+                  {/* Data statistics */}
+                  <div className="flex flex-wrap items-center gap-4 text-sm">
+                    {dataset.preview_data?.type === 'multi_file' && (
+                      <span>
+                        <strong>Files:</strong> {dataset.preview_data.total_files}
+                      </span>
+                    )}
+                    {dataset.row_count && dataset.column_count && (
+                      <>
+                        <span>
+                          <strong>Rows:</strong> {dataset.row_count.toLocaleString()}
+                        </span>
+                        <span>
+                          <strong>Columns:</strong> {dataset.column_count.toLocaleString()}
+                        </span>
+                      </>
+                    )}
+                  </div>
                 </div>
 
                 {/* Download Instructions */}
                 <div className="mt-3 pt-3 border-t border-green-200">
-                  <h4 className="font-medium text-green-900 mb-2">How to Access This File</h4>
+                  <h4 className="font-medium text-green-900 mb-2">
+                    {dataset.preview_data?.type === 'multi_file' ? 'How to Access These Files' : 'How to Access This File'}
+                  </h4>
                   <div className="text-sm text-green-700 space-y-1">
-                    <p>• Click the "Download" button above to get the file</p>
-                    <p>• Open the file in your preferred application (Excel, text editor, etc.)</p>
+                    <p>• Click the "Download" button above to get {dataset.preview_data?.type === 'multi_file' ? 'all files as a zip archive' : 'the file'}</p>
+                    <p>• Open {dataset.preview_data?.type === 'multi_file' ? 'the files' : 'the file'} in your preferred application (Excel, text editor, etc.)</p>
                     {dataset.enable_chat && <p>• Use the Chat feature above to ask questions about the data</p>}
+                    {dataset.preview_data?.type === 'multi_file' && (
+                      <p className="text-green-600 italic">• Primary file ({dataset.preview_data.primary_file?.filename}) will be used for AI chat responses</p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -611,39 +717,97 @@ export default function SharedDatasetPage() {
         {dataset.preview_data && (
           <div className="bg-white shadow rounded-lg">
             <div className="px-6 py-4 border-b border-gray-200">
-              <h2 className="text-lg font-medium text-gray-900">Data Preview</h2>
+              <h2 className="text-lg font-medium text-gray-900">
+                {dataset.preview_data.type === 'multi_file' ? 'Dataset Overview & Primary File Preview' : 'Data Preview'}
+              </h2>
+              {dataset.preview_data.type === 'multi_file' && (
+                <p className="text-sm text-gray-600 mt-1">
+                  Showing preview of primary file: <strong>{dataset.preview_data.primary_file?.filename}</strong>
+                </p>
+              )}
             </div>
             <div className="px-6 py-4">
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      {dataset.preview_data.headers?.map((header: string, index: number) => (
-                        <th
-                          key={index}
-                          scope="col"
-                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                        >
-                          {header}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {dataset.preview_data.rows?.slice(0, 10).map((row: any[], rowIndex: number) => (
-                      <tr key={rowIndex} className={rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                        {row.map((cell: any, cellIndex: number) => (
-                          <td key={cellIndex} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {cell !== null && cell !== undefined ? String(cell) : (
-                              <span className="text-gray-400 italic">null</span>
-                            )}
-                          </td>
+              {/* Multi-file overview */}
+              {dataset.preview_data.type === 'multi_file' && (
+                <div className="mb-6">
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <div className="flex items-center mb-2">
+                      <span className="text-blue-600 text-lg mr-2">📁</span>
+                      <h3 className="font-medium text-blue-900">Multi-File Dataset</h3>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-blue-800">
+                      <div>
+                        <span className="font-medium">Total Files:</span>
+                        <span className="ml-1">{dataset.preview_data.total_files}</span>
+                      </div>
+                      <div>
+                        <span className="font-medium">Primary File:</span>
+                        <span className="ml-1">{dataset.preview_data.primary_file?.filename}</span>
+                      </div>
+                      <div>
+                        <span className="font-medium">File Type:</span>
+                        <span className="ml-1">{dataset.preview_data.primary_file?.file_type?.toUpperCase()}</span>
+                      </div>
+                      <div>
+                        <span className="font-medium">Preview Source:</span>
+                        <span className="ml-1">Primary File</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {/* Data table preview */}
+              {dataset.preview_data.headers && dataset.preview_data.rows && (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        {dataset.preview_data.headers.map((header: string, index: number) => (
+                          <th
+                            key={index}
+                            scope="col"
+                            className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                          >
+                            {header}
+                          </th>
                         ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {dataset.preview_data.rows.slice(0, 10).map((row: any[], rowIndex: number) => (
+                        <tr key={rowIndex} className={rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                          {row.map((cell: any, cellIndex: number) => (
+                            <td key={cellIndex} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                              {cell !== null && cell !== undefined ? String(cell) : (
+                                <span className="text-gray-400 italic">null</span>
+                              )}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {dataset.preview_data.total_rows > 10 && (
+                    <div className="mt-3 text-sm text-gray-500 text-center">
+                      Showing first 10 rows of {dataset.preview_data.total_rows} total rows in {dataset.preview_data.type === 'multi_file' ? 'primary file' : 'dataset'}
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {/* No preview available message */}
+              {(!dataset.preview_data.headers || !dataset.preview_data.rows) && dataset.preview_data.type === 'multi_file' && (
+                <div className="text-center py-8">
+                  <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
+                    <span className="text-2xl">📁</span>
+                  </div>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">Multi-File Dataset</h3>
+                  <p className="text-gray-600">
+                    This dataset contains {dataset.preview_data.total_files} files. Download the dataset to access all files.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         )}
