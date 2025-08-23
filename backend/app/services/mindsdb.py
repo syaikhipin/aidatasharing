@@ -1327,6 +1327,228 @@ class MindsDBService:
                 "timestamp": datetime.utcnow().isoformat()
             }
 
+    def create_dataset_ml_model(
+        self, 
+        dataset_id: int, 
+        dataset_name: str, 
+        dataset_type: str, 
+        dataset_content: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Create ML models for a dataset (chat model with Gemini)."""
+        try:
+            logger.info(f"🤖 Creating ML models for dataset {dataset_id} ({dataset_name})")
+            
+            # Ensure MindsDB connection
+            if not self._ensure_connection():
+                logger.error("❌ MindsDB connection failed")
+                return {
+                    "success": False,
+                    "error": "MindsDB connection failed",
+                    "dataset_id": dataset_id
+                }
+            
+            # Clean dataset name for MindsDB model naming
+            clean_dataset_name = dataset_name.lower().replace(' ', '_').replace('-', '_')
+            model_name = f"dataset_{dataset_id}_chat_model"
+            
+            # Create chat model using Gemini engine
+            prompt_template = f"""You are an AI assistant specialized in analyzing and discussing the dataset "{dataset_name}".
+
+Dataset Information:
+- Name: {dataset_name}
+- Type: {dataset_type}
+- Dataset ID: {dataset_id}
+
+You are designed to help users understand and analyze this specific dataset. When answering questions:
+1. Be specific about this dataset
+2. Provide helpful insights when possible
+3. Explain any patterns or concepts clearly
+4. Suggest relevant analyses or questions
+5. Be helpful and informative
+
+User Question: {{{{question}}}}
+
+Please provide a comprehensive answer about this dataset:"""
+
+            # Create the chat model
+            chat_model_result = self.create_gemini_model(
+                model_name=model_name,
+                model_type="chat",
+                column_name="response"
+            )
+            
+            # Update the model with specific prompt template if creation was successful
+            if chat_model_result.get("status") == "created":
+                try:
+                    # Try to set a custom prompt template for this specific dataset
+                    update_query = f"""
+                    CREATE OR REPLACE MODEL {model_name}
+                    PREDICT response
+                    USING
+                        engine = '{self.engine_name}',
+                        model_name = '{self.default_model}',
+                        prompt_template = '{prompt_template}',
+                        max_tokens = 1500;
+                    """
+                    
+                    self.connection.query(update_query)
+                    logger.info(f"✅ Updated chat model {model_name} with dataset-specific prompt")
+                    
+                except Exception as update_error:
+                    logger.warning(f"⚠️ Could not update model prompt template: {update_error}")
+                    # Continue anyway - model was created successfully
+            
+            logger.info(f"✅ ML models created for dataset {dataset_id}")
+            
+            return {
+                "success": True,
+                "models_created": [
+                    {
+                        "name": model_name,
+                        "type": "chat",
+                        "engine": self.engine_name,
+                        "status": chat_model_result.get("status", "unknown")
+                    }
+                ],
+                "dataset_id": dataset_id,
+                "dataset_name": dataset_name
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to create ML models for dataset {dataset_id}: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "dataset_id": dataset_id
+            }
+
+    def delete_dataset_models(self, dataset_id: int) -> Dict[str, Any]:
+        """Delete all MindsDB models associated with a dataset."""
+        try:
+            logger.info(f"🗑️ Deleting ML models for dataset {dataset_id}")
+            
+            # Ensure MindsDB connection
+            if not self._ensure_connection():
+                logger.error("❌ MindsDB connection failed")
+                return {
+                    "success": False,
+                    "error": "MindsDB connection failed",
+                    "dataset_id": dataset_id
+                }
+            
+            deleted_models = []
+            errors = []
+            
+            # List of model patterns to look for and delete
+            model_patterns = [
+                f"dataset_{dataset_id}_chat_model",
+                f"dataset_{dataset_id}_model",
+                f"dataset_{dataset_id}_embedding_model",
+                f"dataset_{dataset_id}_vision_model"
+            ]
+            
+            for model_name in model_patterns:
+                try:
+                    # Check if model exists
+                    check_query = f"SHOW MODELS WHERE name = '{model_name}'"
+                    result = self.connection.query(check_query)
+                    
+                    if result and hasattr(result, 'fetch'):
+                        models_df = result.fetch()
+                        if not models_df.empty:
+                            # Model exists, delete it
+                            logger.info(f"🗑️ Deleting model: {model_name}")
+                            delete_query = f"DROP MODEL {model_name}"
+                            self.connection.query(delete_query)
+                            deleted_models.append(model_name)
+                            logger.info(f"✅ Successfully deleted model: {model_name}")
+                        else:
+                            logger.info(f"ℹ️ Model {model_name} does not exist, skipping")
+                    else:
+                        logger.info(f"ℹ️ Could not check existence of model {model_name}, attempting delete anyway")
+                        
+                        # Try to delete anyway in case the check failed
+                        try:
+                            delete_query = f"DROP MODEL IF EXISTS {model_name}"
+                            self.connection.query(delete_query)
+                            deleted_models.append(model_name)
+                            logger.info(f"✅ Successfully deleted model: {model_name}")
+                        except Exception as delete_error:
+                            error_msg = str(delete_error)
+                            if "does not exist" not in error_msg.lower():
+                                logger.warning(f"⚠️ Could not delete model {model_name}: {error_msg}")
+                                errors.append(f"{model_name}: {error_msg}")
+                            else:
+                                logger.info(f"ℹ️ Model {model_name} does not exist")
+                        
+                except Exception as e:
+                    error_msg = str(e)
+                    if "does not exist" not in error_msg.lower():
+                        logger.warning(f"⚠️ Error checking/deleting model {model_name}: {error_msg}")
+                        errors.append(f"{model_name}: {error_msg}")
+                    else:
+                        logger.info(f"ℹ️ Model {model_name} does not exist")
+            
+            # Also clean up any other models that might follow different naming patterns
+            try:
+                # Get all models and find any that contain the dataset ID
+                all_models_query = "SHOW MODELS"
+                result = self.connection.query(all_models_query)
+                
+                if result and hasattr(result, 'fetch'):
+                    all_models_df = result.fetch()
+                    
+                    # Look for models that contain the dataset ID
+                    dataset_models = all_models_df[
+                        all_models_df['NAME'].str.contains(f"dataset_{dataset_id}", case=False, na=False) |
+                        all_models_df['NAME'].str.contains(f"_{dataset_id}_", case=False, na=False)
+                    ]
+                    
+                    for _, model_row in dataset_models.iterrows():
+                        model_name = model_row['NAME']
+                        if model_name not in deleted_models:
+                            try:
+                                logger.info(f"🗑️ Deleting additional dataset model: {model_name}")
+                                delete_query = f"DROP MODEL {model_name}"
+                                self.connection.query(delete_query)
+                                deleted_models.append(model_name)
+                                logger.info(f"✅ Successfully deleted additional model: {model_name}")
+                            except Exception as delete_error:
+                                error_msg = str(delete_error)
+                                logger.warning(f"⚠️ Could not delete additional model {model_name}: {error_msg}")
+                                errors.append(f"{model_name}: {error_msg}")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Could not check for additional dataset models: {e}")
+                errors.append(f"Additional model check failed: {str(e)}")
+            
+            result = {
+                "success": len(deleted_models) > 0 or len(errors) == 0,
+                "deleted_models": deleted_models,
+                "errors": errors,
+                "dataset_id": dataset_id
+            }
+            
+            if deleted_models:
+                logger.info(f"✅ Successfully deleted {len(deleted_models)} models for dataset {dataset_id}: {deleted_models}")
+            else:
+                logger.info(f"ℹ️ No models found to delete for dataset {dataset_id}")
+                
+            if errors:
+                logger.warning(f"⚠️ Some errors occurred while deleting models for dataset {dataset_id}: {errors}")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to delete models for dataset {dataset_id}: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "dataset_id": dataset_id,
+                "deleted_models": [],
+                "errors": [str(e)]
+            }
+
 
 # Create service instance
 mindsdb_service = MindsDBService()
