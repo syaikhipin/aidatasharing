@@ -39,7 +39,7 @@ venv.bak/
 backend/config.env
 config.env
 forge.yaml
-proxy_service.pid
+*.pid
 # Backend specific
 backend/*.log
 backend/app.db
