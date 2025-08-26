@@ -450,69 +450,65 @@ function DatasetDetailContent() {
         return;
       }
       
-      // Try direct file download first
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/datasets/${datasetId}/download`, {
-        method: 'POST',
+      // Step 1: Get download token from the backend
+      const tokenResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/datasets/${datasetId}/download`, {
+        method: 'GET',
         headers: {
-          'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ format })
+        }
       });
       
-      if (response.ok) {
-        const contentType = response.headers.get('Content-Type');
-        
-        // Check if response is a direct file download
-        if (contentType && !contentType.includes('application/json')) {
-          const blob = await response.blob();
-          const url = window.URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.style.display = 'none';
-          a.href = url;
-          a.download = `${dataset?.name || 'dataset'}.${format === 'original' ? dataset?.type || 'csv' : format}`;
-          document.body.appendChild(a);
-          a.click();
-          window.URL.revokeObjectURL(url);
-          document.body.removeChild(a);
-          return;
-        }
-        
-        // Handle JSON response with download info
-        const downloadInfo = await response.json();
-        if (downloadInfo.download_url) {
-          window.open(downloadInfo.download_url, '_blank');
-        } else if (downloadInfo.download_token) {
-          alert('Download initiated. Please wait...');
-        } else {
-          throw new Error('Invalid download response');
-        }
-      } else if (response.status === 405) {
-        // Method not allowed - try GET instead
-        const getResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/datasets/${datasetId}/download?format=${format}`, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
-        
-        if (getResponse.ok) {
-          const blob = await getResponse.blob();
-          const url = window.URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.style.display = 'none';
-          a.href = url;
-          a.download = `${dataset?.name || 'dataset'}.${format === 'original' ? dataset?.type || 'csv' : format}`;
-          document.body.appendChild(a);
-          a.click();
-          window.URL.revokeObjectURL(url);
-          document.body.removeChild(a);
-        } else {
-          throw new Error(`Download failed with status ${getResponse.status}`);
-        }
-      } else {
-        throw new Error(`Download failed with status ${response.status}`);
+      if (!tokenResponse.ok) {
+        const errorData = await tokenResponse.json().catch(() => null);
+        throw new Error(errorData?.detail?.message || `Failed to initiate download: ${tokenResponse.status}`);
       }
+      
+      const downloadInfo = await tokenResponse.json();
+      console.log('Download info received:', downloadInfo);
+      
+      if (!downloadInfo.download_token) {
+        throw new Error('No download token received from server');
+      }
+      
+      // Step 2: Use the download token to get the actual file
+      const fileResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/datasets/download/${downloadInfo.download_token}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (!fileResponse.ok) {
+        const errorData = await fileResponse.json().catch(() => null);
+        throw new Error(errorData?.detail?.message || `Download failed: ${fileResponse.status}`);
+      }
+      
+      // Step 3: Handle the file download
+      const contentType = fileResponse.headers.get('Content-Type');
+      const contentDisposition = fileResponse.headers.get('Content-Disposition');
+      
+      // Extract filename from Content-Disposition header or use dataset name
+      let filename = `${dataset?.name || 'dataset'}.${format === 'original' ? dataset?.type || 'csv' : format}`;
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1].replace(/['"]/g, '');
+        }
+      }
+      
+      const blob = await fileResponse.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      console.log('Download completed successfully');
+      
     } catch (error: any) {
       console.error('Failed to download dataset:', error);
       alert(error.message || 'Failed to download dataset');
@@ -627,37 +623,16 @@ function DatasetDetailContent() {
               </p>
             </div>
             <div className="flex space-x-3">
-              <div className="relative group">
+              {/* Only show download for uploaded file datasets, not connector datasets */}
+              {dataset.source_url && !dataset.connector_id && (
                 <button 
                   onClick={() => handleDownload('original')}
                   className="flex items-center bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium"
                 >
                   <Download className="w-4 h-4 mr-2" />
-                  Download
+                  Download ({dataset?.type?.toUpperCase()})
                 </button>
-                <div className="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-10 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
-                  <div className="py-1">
-                    <button
-                      onClick={() => handleDownload('original')}
-                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                    >
-                      📄 Original Format ({dataset?.type?.toUpperCase()})
-                    </button>
-                    <button
-                      onClick={() => handleDownload('csv')}
-                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                    >
-                      📊 CSV Format
-                    </button>
-                    <button
-                      onClick={() => handleDownload('json')}
-                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                    >
-                      📋 JSON Format
-                    </button>
-                  </div>
-                </div>
-              </div>
+              )}
               {isOwner && (
                 <>
                   <button
@@ -1387,16 +1362,19 @@ function DatasetDetailContent() {
             <div className="bg-white shadow rounded-lg p-6">
               <h3 className="text-lg font-medium text-gray-900 mb-4">Quick Actions</h3>
               <div className="space-y-3">
-                <button 
-                  onClick={() => handleDownload('original')}
-                  className="w-full flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50"
-                >
-                  <Download className="w-5 h-5 text-green-600 mr-3" />
-                  <div className="text-left">
-                    <p className="text-sm font-medium text-gray-900">Download Dataset</p>
-                    <p className="text-xs text-gray-500">Export as CSV, JSON, or original format</p>
-                  </div>
-                </button>
+                {/* Only show download for uploaded file datasets, not connector datasets */}
+                {dataset.source_url && !dataset.connector_id && (
+                  <button 
+                    onClick={() => handleDownload('original')}
+                    className="w-full flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50"
+                  >
+                    <Download className="w-5 h-5 text-green-600 mr-3" />
+                    <div className="text-left">
+                      <p className="text-sm font-medium text-gray-900">Download Dataset</p>
+                      <p className="text-xs text-gray-500">Download in original format ({dataset?.type?.toUpperCase()})</p>
+                    </div>
+                  </button>
+                )}
 
                 {isOwner && (
                   <>

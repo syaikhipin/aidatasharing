@@ -83,6 +83,75 @@ function DatasetsContent() {
     }
   };
 
+  const handleDownloadDataset = async (datasetId: number, datasetName: string, datasetType: string) => {
+    try {
+      const token = localStorage.getItem('access_token');
+      if (!token) {
+        alert('Authentication required. Please log in again.');
+        return;
+      }
+      
+      // Step 1: Get download token from the backend
+      const tokenResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/datasets/${datasetId}/download`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (!tokenResponse.ok) {
+        const errorData = await tokenResponse.json().catch(() => null);
+        throw new Error(errorData?.detail?.message || `Failed to initiate download: ${tokenResponse.status}`);
+      }
+      
+      const downloadInfo = await tokenResponse.json();
+      
+      if (!downloadInfo.download_token) {
+        throw new Error('No download token received from server');
+      }
+      
+      // Step 2: Use the download token to get the actual file
+      const fileResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/datasets/download/${downloadInfo.download_token}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (!fileResponse.ok) {
+        const errorData = await fileResponse.json().catch(() => null);
+        throw new Error(errorData?.detail?.message || `Download failed: ${fileResponse.status}`);
+      }
+      
+      // Step 3: Handle the file download
+      const contentDisposition = fileResponse.headers.get('Content-Disposition');
+      
+      // Extract filename from Content-Disposition header or use dataset name
+      let filename = `${datasetName}.${datasetType || 'csv'}`;
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1].replace(/['"]/g, '');
+        }
+      }
+      
+      const blob = await fileResponse.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+    } catch (error: any) {
+      console.error('Failed to download dataset:', error);
+      alert(error.message || 'Failed to download dataset');
+    }
+  };
+
   // Filter datasets based on search and type
   const filteredDatasets = datasets.filter(dataset => {
     const matchesSearch = dataset.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -346,6 +415,18 @@ function DatasetsContent() {
                                 View
                               </Button>
                             </Link>
+                            {/* Only show download for uploaded file datasets, not connector datasets */}
+                            {dataset.source_url && !dataset.connector_id && (
+                              <Button 
+                                onClick={() => handleDownloadDataset(dataset.id, dataset.name, dataset.type)}
+                                variant="secondary"
+                                size="sm"
+                                title="Download dataset file"
+                              >
+                                <span className="mr-1">💾</span>
+                                Download
+                              </Button>
+                            )}
                             <Button 
                               onClick={() => window.open(`/datasets/${dataset.id}/chat`, '_blank')}
                               variant="secondary"

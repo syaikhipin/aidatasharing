@@ -287,6 +287,13 @@ function OverviewTab({ stats, onRefresh }: { stats: AdminStats | null; onRefresh
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
+            <Link href="/admin/users">
+              <Button variant="outline" className="w-full justify-start">
+                <Users className="mr-2 h-4 w-4" />
+                Manage Users
+              </Button>
+            </Link>
+            
             <Link href="/admin/organizations">
               <Button variant="outline" className="w-full justify-start">
                 <Building className="mr-2 h-4 w-4" />

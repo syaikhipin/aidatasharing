@@ -115,13 +115,43 @@ export default function SharedDatasetPage() {
         downloadUrl += `?password=${encodeURIComponent(password)}`;
       }
       
-      // Create a temporary link element for download
+      // Create a fetch request to handle proper file extension from response headers
+      const response = await fetch(downloadUrl, {
+        method: 'GET'
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Download failed: ${response.status}`);
+      }
+      
+      // Extract filename from Content-Disposition header or use dataset info
+      const contentDisposition = response.headers.get('Content-Disposition');
+      let filename = dataset?.dataset_name || 'dataset';
+      
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1].replace(/['"]/g, '');
+        }
+      } else if (dataset?.file_type) {
+        // Add file extension based on file type if not already present
+        const extension = dataset.file_type.toLowerCase();
+        if (!filename.toLowerCase().endsWith(`.${extension}`)) {
+          filename += `.${extension}`;
+        }
+      }
+      
+      // Download the file with proper filename
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.download = dataset?.dataset_name || 'dataset';
+      link.href = url;
+      link.download = filename;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
     } catch (error) {
       console.error('Download failed:', error);
       setError('Download failed. Please try again.');
@@ -430,13 +460,16 @@ export default function SharedDatasetPage() {
                 )}
               </div>
               <div className="flex space-x-3">
-                <button
-                  onClick={handleDownload}
-                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                >
-                  <Download className="h-4 w-4 mr-2" />
-                  Download
-                </button>
+                {/* Only show download for uploaded files, not connector datasets */}
+                {dataset.is_uploaded_file && (
+                  <button
+                    onClick={handleDownload}
+                    className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Download
+                  </button>
+                )}
                 {dataset.enable_chat && (
                   <button 
                     onClick={() => setShowChat(!showChat)}

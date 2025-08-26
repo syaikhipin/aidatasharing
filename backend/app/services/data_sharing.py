@@ -742,7 +742,7 @@ class DataSharingService:
                                         converted_row.append(bool(val))
                                     else:
                                         converted_row.append(str(val))
-                                converted_row.append(converted_row)
+                                rows.append(converted_row)
                             
                             preview_data.update({
                                 "headers": headers,
@@ -784,7 +784,7 @@ class DataSharingService:
                         "preview_source": "single_file"
                     }
                     
-            logger.info(f"Generated preview data for shared dataset {dataset.id}: {preview_data.get('type', 'none')} preview")
+            logger.info(f"Generated preview data for shared dataset {dataset.id}: {preview_data.get('type', 'none') if preview_data else 'none'} preview")
         except Exception as e:
             logger.warning(f"Failed to generate preview for shared dataset {dataset.id}: {e}")
             
@@ -1101,7 +1101,6 @@ class DataSharingService:
                     file_url = storage_service.get_dataset_file_url(file_path, expires_in=86400)  # 24 hours
                     if file_url and not file_url.startswith('http'):
                         # Convert relative URL to absolute for external access
-                        from app.core.config import settings
                         base_url = getattr(settings, 'BASE_URL', 'http://localhost:8000')
                         file_url = f"{base_url}{file_url}"
                 except Exception as e:
@@ -1232,9 +1231,9 @@ Instructions: When answering, consider whether the dataset file is accessible vi
             )
             
             return {
-                "content": response.get("answer", "I'm sorry, I couldn't process your request."),
-                "metadata": response.get("metadata"),
-                "tokens_used": response.get("tokens_used", 0)
+                "content": response.get("answer", "I'm sorry, I couldn't process your request.") if response else "I'm sorry, I couldn't process your request.",
+                "metadata": response.get("metadata") if response else None,
+                "tokens_used": response.get("tokens_used", 0) if response else 0
             }
             
         except Exception as e:

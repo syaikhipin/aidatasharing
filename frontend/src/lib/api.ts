@@ -249,8 +249,10 @@ export const adminAPI = {
     return response.data;
   },
 
-  deleteUser: async (userId: number) => {
-    const response = await apiClient.delete(`/api/admin/users/${userId}`);
+  deleteUser: async (userId: number, force: boolean = true, transferToAdmin: boolean = true) => {
+    const response = await apiClient.delete(`/api/admin/users/${userId}`, {
+      params: { force, transfer_to_admin: transferToAdmin }
+    });
     return response.data;
   },
 

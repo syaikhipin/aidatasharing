@@ -2080,8 +2080,7 @@ async def get_all_users(
                 "is_superuser": user.is_superuser,
                 "organization_id": user.organization_id,
                 "organization_name": org_name,
-                "created_at": user.created_at.isoformat() if user.created_at else None,
-                "last_login": user.last_login.isoformat() if user.last_login else None
+                "created_at": user.created_at.isoformat() if user.created_at else None
             })
         
         return {
@@ -2249,10 +2248,12 @@ async def update_user(
 @router.delete("/users/{user_id}")
 async def delete_user(
     user_id: int,
+    force: bool = False,
+    transfer_to_admin: bool = True,
     current_user: User = Depends(get_current_superuser),
     db: Session = Depends(get_db)
 ):
-    """Delete a user."""
+    """Delete a user with proper handling of owned datasets."""
     try:
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
@@ -2262,12 +2263,46 @@ async def delete_user(
         if user.id == current_user.id:
             raise HTTPException(status_code=400, detail="Cannot delete your own account")
         
+        # Check if user owns any datasets
+        owned_datasets = db.query(Dataset).filter(Dataset.owner_id == user_id).all()
+        
+        if owned_datasets:
+            if not force:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Cannot delete user: owns {len(owned_datasets)} dataset(s). Use force=true to handle datasets automatically."
+                )
+            
+            if transfer_to_admin:
+                # Transfer ownership to the current admin user
+                logger.info(f"Transferring {len(owned_datasets)} datasets from user {user_id} to admin {current_user.id}")
+                for dataset in owned_datasets:
+                    dataset.owner_id = current_user.id
+                    # Update the organization to match the admin's organization if different
+                    if dataset.organization_id != current_user.organization_id and current_user.organization_id:
+                        dataset.organization_id = current_user.organization_id
+            else:
+                # Delete all owned datasets (cascade delete)
+                logger.info(f"Deleting {len(owned_datasets)} datasets owned by user {user_id}")
+                for dataset in owned_datasets:
+                    db.delete(dataset)
+        
+        # Now delete the user
         db.delete(user)
         db.commit()
         
+        action_taken = "User deleted successfully"
+        if owned_datasets:
+            if transfer_to_admin:
+                action_taken += f" and {len(owned_datasets)} dataset(s) transferred to admin"
+            else:
+                action_taken += f" and {len(owned_datasets)} dataset(s) deleted"
+        
         return {
-            "message": "User deleted successfully",
-            "user_id": user_id
+            "message": action_taken,
+            "user_id": user_id,
+            "datasets_affected": len(owned_datasets),
+            "action": "transferred" if transfer_to_admin and owned_datasets else "deleted" if owned_datasets else "none"
         }
         
     except HTTPException:

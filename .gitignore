@@ -55,7 +55,6 @@ frontend/.next/
 frontend/out/
 frontend/build/
 frontend/.vercel/
-frontend/
 frontend/npm-debug.log*
 frontend/yarn-debug.log*
 frontend/yarn-error.log*
@@ -112,5 +111,5 @@ htmlcov/
 !*.key.example 
 
 node_modules/
-
+*.sqlite
 forge.yaml

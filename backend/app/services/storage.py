@@ -491,7 +491,14 @@ class StorageService:
         if len(parts) != 2:
             return False
         
+        # First part should be exactly 22 characters (URL-safe base64 from 16 bytes)
+        # Second part should be exactly 32 characters (SHA256 hash truncated)
         if len(parts[0]) != 22 or len(parts[1]) != 32:
+            return False
+        
+        # Check if parts contain only valid characters
+        import re
+        if not re.match(r'^[A-Za-z0-9_-]+$', parts[0]) or not re.match(r'^[a-f0-9]+$', parts[1]):
             return False
         
         return True

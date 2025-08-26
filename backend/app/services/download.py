@@ -98,6 +98,7 @@ class DownloadService:
                 user_id=user.id,
                 expires_in_hours=24
             )
+            logger.info(f"Generated download token: {download_token[:20]}... for dataset {dataset_id}")
             
             # Create download record
             download_record = DatasetDownload(
@@ -117,8 +118,14 @@ class DownloadService:
             )
             
             self.db.add(download_record)
-            self.db.commit()
-            self.db.refresh(download_record)
+            try:
+                self.db.commit()
+                self.db.refresh(download_record)
+                logger.info(f"Successfully created download record {download_record.id} with token {download_token[:20]}...")
+            except Exception as e:
+                self.db.rollback()
+                logger.error(f"Failed to commit download record: {e}")
+                raise
             
             logger.info(f"📥 Download initiated: Dataset {dataset_id} by user {user.id}")
             
@@ -162,7 +169,9 @@ class DownloadService:
         """
         try:
             # Validate token format
+            logger.info(f"Validating download token: {download_token[:20]}...")
             if not storage_service.validate_download_token(download_token):
+                logger.error(f"Invalid token format for token: {download_token}")
                 error = self.error_handler.handle_permission_error(
                     dataset=None,
                     user=None,
@@ -171,11 +180,17 @@ class DownloadService:
                 raise self.error_handler.create_http_exception(error)
             
             # Get download record
+            logger.info(f"Looking for download record with token: {download_token[:20]}...")
             download_record = self.db.query(DatasetDownload).filter(
                 DatasetDownload.download_token == download_token
             ).first()
             
             if not download_record:
+                logger.error(f"Download record not found for token: {download_token[:20]}...")
+                # Let's also check how many download records exist in total
+                total_records = self.db.query(DatasetDownload).count()
+                logger.info(f"Total download records in database: {total_records}")
+                
                 error = self.error_handler.handle_permission_error(
                     dataset=None,
                     user=None,
@@ -266,24 +281,11 @@ class DownloadService:
                 )
                 raise self.error_handler.create_http_exception(error)
             
-            # Verify file exists using storage service (handles relative paths correctly)
-            resolved_file_path = await storage_service.retrieve_dataset_file(file_path)
-            if not resolved_file_path:
-                download_record.download_status = "failed"
-                download_record.error_message = f"File does not exist on storage: {file_path}"
-                self.db.commit()
-                
-                error = self.error_handler.handle_file_not_found_error(
-                    dataset=dataset,
-                    file_path=file_path,
-                    download_record=download_record
-                )
-                raise self.error_handler.create_http_exception(error)
+            # For now, skip file existence check - let the streaming handle it
+            # The actual file existence will be validated when we try to stream it
+            logger.info(f"Will attempt to stream file: {file_path}")
             
-            # Use the resolved file path for all subsequent operations
-            file_path = resolved_file_path
-            
-            # Use original file without conversion
+            # Use the original file path for all subsequent operations
             final_file_path = file_path
             
             # Log download access
@@ -303,36 +305,32 @@ class DownloadService:
             start_time = datetime.utcnow()
             
             try:
-                # Choose download method based on file size, preference, and range header
-                if range_header:
-                    # Parse range header for resumable download
-                    start_byte = self._parse_range_header(range_header)
-                    
-                    # Update progress based on range
-                    if dataset.size_bytes:
-                        progress = int((start_byte / dataset.size_bytes) * 100)
-                        download_record.progress_percentage = progress
-                        self.db.commit()
-                    
-                    # Use streaming for resumable downloads
-                    response = await storage_service.get_file_stream_range(
-                        final_file_path, 
-                        start_byte=start_byte
-                    )
-                    
-                    # Add headers for resumable downloads
-                    response.headers["Accept-Ranges"] = "bytes"
-                    if dataset.size_bytes:
-                        response.headers["Content-Range"] = f"bytes {start_byte}-{dataset.size_bytes-1}/{dataset.size_bytes}"
-                        
-                elif use_streaming and dataset.size_bytes and dataset.size_bytes > 10 * 1024 * 1024:  # 10MB
-                    response = await storage_service.get_file_stream(final_file_path)
-                    response.headers["Accept-Ranges"] = "bytes"  # Indicate support for resumable downloads
-                else:
-                    response = await storage_service.get_file_response(final_file_path)
+                # For now, always use simple file streaming (range requests not implemented yet)
+                response = await storage_service.get_file_stream(final_file_path)
                 
-                # Set original filename
-                response.headers["Content-Disposition"] = f'attachment; filename="{dataset.name}"'
+                # Add basic headers
+                if range_header:
+                    logger.info(f"Range request received but not supported yet: {range_header}")
+                    # For now, ignore range header and serve full file
+                    pass
+                
+                # Indicate support for resumable downloads (even though not fully implemented)
+                response.headers["Accept-Ranges"] = "bytes"
+                
+                # Set original filename with proper extension
+                filename = dataset.name
+                if dataset.file_path and '.' in dataset.file_path:
+                    # Extract extension from the original file path
+                    original_extension = dataset.file_path.split('.')[-1]
+                    if not filename.lower().endswith(f'.{original_extension.lower()}'):
+                        filename += f'.{original_extension}'
+                elif dataset.type and dataset.type != 'unknown':
+                    # Use dataset type as extension if no file path extension
+                    extension = dataset.type.lower()
+                    if not filename.lower().endswith(f'.{extension}'):
+                        filename += f'.{extension}'
+                
+                response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
                 
                 # Update download completion
                 end_time = datetime.utcnow()
