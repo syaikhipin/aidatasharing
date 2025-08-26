@@ -4,7 +4,7 @@ from app.core.config import settings
 from app.core.auth import get_password_hash
 from app.models import *  # Import all models to ensure they are registered
 from app.core.database import Base
-from migrations.migration_manager import MigrationManager
+from migrations.postgresql_migration_manager import PostgreSQLMigrationManager as MigrationManager
 import logging
 import sys
 import os
@@ -29,15 +29,34 @@ def init_db():
     
     engine = create_engine(
         settings.DATABASE_URL,
-        connect_args={"check_same_thread": False} if "sqlite" in settings.DATABASE_URL else {}
+        # Use configuration from .env file
+        pool_size=settings.DB_POOL_SIZE,
+        max_overflow=settings.DB_MAX_OVERFLOW,
+        pool_pre_ping=settings.DB_POOL_PRE_PING,
+        pool_recycle=settings.DB_POOL_RECYCLE,
+        connect_args={
+            "connect_timeout": settings.DB_CONNECTION_TIMEOUT,
+        } if "postgresql" in settings.DATABASE_URL else {}
     )
     
     # Create all tables
     Base.metadata.create_all(bind=engine)
     
-    # Run database migrations
-    migration_manager = MigrationManager()
-    migration_manager.migrate()
+    # Run database migrations - PostgreSQL is now the primary database
+    if "postgresql" in settings.DATABASE_URL:
+        logger.info("PostgreSQL database detected - using PostgreSQL migration")
+        try:
+            from migrations.postgresql_migration_manager import PostgreSQLMigrationManager
+            migration_manager = PostgreSQLMigrationManager()
+            migration_manager.migrate()
+        except ImportError:
+            logger.info("PostgreSQL migration manager not found, using standard initialization")
+    else:
+        # Fallback to SQLite migrations (deprecated)
+        logger.warning("SQLite detected - consider migrating to PostgreSQL for better performance")
+        migration_manager = MigrationManager()
+        if hasattr(migration_manager, 'migrate'):
+            migration_manager.migrate()
     
     # Create session
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

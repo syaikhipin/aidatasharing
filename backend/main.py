@@ -415,7 +415,7 @@ async def health_check():
         "services": {
             "database": {
                 "status": "connected",
-                "type": "SQLite",
+                "type": "PostgreSQL",
                 "response_time": "2ms"
             },
             "mindsdb": {

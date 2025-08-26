@@ -11,11 +11,26 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "AI Share Platform"
     VERSION: str = "1.0.0"
     
-    # Database - Single unified database location
-    DATABASE_URL: str = "sqlite:///./storage/aishare_platform.db"
+    # Database - Single unified database location (loaded from .env)
+    DATABASE_URL: str = Field(default=None, env="DATABASE_URL", description="Database connection URL")
+    
+    # Database connection pool settings (loaded from .env)
+    DB_POOL_SIZE: int = Field(default=10, env="DB_POOL_SIZE", description="Database connection pool size")
+    DB_MAX_OVERFLOW: int = Field(default=20, env="DB_MAX_OVERFLOW", description="Database connection pool max overflow")
+    DB_POOL_PRE_PING: bool = Field(default=True, env="DB_POOL_PRE_PING", description="Enable database connection pre-ping")
+    DB_POOL_RECYCLE: int = Field(default=3600, env="DB_POOL_RECYCLE", description="Database connection pool recycle time in seconds")
+    
+    # Database timeout settings (loaded from .env)
+    DB_CONNECTION_TIMEOUT: int = Field(default=30, env="DB_CONNECTION_TIMEOUT", description="Database connection timeout in seconds")
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        # Validate that DATABASE_URL is provided
+        if not self.DATABASE_URL:
+            raise ValueError(
+                "DATABASE_URL is required. Please set it in your .env file or environment variables. "
+                "Example: DATABASE_URL=postgresql://user:password@host:port/database"
+            )
         # Get centralized configuration
         self._app_config = get_app_config()
     

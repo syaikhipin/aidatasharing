@@ -263,11 +263,14 @@ async def get_organization_members(
     
     result = []
     for member in members:
+        # Handle cases where role might be None and provide appropriate default
+        role = member.role or ('admin' if member.is_superuser else 'member')
+        
         result.append(OrganizationMember(
             id=member.id,
             email=member.email,
             full_name=member.full_name,
-            role=member.role,
+            role=role,
             is_active=member.is_active,
             created_at=member.created_at
         ))

@@ -67,7 +67,9 @@ class AdminConfigurationService:
                 "type": ConfigType.URL,
                 "title": "Database URL",
                 "description": "Database connection string",
-                "default": "sqlite:///./storage/aishare_platform.db",
+                "default": "postgresql://user:password@localhost:5432/database",
+                "placeholder": "postgresql://user:password@host:port/database",
+                "env_var": "DATABASE_URL",
                 "required": True,
                 "restart_required": True
             },
