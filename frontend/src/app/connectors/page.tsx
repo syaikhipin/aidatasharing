@@ -72,6 +72,7 @@ function ConnectorsContent() {
   const [testing, setTesting] = useState<Record<number, boolean>>({});
   const [syncing, setSyncing] = useState<Record<number, boolean>>({});
   const [enablingProxy, setEnablingProxy] = useState<Record<number, boolean>>({});
+  const [creatingDataset, setCreatingDataset] = useState<Record<number, boolean>>({});
 
   const showToast = (title: string, description: string, variant: 'default' | 'destructive' = 'default') => {
     // Simple alert for now - can be replaced with proper toast implementation
@@ -185,6 +186,44 @@ function ConnectorsContent() {
       showToast("Error", "Failed to enable proxy access", "destructive");
     } finally {
       setEnablingProxy(prev => ({ ...prev, [connectorId]: false }));
+    }
+  };
+
+  const handleCreateDataset = async (connectorId: number) => {
+    const connector = connectors.find(c => c.id === connectorId);
+    if (!connector) return;
+    
+    // Prompt for dataset name and table/query
+    const datasetName = prompt('Enter dataset name:');
+    if (!datasetName) return;
+    
+    let tableOrQuery = '';
+    if (connector.connector_type === 'mysql' || connector.connector_type === 'postgresql') {
+      tableOrQuery = prompt('Enter table name or SQL query:') || 'SELECT * FROM your_table LIMIT 100';
+    } else if (connector.connector_type === 'api') {
+      tableOrQuery = prompt('Enter API endpoint (optional):') || '';
+    }
+    
+    setCreatingDataset(prev => ({ ...prev, [connectorId]: true }));
+    
+    try {
+      const result = await dataConnectorsAPI.createDatasetFromConnector(connectorId, {
+        dataset_name: datasetName,
+        description: `Dataset created from ${connector.name} connector`,
+        table_or_endpoint: tableOrQuery,
+        sharing_level: 'private'
+      });
+      
+      showToast("Success", `Dataset "${datasetName}" created successfully`);
+      fetchConnectors(); // Refresh to show updated dataset counts
+      
+      // Navigate to the new dataset
+      router.push(`/datasets/${result.dataset_id}`);
+    } catch (error: any) {
+      console.error('Failed to create dataset:', error);
+      showToast("Error", error.response?.data?.detail || 'Failed to create dataset', "destructive");
+    } finally {
+      setCreatingDataset(prev => ({ ...prev, [connectorId]: false }));
     }
   };
 
@@ -437,6 +476,24 @@ function ConnectorsContent() {
                   </div>
                   
                   <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => handleCreateDataset(connector.id)}
+                      disabled={creatingDataset[connector.id] || connector.test_status !== 'success'}
+                      className={`inline-flex items-center px-3 py-2 border rounded-md text-sm font-medium disabled:opacity-50 ${
+                        connector.test_status === 'success' 
+                          ? 'border-green-300 text-green-700 bg-green-50 hover:bg-green-100'
+                          : 'border-gray-300 text-gray-500 bg-gray-50'
+                      }`}
+                      title={connector.test_status !== 'success' ? 'Test connector first to create datasets' : ''}
+                    >
+                      {creatingDataset[connector.id] ? (
+                        <RefreshCw className="w-4 h-4 animate-spin mr-1" />
+                      ) : (
+                        <Plus className="w-4 h-4 mr-1" />
+                      )}
+                      Create Dataset
+                    </button>
+                    
                     {connector.test_status === 'success' && !connector.proxy_enabled && (
                       <button
                         onClick={() => handleEnableProxy(connector.id)}

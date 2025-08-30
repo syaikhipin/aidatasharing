@@ -460,8 +460,8 @@ export default function SharedDatasetPage() {
                 )}
               </div>
               <div className="flex space-x-3">
-                {/* Only show download for uploaded files, not connector datasets */}
-                {dataset.is_uploaded_file && (
+                {/* Show download for uploaded files or any dataset without proxy connection */}
+                {(dataset.is_uploaded_file || !dataset.has_proxy_connection) && (
                   <button
                     onClick={handleDownload}
                     className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
@@ -511,8 +511,8 @@ export default function SharedDatasetPage() {
           </div>
         </div>
 
-        {/* File Information - Show for uploaded files (single or multi-file) */}
-        {dataset.is_uploaded_file && (
+        {/* File Information - Show for uploaded files or datasets without proxy connection */}
+        {(dataset.is_uploaded_file || !dataset.has_proxy_connection) && (
           <div className="bg-white shadow rounded-lg mb-6">
             <div className="px-6 py-4 border-b border-gray-200">
               <div className="flex items-center">
@@ -613,8 +613,8 @@ export default function SharedDatasetPage() {
           </div>
         )}
 
-        {/* Proxy Connection Details - Only show for connector datasets */}
-        {!dataset.is_uploaded_file && dataset.has_proxy_connection && (
+        {/* Proxy Connection Details - Only show for connector datasets with proxy connection */}
+        {dataset.has_proxy_connection && (
           <div className="bg-white shadow rounded-lg mb-6">
             <div className="px-6 py-4 border-b border-gray-200">
               <div className="flex items-center">

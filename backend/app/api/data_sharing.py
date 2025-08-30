@@ -292,7 +292,7 @@ async def validate_shared_resources(
 
 @router.get("/my-shared-datasets")
 async def get_my_shared_datasets(
-    include_invalid: bool = False,
+    include_invalid: bool = True,  # Changed default to True to be less aggressive
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ) -> List[Dict[str, Any]]:
@@ -323,19 +323,44 @@ async def get_my_shared_datasets(
             ).first()
             connector_valid = connector is not None
         
-        # Check file validity
+        # Check file validity - but be more lenient for different dataset types
         file_valid = True
         if dataset.file_path and not dataset.connector_id:
-            file_valid = os.path.exists(dataset.file_path)
+            # Use proper storage path resolution
+            from app.services.storage import StorageService
+            try:
+                storage_service = StorageService()
+                # Get the actual storage base path from storage service
+                if hasattr(storage_service, 'backend') and hasattr(storage_service.backend, 'storage_dir'):
+                    storage_base = storage_service.backend.storage_dir
+                else:
+                    from app.core.config import settings
+                    storage_base = os.path.abspath(settings.STORAGE_BASE_PATH)
+                
+                full_path = os.path.join(storage_base, dataset.file_path)
+                file_valid = os.path.exists(full_path)
+                logger.debug(f"File validation for dataset {dataset.id}: {full_path} exists: {file_valid}")
+            except Exception as e:
+                # Fallback to direct path check if storage service fails
+                logger.warning(f"Storage service validation failed for dataset {dataset.id}: {e}")
+                file_valid = os.path.exists(dataset.file_path)
+        elif not dataset.file_path and not dataset.connector_id:
+            # For datasets without file_path or connector_id, check if it has dataset_files
+            from app.models.dataset import DatasetFile
+            has_dataset_files = db.query(DatasetFile).filter(
+                DatasetFile.dataset_id == dataset.id,
+                DatasetFile.is_deleted == False
+            ).first() is not None
+            file_valid = has_dataset_files
         
         is_valid = not is_expired and connector_valid and file_valid
         
-        # If dataset is invalid, automatically disable sharing
-        if not is_valid and not include_invalid:
-            dataset.public_share_enabled = False
-            db.commit()
-            logger.info(f"Auto-disabled sharing for invalid dataset {dataset.id}")
-            continue
+        # Don't automatically disable sharing - just log warnings for invalid datasets
+        if not is_valid:
+            logger.warning(f"Dataset {dataset.id} ({dataset.name}) has validation issues: expired={is_expired}, connector_valid={connector_valid}, file_valid={file_valid}")
+            # Only skip if include_invalid is False
+            if not include_invalid:
+                continue
         
         dataset_info = {
             "id": dataset.id,
@@ -370,10 +395,11 @@ async def refresh_proxy_connectors(
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Refresh proxy connectors for all shared datasets."""
-    if current_user.role not in ["owner", "admin"]:
+    # Check if user has admin privileges or is superuser
+    if not (current_user.role in ["owner", "admin"] or getattr(current_user, 'is_superuser', False)):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Insufficient permissions"
+            detail="Insufficient permissions. Admin or owner role required."
         )
     
     service = DataSharingService(db)
@@ -640,26 +666,62 @@ async def download_shared_dataset(
             db.commit()
     
     # Check if this is a URL (external dataset) - cannot download
-    if dataset.source_url.startswith(('http://', 'https://')):
+    if dataset.source_url and dataset.source_url.startswith(('http://', 'https://')):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot download external URL datasets. This dataset is hosted externally."
         )
     
-    # Construct file path - files are stored in backend/storage/
+    # Try to find the file using multiple methods
     file_path = None
-    possible_paths = [
-        f"storage/{dataset.source_url}",  # Main storage directory (backend/storage/)
-        f"../storage/{dataset.source_url}",  # Alternative storage path
-        dataset.source_url,  # Direct path (if absolute)
-        f"uploads/{dataset.source_url}",  # Legacy uploads directory
-    ]
     
-    for path in possible_paths:
-        abs_path = os.path.abspath(path)
-        if os.path.exists(abs_path):
-            file_path = abs_path
-            break
+    # Method 1: Check dataset_files table first (new upload system)
+    if dataset.is_multi_file_dataset or not dataset.source_url:
+        from app.models.dataset import DatasetFile
+        dataset_files = db.query(DatasetFile).filter(
+            DatasetFile.dataset_id == dataset.id,
+            DatasetFile.is_deleted == False
+        ).all()
+        
+        if dataset_files:
+            # For single file, use the first/primary file
+            primary_file = next((f for f in dataset_files if f.is_primary), dataset_files[0])
+            if primary_file.file_path and os.path.exists(primary_file.file_path):
+                file_path = primary_file.file_path
+    
+    # Method 2: Use source_url if available
+    if not file_path and dataset.source_url:
+        possible_paths = [
+            f"storage/{dataset.source_url}",  # Main storage directory
+            f"../storage/{dataset.source_url}",  # Alternative storage path
+            dataset.source_url,  # Direct path (if absolute)
+            f"uploads/{dataset.source_url}",  # Legacy uploads directory
+        ]
+        
+        for path in possible_paths:
+            abs_path = os.path.abspath(path)
+            if os.path.exists(abs_path):
+                file_path = abs_path
+                break
+    
+    # Method 3: Search by dataset ID pattern if still not found
+    if not file_path:
+        import glob
+        
+        # Search for files with dataset ID in the filename
+        search_patterns = [
+            f"storage/*/dataset_{dataset.id}_*",
+            f"../storage/*/dataset_{dataset.id}_*", 
+            f"storage/dataset_{dataset.id}_*",
+            f"../storage/dataset_{dataset.id}_*"
+        ]
+        
+        for pattern in search_patterns:
+            matches = glob.glob(pattern)
+            if matches:
+                # Use the first match found
+                file_path = os.path.abspath(matches[0])
+                break
     
     if not file_path:
         raise HTTPException(
@@ -726,26 +788,62 @@ async def download_shared_dataset_authenticated(
         )
     
     # Check if this is a URL (external dataset) - cannot download
-    if dataset.source_url.startswith(('http://', 'https://')):
+    if dataset.source_url and dataset.source_url.startswith(('http://', 'https://')):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot download external URL datasets. This dataset is hosted externally."
         )
     
-    # Construct file path - files are stored in backend/storage/
+    # Try to find the file using multiple methods (same as public endpoint)
     file_path = None
-    possible_paths = [
-        f"storage/{dataset.source_url}",  # Main storage directory (backend/storage/)
-        f"../storage/{dataset.source_url}",  # Alternative storage path
-        dataset.source_url,  # Direct path (if absolute)
-        f"uploads/{dataset.source_url}",  # Legacy uploads directory
-    ]
     
-    for path in possible_paths:
-        abs_path = os.path.abspath(path)
-        if os.path.exists(abs_path):
-            file_path = abs_path
-            break
+    # Method 1: Check dataset_files table first (new upload system)
+    if dataset.is_multi_file_dataset or not dataset.source_url:
+        from app.models.dataset import DatasetFile
+        dataset_files = db.query(DatasetFile).filter(
+            DatasetFile.dataset_id == dataset.id,
+            DatasetFile.is_deleted == False
+        ).all()
+        
+        if dataset_files:
+            # For single file, use the first/primary file
+            primary_file = next((f for f in dataset_files if f.is_primary), dataset_files[0])
+            if primary_file.file_path and os.path.exists(primary_file.file_path):
+                file_path = primary_file.file_path
+    
+    # Method 2: Use source_url if available
+    if not file_path and dataset.source_url:
+        possible_paths = [
+            f"storage/{dataset.source_url}",  # Main storage directory
+            f"../storage/{dataset.source_url}",  # Alternative storage path
+            dataset.source_url,  # Direct path (if absolute)
+            f"uploads/{dataset.source_url}",  # Legacy uploads directory
+        ]
+        
+        for path in possible_paths:
+            abs_path = os.path.abspath(path)
+            if os.path.exists(abs_path):
+                file_path = abs_path
+                break
+    
+    # Method 3: Search by dataset ID pattern if still not found
+    if not file_path:
+        import glob
+        
+        # Search for files with dataset ID in the filename
+        search_patterns = [
+            f"storage/*/dataset_{dataset.id}_*",
+            f"../storage/*/dataset_{dataset.id}_*", 
+            f"storage/dataset_{dataset.id}_*",
+            f"../storage/dataset_{dataset.id}_*"
+        ]
+        
+        for pattern in search_patterns:
+            matches = glob.glob(pattern)
+            if matches:
+                # Use the first match found
+                file_path = os.path.abspath(matches[0])
+                break
     
     if not file_path:
         raise HTTPException(

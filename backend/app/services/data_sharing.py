@@ -580,11 +580,12 @@ class DataSharingService:
         dataset.share_password = password
         dataset.ai_chat_enabled = enable_chat and settings.ENABLE_AI_CHAT
         
-        # Create proxy connector for API access (skip for image files)
-        if dataset.type.value.lower() not in ['image']:
+        # Only create proxy connector for connector-based datasets, not uploaded files
+        if dataset.connector_id:
             self._create_dataset_proxy_connector_sync(dataset, share_token)
+            logger.info(f"Created proxy connector for connector-based dataset: {dataset.name}")
         else:
-            logger.info(f"Skipping proxy connector creation for {dataset.type.value} file: {dataset.name}")
+            logger.info(f"Skipping proxy connector creation for uploaded file: {dataset.name}")
         
         self.db.commit()
         self.db.refresh(dataset)
@@ -661,7 +662,22 @@ class DataSharingService:
                     DatasetFile.is_deleted == False
                 ).all()
                 
-                file_exists = any(os.path.exists(f.file_path) for f in existing_files if f.file_path)
+                # Use storage service to check file existence properly
+                from app.services.storage import StorageService
+                storage_service = StorageService()
+                
+                file_exists = False
+                for f in existing_files:
+                    if f.file_path:
+                        try:
+                            # Try to get file info through storage service
+                            content = await storage_service.retrieve_dataset_file(f.file_path)
+                            if content:
+                                file_exists = True
+                                break
+                        except Exception:
+                            # File doesn't exist or can't be retrieved
+                            continue
                 
                 if not file_exists:
                     # Disable sharing if no files exist
@@ -671,14 +687,26 @@ class DataSharingService:
                         status_code=status.HTTP_410_GONE,
                         detail="Dataset files are no longer available"
                     )
-            elif dataset.file_path and not os.path.exists(dataset.file_path):
-                # Single file check
-                dataset.public_share_enabled = False
-                self.db.commit()
-                raise HTTPException(
-                    status_code=status.HTTP_410_GONE,
-                    detail="Dataset file is no longer available"
-                )
+            elif dataset.file_path:
+                # Single file check - use storage service instead of direct os.path.exists
+                from app.services.storage import StorageService
+                storage_service = StorageService()
+                
+                try:
+                    # Try to get file info through storage service
+                    content = await storage_service.retrieve_dataset_file(dataset.file_path)
+                    file_exists = content is not None
+                except Exception:
+                    file_exists = False
+                
+                if not file_exists:
+                    # Disable sharing if file doesn't exist
+                    dataset.public_share_enabled = False
+                    self.db.commit()
+                    raise HTTPException(
+                        status_code=status.HTTP_410_GONE,
+                        detail="Dataset file is no longer available"
+                    )
         
         # Log access
         self._log_share_access(dataset, share_token, ip_address, user_agent)
@@ -692,7 +720,6 @@ class DataSharingService:
         preview_data = None
         try:
             import pandas as pd
-            import os
             
             # Handle multi-file datasets
             if dataset.is_multi_file_dataset:
@@ -784,21 +811,39 @@ class DataSharingService:
                         "preview_source": "single_file"
                     }
                     
-            logger.info(f"Generated preview data for shared dataset {dataset.id}: {preview_data.get('type', 'none') if preview_data else 'none'} preview")
+            if preview_data and preview_data.get('rows'):
+                logger.info(f"Generated preview data for shared dataset {dataset.id}: {len(preview_data.get('rows', []))} rows of {preview_data.get('type', 'unknown')} data")
+            else:
+                logger.debug(f"No preview data available for shared dataset {dataset.id} (file not found or unsupported format)")
         except Exception as e:
             logger.warning(f"Failed to generate preview for shared dataset {dataset.id}: {e}")
             
         # Determine if this is an uploaded file or a connector dataset
+        # Check if there are files in dataset_files table (for new upload system)
+        has_dataset_files = False
+        if dataset.id:
+            from app.models.dataset import DatasetFile
+            dataset_files_count = self.db.query(DatasetFile).filter(
+                DatasetFile.dataset_id == dataset.id,
+                DatasetFile.is_deleted == False
+            ).count()
+            has_dataset_files = dataset_files_count > 0
+        
         is_uploaded_file = bool(
             (dataset.source_url and not dataset.source_url.startswith('http')) or
             dataset.is_multi_file_dataset or
-            dataset.file_path
+            dataset.file_path or
+            has_dataset_files or
+            # Fallback: if no connector_id and it's a file type, assume uploaded
+            (not dataset.connector_id and dataset.type.value.lower() in [
+                'pdf', 'csv', 'json', 'excel', 'txt', 'docx', 'doc', 'rtf', 'odt', 'image'
+            ])
         )
         
-        # Only include proxy connection info for connector datasets, not uploaded files
+        # Only include proxy connection info for connector-based datasets, not uploaded files
         proxy_connection_info = None
-        if not is_uploaded_file:
-            # For connector datasets, provide basic connection info
+        if dataset.connector_id:
+            # For connector datasets, provide connection info only
             proxy_connection_info = {
                 "connection_type": dataset.type.value,
                 "proxy_url": f"http://localhost:10103",
@@ -829,6 +874,7 @@ class DataSharingService:
             "shared_at": dataset.created_at,
             "preview_data": preview_data,
             "is_uploaded_file": is_uploaded_file,
+            "is_connector_dataset": bool(dataset.connector_id),
             "has_proxy_connection": bool(proxy_connection_info),
             "proxy_connection_info": proxy_connection_info
         }

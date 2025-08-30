@@ -291,7 +291,6 @@ app.include_router(data_sharing_files.router, prefix="/api/data-sharing", tags=[
 app.include_router(file_handler.router, prefix="/api/files", tags=["file-handler"])
 app.include_router(file_server.router, prefix="/api/files", tags=["file-server"])
 app.include_router(data_connectors.router, prefix="/api/connectors", tags=["data-connectors"])
-app.include_router(data_connectors.router, prefix="/api/data-connectors", tags=["data-connectors"])  # Alternative endpoint
 app.include_router(environment.router, prefix="/api/admin/environment", tags=["admin"])
 app.include_router(llm_configurations.router, prefix="/api/llm-configs", tags=["llm-configurations"])
 app.include_router(proxy_connectors.router, prefix="/api/proxy-connectors", tags=["proxy-connectors"])

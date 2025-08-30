@@ -981,8 +981,14 @@ async def upload_dataset_file(
         
     except Exception as e:
         # Clean up dataset record if storage fails
-        db.delete(temp_dataset)
-        db.commit()
+        try:
+            db.rollback()  # Rollback any pending transaction
+            db.delete(temp_dataset)
+            db.commit()
+        except Exception as cleanup_error:
+            logger.error(f"❌ Error during cleanup: {cleanup_error}")
+            db.rollback()  # Ensure we rollback the failed cleanup transaction
+        
         logger.error(f"❌ File storage failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1225,6 +1231,29 @@ async def upload_dataset_file(
             "error": str(e),
             "message": "ML model creation failed but dataset was uploaded successfully"
         }
+    
+    # Automatically create share link if sharing level is not private
+    if sharing_level_enum != DataSharingLevel.PRIVATE:
+        try:
+            from app.services.data_sharing import DataSharingService
+            sharing_service = DataSharingService(db)
+            
+            # Create share link with chat enabled by default
+            share_result = sharing_service.create_share_link(
+                dataset_id=db_dataset.id,
+                user_id=current_user.id,
+                password=None,  # No password by default
+                enable_chat=True  # Enable chat by default
+            )
+            
+            logger.info(f"Auto-created share link for dataset {db_dataset.id} with sharing level {sharing_level_enum.value}")
+            
+            # Refresh dataset to get updated share info
+            db.refresh(db_dataset)
+            
+        except Exception as e:
+            logger.warning(f"Could not auto-create share link for dataset {db_dataset.id}: {e}")
+            # Don't fail the upload if share link creation fails
     
     # Prepare comprehensive response
     response_data = {

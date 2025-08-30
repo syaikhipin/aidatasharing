@@ -75,6 +75,7 @@ class PostgreSQLMigrationManager:
                 
                 # List of migrations to run
                 migrations = [
+                    "fix_sequences",
                     "add_postgresql_indexes",
                     "optimize_json_columns", 
                     "add_postgresql_constraints"
@@ -82,15 +83,17 @@ class PostgreSQLMigrationManager:
                 
                 for migration_name in migrations:
                     try:
-                        with conn.begin():
-                            if not self._is_migration_applied(conn, migration_name):
-                                migration_method = getattr(self, f"_migration_{migration_name}", None)
-                                if migration_method:
-                                    logger.info(f"Running migration: {migration_name}")
-                                    migration_method(conn)
-                                    self._mark_migration_applied(conn, migration_name)
-                                else:
-                                    logger.warning(f"Migration method not found: {migration_name}")
+                        # Use separate connection for each migration to avoid transaction rollback issues
+                        with self.engine.connect() as migration_conn:
+                            with migration_conn.begin():
+                                if not self._is_migration_applied(migration_conn, migration_name):
+                                    migration_method = getattr(self, f"_migration_{migration_name}", None)
+                                    if migration_method:
+                                        logger.info(f"Running migration: {migration_name}")
+                                        migration_method(migration_conn)
+                                        self._mark_migration_applied(migration_conn, migration_name)
+                                    else:
+                                        logger.warning(f"Migration method not found: {migration_name}")
                     except Exception as e:
                         logger.warning(f"Migration {migration_name} failed: {e}")
                         # Continue with other migrations
@@ -125,6 +128,60 @@ class PostgreSQLMigrationManager:
             {"name": migration_name}
         )
     
+    def _migration_fix_sequences(self, conn):
+        """Fix PostgreSQL sequences to match existing data"""
+        try:
+            # Get all sequences
+            sequences_result = conn.execute(text("""
+                SELECT schemaname, sequencename, last_value 
+                FROM pg_sequences 
+                WHERE schemaname = 'public'
+                ORDER BY sequencename
+            """))
+            
+            sequences = sequences_result.fetchall()
+            fixed_count = 0
+            
+            for seq in sequences:
+                schema, seq_name, last_value = seq
+                
+                # Extract table name from sequence name (remove _id_seq suffix)
+                if seq_name.endswith('_id_seq'):
+                    table_name = seq_name[:-7]  # Remove '_id_seq'
+                    
+                    try:
+                        # Check if table exists and has an id column
+                        check_table = conn.execute(text(f"""
+                            SELECT column_name 
+                            FROM information_schema.columns 
+                            WHERE table_name = '{table_name}' 
+                            AND column_name = 'id'
+                        """))
+                        
+                        if not check_table.fetchone():
+                            continue
+                        
+                        # Check max ID in the corresponding table
+                        max_result = conn.execute(text(f'SELECT MAX(id) FROM {table_name}'))
+                        max_id_row = max_result.fetchone()
+                        max_id = max_id_row[0] if max_id_row and max_id_row[0] is not None else 0
+                        
+                        # Handle None last_value (new sequences) or when max_id is greater
+                        if last_value is None or max_id > last_value:
+                            # Fix the sequence - ensure at least 1 if table is empty
+                            next_val = max(max_id, 1)
+                            conn.execute(text(f"SELECT setval('{seq_name}', {next_val})"))
+                            fixed_count += 1
+                            logger.info(f"Fixed sequence {seq_name}: {last_value} -> {next_val}")
+                            
+                    except Exception as e:
+                        logger.warning(f"Could not fix sequence for table {table_name}: {e}")
+            
+            logger.info(f"Fixed {fixed_count} PostgreSQL sequences")
+            
+        except Exception as e:
+            logger.warning(f"Sequence fix failed: {e}")
+
     def _migration_add_postgresql_indexes(self, conn):
         """Add PostgreSQL-specific indexes for better performance"""
         indexes = [
@@ -159,12 +216,27 @@ class PostgreSQLMigrationManager:
     def _migration_optimize_json_columns(self, conn):
         """Add PostgreSQL-specific optimizations for JSON columns"""
         try:
-            # Create GIN indexes on JSON columns for better search performance
+            # First convert JSON columns to JSONB if needed
+            column_conversions = [
+                "ALTER TABLE datasets ALTER COLUMN schema_info TYPE JSONB USING schema_info::JSONB",
+                "ALTER TABLE datasets ALTER COLUMN file_metadata TYPE JSONB USING file_metadata::JSONB",
+                "ALTER TABLE datasets ALTER COLUMN ai_insights TYPE JSONB USING ai_insights::JSONB",
+                "ALTER TABLE database_connectors ALTER COLUMN connection_config TYPE JSONB USING connection_config::JSONB",
+            ]
+            
+            for conversion_sql in column_conversions:
+                try:
+                    conn.execute(text(conversion_sql))
+                except Exception as e:
+                    # Column might already be JSONB or not exist
+                    logger.debug(f"Column conversion skipped: {e}")
+            
+            # Create GIN indexes on JSONB columns for better search performance
             json_indexes = [
-                "CREATE INDEX IF NOT EXISTS idx_datasets_schema_info_gin ON datasets USING GIN (schema_info)",
-                "CREATE INDEX IF NOT EXISTS idx_datasets_file_metadata_gin ON datasets USING GIN (file_metadata)",
-                "CREATE INDEX IF NOT EXISTS idx_datasets_ai_insights_gin ON datasets USING GIN (ai_insights)",
-                "CREATE INDEX IF NOT EXISTS idx_database_connectors_config_gin ON database_connectors USING GIN (connection_config)",
+                "CREATE INDEX IF NOT EXISTS idx_datasets_schema_info_gin ON datasets USING GIN (schema_info jsonb_path_ops)",
+                "CREATE INDEX IF NOT EXISTS idx_datasets_file_metadata_gin ON datasets USING GIN (file_metadata jsonb_path_ops)",
+                "CREATE INDEX IF NOT EXISTS idx_datasets_ai_insights_gin ON datasets USING GIN (ai_insights jsonb_path_ops)",
+                "CREATE INDEX IF NOT EXISTS idx_database_connectors_config_gin ON database_connectors USING GIN (connection_config jsonb_path_ops)",
             ]
             
             for index_sql in json_indexes:
@@ -179,27 +251,45 @@ class PostgreSQLMigrationManager:
     def _migration_add_postgresql_constraints(self, conn):
         """Add PostgreSQL-specific constraints"""
         try:
-            constraints = [
+            # Check existing constraints first
+            existing_constraints = set()
+            result = conn.execute(text("""
+                SELECT conname 
+                FROM pg_constraint 
+                WHERE contype = 'c'
+            """))
+            for row in result:
+                existing_constraints.add(row[0])
+            
+            # Simple constraints that are likely to work
+            simple_constraints = [
                 # Email format validation
-                "ALTER TABLE users ADD CONSTRAINT IF NOT EXISTS chk_users_email_format CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$')",
+                ("chk_users_email_format", "users", 
+                 "ALTER TABLE users ADD CONSTRAINT chk_users_email_format CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$')"),
                 
                 # Dataset size validation
-                "ALTER TABLE datasets ADD CONSTRAINT IF NOT EXISTS chk_datasets_size_positive CHECK (size_bytes >= 0)",
-                "ALTER TABLE datasets ADD CONSTRAINT IF NOT EXISTS chk_datasets_row_count_positive CHECK (row_count >= 0)",
-                "ALTER TABLE datasets ADD CONSTRAINT IF NOT EXISTS chk_datasets_column_count_positive CHECK (column_count >= 0)",
-                
-                # Quality scores validation
-                "ALTER TABLE datasets ADD CONSTRAINT IF NOT EXISTS chk_datasets_quality_score CHECK (data_quality_score >= 0 AND data_quality_score <= 1)",
-                "ALTER TABLE datasets ADD CONSTRAINT IF NOT EXISTS chk_datasets_completeness_score CHECK (completeness_score >= 0 AND completeness_score <= 1)",
-                "ALTER TABLE datasets ADD CONSTRAINT IF NOT EXISTS chk_datasets_consistency_score CHECK (consistency_score >= 0 AND consistency_score <= 1)",
-                "ALTER TABLE datasets ADD CONSTRAINT IF NOT EXISTS chk_datasets_accuracy_score CHECK (accuracy_score >= 0 AND accuracy_score <= 1)",
+                ("chk_datasets_size_positive", "datasets",
+                 "ALTER TABLE datasets ADD CONSTRAINT chk_datasets_size_positive CHECK (size_bytes >= 0)"),
+                ("chk_datasets_row_count_positive", "datasets",
+                 "ALTER TABLE datasets ADD CONSTRAINT chk_datasets_row_count_positive CHECK (row_count >= 0)"),
+                ("chk_datasets_column_count_positive", "datasets",
+                 "ALTER TABLE datasets ADD CONSTRAINT chk_datasets_column_count_positive CHECK (column_count >= 0)"),
             ]
             
-            for constraint_sql in constraints:
-                try:
-                    conn.execute(text(constraint_sql))
-                except Exception as e:
-                    logger.warning(f"Constraint creation failed: {constraint_sql} - {e}")
+            # Add simple constraints first
+            for constraint_name, table_name, constraint_sql in simple_constraints:
+                if constraint_name not in existing_constraints:
+                    try:
+                        conn.execute(text(constraint_sql))
+                        logger.info(f"Added constraint: {constraint_name}")
+                    except Exception as e:
+                        logger.warning(f"Constraint creation failed: {constraint_name} - {e}")
+                else:
+                    logger.debug(f"Constraint already exists: {constraint_name}")
+            
+            # Skip quality score constraints since they're VARCHAR fields and complex validation
+            # would require more sophisticated handling that's not essential for basic operation
+            logger.info("Skipping quality score constraints (VARCHAR fields with complex validation)")
                     
         except Exception as e:
             logger.warning(f"Constraint creation failed: {e}")

@@ -3,7 +3,7 @@ Enhanced Database Connectors API endpoints
 Provides endpoints for managing MySQL, PostgreSQL, S3, document processing, and other data connectors
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
 import logging
@@ -347,7 +347,6 @@ async def sync_connector_data(
 @router.post("/", response_model=DatabaseConnectorResponse)
 async def create_connector(
     connector_data: DatabaseConnectorCreate,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -395,8 +394,18 @@ async def create_connector(
     db.commit()
     db.refresh(db_connector)
     
-    # Test connection in background
-    background_tasks.add_task(test_connector_connection, db_connector.id)
+    # Test connection immediately
+    try:
+        test_result = await test_connector_connection_sync(db_connector)
+        db_connector.test_status = "success" if test_result["success"] else "failed"
+        db_connector.test_error = test_result.get("error")
+        db_connector.last_tested_at = datetime.utcnow()
+        db.commit()
+    except Exception as e:
+        logger.warning(f"Initial connector test failed: {e}")
+        db_connector.test_status = "failed"
+        db_connector.test_error = str(e)
+        db.commit()
     
     return DatabaseConnectorResponse(
         id=db_connector.id,
@@ -415,7 +424,6 @@ async def create_connector(
 @router.post("/simplified", response_model=DatabaseConnectorResponse)
 async def create_simplified_connector(
     connector_data: SimplifiedConnectorCreate,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -477,8 +485,18 @@ async def create_simplified_connector(
     db.commit()
     db.refresh(db_connector)
     
-    # Test connection in background
-    background_tasks.add_task(test_connector_connection, db_connector.id)
+    # Test connection immediately
+    try:
+        test_result = await test_connector_connection_sync(db_connector)
+        db_connector.test_status = "success" if test_result["success"] else "failed"
+        db_connector.test_error = test_result.get("error")
+        db_connector.last_tested_at = datetime.utcnow()
+        db.commit()
+    except Exception as e:
+        logger.warning(f"Initial connector test failed: {e}")
+        db_connector.test_status = "failed"
+        db_connector.test_error = str(e)
+        db.commit()
     
     return DatabaseConnectorResponse(
         id=db_connector.id,
@@ -516,42 +534,6 @@ async def get_connector(
     return connector
 
 
-@router.put("/{connector_id}", response_model=DatabaseConnectorResponse)
-async def update_connector(
-    connector_id: int,
-    connector_update: DatabaseConnectorUpdate,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Update a database connector."""
-    connector = db.query(DatabaseConnector).filter(
-        DatabaseConnector.id == connector_id,
-        DatabaseConnector.organization_id == current_user.organization_id,
-        DatabaseConnector.is_deleted == False
-    ).first()
-    
-    if not connector:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Connector not found"
-        )
-    
-    # Update fields
-    update_data = connector_update.dict(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(connector, field, value)
-    
-    connector.updated_at = datetime.utcnow()
-    
-    db.commit()
-    db.refresh(connector)
-    
-    # Re-test connection if config changed
-    if connector_update.connection_config or connector_update.credentials:
-        background_tasks.add_task(test_connector_connection, connector_id)
-    
-    return connector
 
 
 @router.delete("/{connector_id}")
@@ -628,42 +610,11 @@ async def delete_connector(
     }
 
 
-@router.post("/{connector_id}/test")
-async def test_connector(
-    connector_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Test database connector connection."""
-    connector = db.query(DatabaseConnector).filter(
-        DatabaseConnector.id == connector_id,
-        DatabaseConnector.organization_id == current_user.organization_id,
-        DatabaseConnector.is_deleted == False
-    ).first()
-    
-    if not connector:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Connector not found"
-        )
-    
-    # Test connection
-    result = await test_connector_connection_sync(connector)
-    
-    # Update test results
-    connector.test_status = "success" if result["success"] else "failed"
-    connector.test_error = result.get("error")
-    connector.last_tested_at = datetime.utcnow()
-    
-    db.commit()
-    
-    return result
 
 
 @router.post("/{connector_id}/sync-mindsdb")
 async def sync_with_mindsdb(
     connector_id: int,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -680,8 +631,12 @@ async def sync_with_mindsdb(
             detail="Connector not found"
         )
     
-    # Sync with MindsDB in background
-    background_tasks.add_task(sync_connector_with_mindsdb, connector_id)
+    # Sync with MindsDB
+    try:
+        sync_result = await sync_connector_with_mindsdb(connector_id)
+        logger.info(f"MindsDB sync initiated for connector {connector_id}")
+    except Exception as e:
+        logger.warning(f"MindsDB sync failed for connector {connector_id}: {e}")
     
     return {
         "message": "Connector sync with MindsDB started",
@@ -855,6 +810,7 @@ async def create_remote_image_connector(
         )
 
 
+
 async def test_connector_connection_sync(connector: DatabaseConnector) -> Dict[str, Any]:
     """Test connector connection synchronously."""
     try:
@@ -874,13 +830,6 @@ async def test_connector_connection_sync(connector: DatabaseConnector) -> Dict[s
     except Exception as e:
         logger.error(f"Connector test failed for {connector.id}: {e}")
         return {"success": False, "error": str(e)}
-
-
-async def test_connector_connection(connector_id: int):
-    """Background task to test connector connection."""
-    # This would be implemented with proper database session handling
-    # For now, it's a placeholder
-    logger.info(f"Testing connector {connector_id} connection in background")
 
 
 async def sync_connector_with_mindsdb(connector_id: int):
@@ -979,28 +928,13 @@ async def _test_api_connection(connector: DatabaseConnector) -> Dict[str, Any]:
         
         config = connector.connection_config.copy()
         
-        # Apply SSL configuration for development
-        from app.core.config import settings
-        from urllib.parse import urlparse
-        
+        # Get connection details
         base_url = config.get("base_url", "")
-        parsed_url = urlparse(base_url)
-        host = parsed_url.hostname
-        port = parsed_url.port
-        
-        # Get SSL-aware configuration
-        ssl_config = settings.get_ssl_config_for_connector(
-            'api', host, port, config
-        )
-        config.update(ssl_config)
-        
-        # Use potentially modified base_url
-        base_url = config.get("base_url", base_url)
         endpoint = config.get("endpoint", "")
         method = config.get("method", "GET").upper()
         timeout = config.get("timeout", 30)
         headers = config.get("headers", {})
-        ssl_verify = config.get("ssl_verify", True)
+        ssl_verify = config.get("ssl_verify", False)  # Default to False for local APIs
         
         if not base_url or not endpoint:
             return {"success": False, "error": "Base URL and endpoint are required"}
@@ -1025,7 +959,7 @@ async def _test_api_connection(connector: DatabaseConnector) -> Dict[str, Any]:
                     "message": f"API connection successful. Retrieved {data_count} items.",
                     "status_code": response.status_code,
                     "data_preview": str(data)[:200] + "..." if len(str(data)) > 200 else str(data),
-                    "ssl_config": {"ssl_verify": ssl_verify, "protocol": "HTTP" if not ssl_verify else "HTTPS"}
+                    "ssl_config": {"ssl_verify": ssl_verify}
                 }
             except:
                 return {
@@ -1033,7 +967,7 @@ async def _test_api_connection(connector: DatabaseConnector) -> Dict[str, Any]:
                     "message": f"API connection successful. Response received (non-JSON).",
                     "status_code": response.status_code,
                     "content_type": response.headers.get("content-type", "unknown"),
-                    "ssl_config": {"ssl_verify": ssl_verify, "protocol": "HTTP" if not ssl_verify else "HTTPS"}
+                    "ssl_config": {"ssl_verify": ssl_verify}
                 }
         else:
             return {

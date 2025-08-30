@@ -37,6 +37,12 @@ interface SharedDataset {
   sharing_level?: 'private' | 'organization' | 'public';
   type?: string;
   size_bytes?: number;
+  is_valid?: boolean;
+  validation_details?: {
+    is_expired: boolean;
+    connector_valid: boolean;
+    file_valid: boolean;
+  };
 }
 
 export default function SharedDatasetsPage() {
@@ -72,6 +78,7 @@ function SharedDatasetsContent() {
       setIsLoading(true);
       setError(null);
       const response = await dataSharingAPI.getMySharedDatasets();
+      console.log('Shared datasets response:', response); // Debug log
       setSharedDatasets(response);
     } catch (error: any) {
       console.error('Failed to fetch shared datasets:', error);
@@ -159,6 +166,16 @@ function SharedDatasetsContent() {
                 className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-md text-sm font-medium"
               >
                 Refresh
+              </button>
+              <button
+                onClick={async () => {
+                  console.log('Fetching ONLY valid datasets...');
+                  const response = await dataSharingAPI.getMySharedDatasets(false);
+                  console.log('Only valid shared datasets:', response);
+                }}
+                className="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+              >
+                Debug (Only Valid)
               </button>
               <Link
                 href="/datasets"
@@ -286,6 +303,11 @@ function SharedDatasetsContent() {
                               <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
                                 <Shield className="w-3 h-3 mr-1" />
                                 Protected
+                              </span>
+                            )}
+                            {dataset.is_valid === false && (
+                              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                ⚠️ Validation Issues
                               </span>
                             )}
                           </div>

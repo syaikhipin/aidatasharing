@@ -547,8 +547,8 @@ export const dataSharingAPI = {
     return response.data;
   },
 
-  getMySharedDatasets: async () => {
-    const response = await apiClient.get('/api/data-sharing/my-shared-datasets');
+  getMySharedDatasets: async (includeInvalid: boolean = true) => {
+    const response = await apiClient.get(`/api/data-sharing/my-shared-datasets?include_invalid=${includeInvalid}`);
     return response.data;
   },
 

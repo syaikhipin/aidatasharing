@@ -235,7 +235,7 @@ export default function LoginPage() {
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder={`Choose from ${demoUsers.length} demo accounts...`} />
                     </SelectTrigger>
-                    <SelectContent className="max-h-80 bg-white border border-gray-200 shadow-lg z-50">
+                    <SelectContent className="max-h-80">
                       {demoUsers.map((user) => (
                         <SelectItem key={user.email} value={user.email} className="py-3">
                           <div className="flex flex-col items-start space-y-1">
