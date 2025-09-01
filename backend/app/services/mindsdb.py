@@ -841,6 +841,235 @@ class MindsDBService:
                 "error": str(e)
             }
 
+    def _check_if_file_needs_mindsdb_setup(self, dataset, file_upload) -> bool:
+        """Check if a file dataset needs MindsDB processing setup."""
+        try:
+            # Check if dataset already has MindsDB processing configured
+            if (dataset.ai_processing_status == "ready" and 
+                dataset.mindsdb_table_name and 
+                dataset.mindsdb_database):
+                logger.info(f"✅ Dataset {dataset.id} already has MindsDB setup")
+                return False
+            
+            # Check if file type is supported for automatic processing
+            if not file_upload:
+                logger.info(f"⚠️ No file upload record found for dataset {dataset.id}")
+                return False
+            
+            file_ext = os.path.splitext(file_upload.original_filename.lower())[1]
+            supported_extensions = {'.csv', '.xlsx', '.xls', '.json', '.txt', '.pdf', '.parquet'}
+            
+            if file_ext not in supported_extensions:
+                logger.info(f"⚠️ File type {file_ext} not supported for automatic MindsDB setup")
+                return False
+            
+            logger.info(f"🔄 Dataset {dataset.id} needs MindsDB setup for file type {file_ext}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error checking MindsDB setup needs for dataset {dataset.id}: {e}")
+            return False
+
+    def _setup_file_processing_automatically(self, dataset, file_upload, db_session) -> Dict[str, Any]:
+        """Automatically set up MindsDB processing for a file dataset."""
+        try:
+            logger.info(f"🚀 Starting automatic MindsDB setup for dataset {dataset.id}")
+            
+            # Determine file type
+            file_ext = os.path.splitext(file_upload.original_filename.lower())[1].lstrip('.')
+            file_type_map = {
+                'csv': 'csv',
+                'xlsx': 'xlsx', 
+                'xls': 'xls',
+                'json': 'json',
+                'txt': 'txt',
+                'pdf': 'pdf',
+                'parquet': 'parquet'
+            }
+            file_type = file_type_map.get(file_ext, file_ext)
+            
+            # Generate names
+            file_name = f"dataset_{dataset.id}_{file_type}"
+            model_name = f"{file_name}_model"
+            
+            # Step 1: Upload file to MindsDB
+            upload_result = self._upload_file_to_mindsdb_internal(file_upload.file_path, file_name, file_ext)
+            if not upload_result.get("success"):
+                return {
+                    "success": False,
+                    "error": f"Failed to upload file to MindsDB: {upload_result.get('error')}"
+                }
+            
+            # Step 2: Create appropriate model
+            model_result = self._create_model_for_file_internal(file_name, file_type)
+            if not model_result.get("success"):
+                return {
+                    "success": False,
+                    "error": f"Failed to create MindsDB model: {model_result.get('error')}"
+                }
+            
+            # Step 3: Update dataset with MindsDB information
+            try:
+                dataset.mindsdb_table_name = model_name
+                dataset.mindsdb_database = "mindsdb"
+                dataset.ai_processing_status = "ready"
+                dataset.ai_chat_enabled = True
+                
+                # Update chat context
+                if not dataset.chat_context:
+                    dataset.chat_context = {}
+                
+                dataset.chat_context.update({
+                    'mindsdb_datasource': file_name,
+                    'mindsdb_available': True,
+                    'model_name': model_name,
+                    'file_type': file_type,
+                    'auto_setup_completed': True,
+                    'auto_setup_timestamp': datetime.utcnow().isoformat()
+                })
+                
+                db_session.commit()
+                
+                logger.info(f"✅ Successfully set up automatic MindsDB processing for dataset {dataset.id}")
+                return {
+                    "success": True,
+                    "model_name": model_name,
+                    "file_name": file_name,
+                    "file_type": file_type
+                }
+                
+            except Exception as update_error:
+                logger.error(f"❌ Failed to update dataset {dataset.id} with MindsDB info: {update_error}")
+                db_session.rollback()
+                return {
+                    "success": False,
+                    "error": f"Failed to update dataset: {str(update_error)}"
+                }
+        
+        except Exception as e:
+            logger.error(f"❌ Error in automatic MindsDB setup for dataset {dataset.id}: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    def _upload_file_to_mindsdb_internal(self, file_path: str, file_name: str, file_ext: str) -> Dict[str, Any]:
+        """Internal method to upload file to MindsDB."""
+        try:
+            # Try multiple possible paths to find the file
+            possible_paths = [
+                file_path,
+                os.path.join("/Users/syaikhipin/Documents/program/simpleaisharing/backend", file_path.lstrip("./")),
+                os.path.join("/Users/syaikhipin/Documents/program/simpleaisharing", file_path.lstrip("./")),
+                os.path.join("/Users/syaikhipin/Documents/program/simpleaisharing/storage", file_path.split('/')[-1]),
+            ]
+            
+            actual_file_path = None
+            for path in possible_paths:
+                if os.path.exists(path):
+                    actual_file_path = path
+                    break
+            
+            if not actual_file_path:
+                return {"success": False, "error": f"File not found at any of these paths: {possible_paths}"}
+            
+            # MIME type mapping
+            mime_types = {
+                'csv': 'text/csv',
+                'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'xls': 'application/vnd.ms-excel',
+                'json': 'application/json',
+                'txt': 'text/plain',
+                'pdf': 'application/pdf',
+                'parquet': 'application/octet-stream'
+            }
+            mime_type = mime_types.get(file_ext, 'application/octet-stream')
+            
+            # Upload to MindsDB via API
+            mindsdb_url = self.base_url
+            
+            with open(actual_file_path, 'rb') as f:
+                files = {'file': (file_name + '.' + file_ext, f, mime_type)}
+                response = requests.put(
+                    f"{mindsdb_url}/api/files/{file_name}",
+                    files=files,
+                    timeout=30
+                )
+            
+            if response.status_code == 200:
+                logger.info(f"✅ Successfully uploaded file to MindsDB: {file_name}")
+                return {"success": True, "file_name": file_name}
+            else:
+                logger.error(f"❌ Failed to upload file to MindsDB: {response.status_code} - {response.text}")
+                return {"success": False, "error": f"Upload failed: {response.status_code}"}
+                
+        except Exception as e:
+            logger.error(f"❌ Error uploading file to MindsDB: {e}")
+            return {"success": False, "error": str(e)}
+
+    def _create_model_for_file_internal(self, file_name: str, file_type: str) -> Dict[str, Any]:
+        """Internal method to create MindsDB model for a file."""
+        try:
+            if not self._ensure_connection():
+                return {"success": False, "error": "MindsDB connection not available"}
+            
+            # Test file accessibility
+            test_query = f"SELECT * FROM files.{file_name} LIMIT 1"
+            try:
+                result = self.connection.query(test_query)
+                logger.info(f"✅ File {file_name} is accessible in MindsDB")
+            except Exception as e:
+                logger.error(f"❌ Cannot access file {file_name} in MindsDB: {e}")
+                return {"success": False, "error": f"File not accessible: {str(e)}"}
+            
+            model_name = f"{file_name}_model"
+            
+            # Create model based on file type
+            if file_type in ['pdf', 'txt']:
+                # RAG model for text-based files
+                model_sql = f"""
+                CREATE MODEL mindsdb.{model_name}
+                FROM files 
+                    (SELECT * FROM {file_name})
+                PREDICT answer
+                USING
+                   engine="rag",
+                   llm_type="openai",
+                   input_column='question';
+                """
+                model_type = "RAG"
+                
+            elif file_type in ['csv', 'xlsx', 'xls', 'json', 'parquet']:
+                # Knowledge base for structured data
+                model_sql = f"""
+                CREATE KNOWLEDGE_BASE mindsdb.{model_name}
+                FROM files.{file_name}
+                USING
+                   model='text-embedding-ada-002',
+                   storage=mindsdb;
+                """
+                model_type = "Knowledge Base"
+            else:
+                return {"success": False, "error": f"Unsupported file type for model creation: {file_type}"}
+            
+            logger.info(f"🤖 Creating {model_type} model: {model_name}")
+            
+            try:
+                result = self.connection.query(model_sql)
+                logger.info(f"✅ {model_type} model created successfully: {model_name}")
+                return {
+                    "success": True,
+                    "model_name": model_name,
+                    "model_type": model_type
+                }
+            except Exception as model_error:
+                logger.error(f"❌ Failed to create model: {model_error}")
+                return {"success": False, "error": f"Model creation failed: {str(model_error)}"}
+                
+        except Exception as e:
+            logger.error(f"❌ Error creating model for file {file_name}: {e}")
+            return {"success": False, "error": str(e)}
+
     def create_file_database_connector(self, file_upload: "FileUpload") -> Dict[str, Any]:
         """Create MindsDB database connector for uploaded files to make them accessible."""
         try:
@@ -1020,8 +1249,12 @@ class MindsDBService:
                 
                 logger.info(f"🔍 Processing chat for dataset: {dataset.name} (ID: {dataset_id})")
                 
-                # Check if this is a web connector dataset
-                if dataset.connector_id or dataset.source_url:
+                # Check if this is a web connector dataset (only if it has a connector_id and actual API URL)
+                if dataset.connector_id and dataset.source_url and (
+                    dataset.source_url.startswith('http://') or 
+                    dataset.source_url.startswith('https://') or
+                    dataset.source_url.startswith('api://')
+                ):
                     is_web_connector = True
                     web_connector_info = {
                         "connector_id": dataset.connector_id,
@@ -1029,6 +1262,9 @@ class MindsDBService:
                         "connector_name": getattr(dataset, 'connector_name', None)
                     }
                     logger.info(f"🌐 Detected web connector dataset: {web_connector_info}")
+                else:
+                    # This is an uploaded file dataset
+                    logger.info(f"📁 Detected uploaded file dataset: {dataset.name} (type: {dataset.type})")
                 
             except Exception as db_error:
                 logger.error(f"❌ Could not load dataset from database: {db_error}")
@@ -1105,6 +1341,20 @@ class MindsDBService:
                     
                     if file_upload:
                         logger.info(f"📁 Found file upload record: {file_upload.original_filename}")
+                        
+                        # Check if file needs MindsDB processing setup and do it automatically
+                        needs_setup = self._check_if_file_needs_mindsdb_setup(dataset, file_upload)
+                        
+                        if needs_setup:
+                            logger.info(f"🔄 File processing not set up yet, automatically setting up MindsDB processing...")
+                            setup_result = self._setup_file_processing_automatically(dataset, file_upload, db)
+                            
+                            if setup_result.get("success"):
+                                logger.info(f"✅ Automatic MindsDB setup completed: {setup_result.get('model_name')}")
+                                # Refresh dataset to get updated info
+                                db.refresh(dataset)
+                            else:
+                                logger.warning(f"⚠️ Automatic MindsDB setup failed: {setup_result.get('error')}")
                         
                         # Create database connector for this file if it doesn't exist
                         connector_result = self.create_file_database_connector(file_upload)
@@ -1548,6 +1798,205 @@ Please provide a comprehensive answer about this dataset:"""
                 "deleted_models": [],
                 "errors": [str(e)]
             }
+
+    # MindsDB supported file extensions
+    SUPPORTED_FILE_EXTENSIONS = {
+        '.csv': 'csv',
+        '.xlsx': 'xlsx', 
+        '.xls': 'xls',
+        '.json': 'json',
+        '.txt': 'txt',
+        '.pdf': 'pdf',
+        '.parquet': 'parquet'
+    }
+
+    def is_supported_file_type(self, file_path: str) -> bool:
+        """Check if file type is supported by MindsDB."""
+        ext = os.path.splitext(file_path.lower())[1]
+        return ext in self.SUPPORTED_FILE_EXTENSIONS
+
+    def get_file_type(self, file_path: str) -> Optional[str]:
+        """Get MindsDB file type from file path."""
+        ext = os.path.splitext(file_path.lower())[1]
+        return self.SUPPORTED_FILE_EXTENSIONS.get(ext)
+
+    def upload_file_to_mindsdb(self, full_path: str, file_name: str) -> Optional[str]:
+        """Upload file to MindsDB files database."""
+        
+        if not os.path.exists(full_path):
+            logger.error(f"File not found at: {full_path}")
+            return None
+        
+        if not self.is_supported_file_type(full_path):
+            ext = os.path.splitext(full_path.lower())[1]
+            logger.error(f"Unsupported file type: {ext}")
+            return None
+        
+        logger.info(f"✅ Found supported file: {full_path}")
+        
+        try:
+            # Determine MIME type based on extension
+            mime_types = {
+                '.csv': 'text/csv',
+                '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                '.xls': 'application/vnd.ms-excel',
+                '.json': 'application/json',
+                '.txt': 'text/plain',
+                '.pdf': 'application/pdf',
+                '.parquet': 'application/octet-stream'
+            }
+            
+            ext = os.path.splitext(full_path.lower())[1]
+            mime_type = mime_types.get(ext, 'application/octet-stream')
+            
+            # Upload file to MindsDB
+            with open(full_path, 'rb') as f:
+                files = {'file': (file_name + ext, f, mime_type)}
+                response = requests.put(
+                    f"{self.base_url}/api/files/{file_name}",
+                    files=files
+                )
+            
+            if response.status_code == 200:
+                logger.info(f"✅ Successfully uploaded {ext} file to MindsDB as '{file_name}'")
+                return file_name
+            else:
+                logger.error(f"❌ Failed to upload file to MindsDB: {response.status_code} - {response.text}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ Error uploading to MindsDB: {e}")
+            return None
+
+    def create_model_for_uploaded_file(self, file_name: str, file_type: str) -> Optional[str]:
+        """Create appropriate MindsDB model based on file type."""
+        
+        try:
+            if not self._ensure_connection():
+                logger.error("Could not connect to MindsDB")
+                return None
+            
+            logger.info("✅ Connected to MindsDB")
+            
+            # Test file access
+            test_query = f"SELECT * FROM files.{file_name} LIMIT 1"
+            logger.info(f"🔍 Testing file access: {test_query}")
+            
+            try:
+                result = self.connection.query(test_query)
+                logger.info("✅ File is accessible in MindsDB")
+            except Exception as e:
+                logger.error(f"❌ Cannot access file in MindsDB: {e}")
+                return None
+            
+            model_name = f"{file_name}_model"
+            
+            # Create different models based on file type
+            if file_type in ['pdf', 'txt']:
+                # RAG model for text-based files
+                model_sql = f"""
+                CREATE MODEL mindsdb.{model_name}
+                FROM files 
+                    (SELECT * FROM {file_name})
+                PREDICT answer
+                USING
+                   engine="rag",
+                   llm_type="openai",
+                   input_column='question';
+                """
+                model_type = "RAG"
+                
+            elif file_type in ['csv', 'xlsx', 'xls', 'json', 'parquet']:
+                # Knowledge base for structured data
+                model_sql = f"""
+                CREATE KNOWLEDGE_BASE mindsdb.{model_name}
+                FROM files.{file_name}
+                USING
+                   model='text-embedding-ada-002',
+                   storage=mindsdb;
+                """
+                model_type = "Knowledge Base"
+            
+            else:
+                logger.error(f"Unsupported file type for model creation: {file_type}")
+                return None
+            
+            logger.info(f"🤖 Creating {model_type} model: {model_name}")
+            logger.info(f"SQL: {model_sql}")
+            
+            result = self.connection.query(model_sql)
+            logger.info(f"✅ {model_type} model created successfully: {model_name}")
+            
+            return model_name
+            
+        except Exception as e:
+            logger.error(f"❌ Error creating model: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def setup_file_dataset_processing(self, dataset, db_session) -> Dict[str, Any]:
+        """Setup MindsDB processing for uploaded file dataset."""
+        try:
+            if not dataset.file_path:
+                return {"success": False, "error": "No file path in dataset"}
+            
+            if not self.is_supported_file_type(dataset.file_path):
+                file_ext = os.path.splitext(dataset.file_path.lower())[1]
+                return {"success": False, "error": f"Unsupported file type: {file_ext}"}
+            
+            # Get storage path
+            from app.services.storage import StorageService
+            storage_service = StorageService()
+            if hasattr(storage_service, 'backend') and hasattr(storage_service.backend, 'storage_dir'):
+                storage_base = storage_service.backend.storage_dir
+            else:
+                from app.core.config import settings
+                storage_base = os.path.abspath(settings.STORAGE_BASE_PATH)
+            
+            full_path = os.path.join(storage_base, dataset.file_path)
+            file_type = self.get_file_type(dataset.file_path)
+            file_name = f"dataset_{dataset.id}_{file_type}"
+            
+            logger.info(f"📁 Processing {file_type.upper()} file for dataset {dataset.id}")
+            
+            # Upload to MindsDB
+            uploaded_name = self.upload_file_to_mindsdb(full_path, file_name)
+            if not uploaded_name:
+                return {"success": False, "error": "Failed to upload file to MindsDB"}
+            
+            # Create model
+            model_name = self.create_model_for_uploaded_file(uploaded_name, file_type)
+            if not model_name:
+                return {"success": False, "error": "Failed to create MindsDB model"}
+            
+            # Update dataset
+            dataset.mindsdb_table_name = model_name
+            dataset.mindsdb_database = "mindsdb"
+            dataset.ai_processing_status = "ready"
+            
+            # Update chat context
+            if hasattr(dataset, 'chat_context') and dataset.chat_context:
+                dataset.chat_context['mindsdb_datasource'] = uploaded_name
+                dataset.chat_context['mindsdb_available'] = True
+                dataset.chat_context['model_name'] = model_name
+                dataset.chat_context['file_type'] = file_type
+            
+            db_session.commit()
+            
+            logger.info(f"✅ Completed MindsDB setup for dataset {dataset.id}")
+            
+            return {
+                "success": True,
+                "model_name": model_name,
+                "uploaded_name": uploaded_name,
+                "file_type": file_type
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error setting up file dataset processing: {e}")
+            db_session.rollback()
+            return {"success": False, "error": str(e)}
 
 
 # Create service instance
