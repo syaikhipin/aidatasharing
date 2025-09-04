@@ -272,7 +272,6 @@ class StorageMigrationService:
             's3_backend_available': self.s3_backend is not None,
             's3_bucket': self.s3_backend.bucket_name if self.s3_backend else None,
             's3_endpoint': self.s3_backend.endpoint_url if self.s3_backend else None,
-            'current_strategy': os.getenv('STORAGE_STRATEGY', 'local_primary'),
             'current_type': os.getenv('STORAGE_TYPE', 'local')
         }
 

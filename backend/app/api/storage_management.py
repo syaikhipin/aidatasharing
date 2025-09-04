@@ -24,7 +24,6 @@ class MigrationRequest(BaseModel):
 
 class StorageStatusResponse(BaseModel):
     current_backend: str
-    storage_strategy: str
     local_backend_available: bool
     s3_backend_available: bool
     backend_info: dict
@@ -48,7 +47,6 @@ async def get_storage_status(
         
         return StorageStatusResponse(
             current_backend=backend_info.get('storage_type', 'unknown'),
-            storage_strategy=migration_status.get('current_strategy', 'unknown'),
             local_backend_available=migration_status['local_backend_available'],
             s3_backend_available=migration_status['s3_backend_available'],
             backend_info={
