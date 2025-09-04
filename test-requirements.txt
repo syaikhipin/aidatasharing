@@ -1,0 +1,41 @@
+# Testing framework
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+pytest-mock>=3.11.1
+pytest-timeout>=2.1.0
+pytest-xdist>=3.3.1  # For parallel test execution
+
+# Test utilities
+faker>=19.3.0  # Generate fake data
+factory-boy>=3.3.0  # Test fixtures
+freezegun>=1.2.2  # Mock time/dates
+responses>=0.23.0  # Mock HTTP responses
+httpx>=0.24.0  # HTTP client for API testing
+
+# Code quality
+black>=23.7.0
+flake8>=6.1.0
+mypy>=1.5.0
+isort>=5.12.0
+pylint>=2.17.5
+
+# Coverage
+coverage>=7.3.0
+coverage-badge>=1.1.0
+
+# Mocking
+unittest-mock>=1.5.0
+mock>=5.1.0
+
+# Database testing
+pytest-postgresql>=5.0.0
+sqlalchemy-utils>=0.41.0
+
+# Performance testing
+pytest-benchmark>=4.0.0
+locust>=2.15.1  # Load testing
+
+# Security testing
+bandit>=1.7.5
+safety>=2.3.5
