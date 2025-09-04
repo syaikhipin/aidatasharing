@@ -26,7 +26,7 @@ backend/lib/
 backend/lib64/
 
 # Virtual environments and Environment files
-.env
+backend/.env
 .env.local
 .env.production
 .env.development
@@ -44,6 +44,7 @@ forge.yaml
 backend/*.log
 backend/app.db
 *.db
+!storage/aishare_platform.db
 *.sqlite3
 backend/backups/
 backend/app.db.backup*
