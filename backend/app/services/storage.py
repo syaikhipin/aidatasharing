@@ -322,15 +322,18 @@ class S3StorageBackend(BaseStorageBackend):
             logger.error(f"Failed to generate presigned URL: {str(e)}")
             return None
 
+# Hybrid storage removed for simplicity - user requested S3 only or local only
+
+
 class StorageService:
-    """Main storage service with multiple backend support"""
+    """Main storage service - simple choice between local or S3 storage"""
     
     def __init__(self):
         self.backend = None
         self._initialize_backend()
     
     def _initialize_backend(self):
-        """Initialize storage backend based on environment configuration"""
+        """Initialize storage backend - simple choice: local or S3"""
         storage_type = os.getenv('STORAGE_TYPE', 'local').lower()
         
         if storage_type == 'local':

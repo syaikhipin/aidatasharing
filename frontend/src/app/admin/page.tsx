@@ -3,6 +3,7 @@
 import React from 'react';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import StorageStatusWidget from '@/components/StorageStatusWidget';
 import { useState, useEffect } from 'react';
 import { datasetsAPI, adminAPI } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -213,8 +214,8 @@ function AdminContent() {
 function OverviewTab({ stats, onRefresh }: { stats: AdminStats | null; onRefresh: () => void }) {
   return (
     <div className="space-y-8">
-      {/* Quick Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      {/* Quick Stats & Storage Status */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-6">
         <Card className="bg-gradient-to-r from-blue-500 to-blue-600 text-white">
           <CardContent className="p-6">
             <div className="flex items-center">
@@ -272,6 +273,11 @@ function OverviewTab({ stats, onRefresh }: { stats: AdminStats | null; onRefresh
             </div>
           </CardContent>
         </Card>
+        
+        {/* Storage Status Widget */}
+        <div className="col-span-1">
+          <StorageStatusWidget showDetails={true} className="h-full" />
+        </div>
       </div>
 
       {/* Quick Actions */}
@@ -312,6 +318,13 @@ function OverviewTab({ stats, onRefresh }: { stats: AdminStats | null; onRefresh
               <Button variant="outline" className="w-full justify-start">
                 <Database className="mr-2 h-4 w-4" />
                 Manage Datasets
+              </Button>
+            </Link>
+            
+            <Link href="/admin/storage">
+              <Button variant="outline" className="w-full justify-start">
+                <Cloud className="mr-2 h-4 w-4" />
+                Storage Management
               </Button>
             </Link>
             

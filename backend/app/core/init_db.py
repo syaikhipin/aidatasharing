@@ -4,7 +4,7 @@ from app.core.config import settings
 from app.core.auth import get_password_hash
 from app.models import *  # Import all models to ensure they are registered
 from app.core.database import Base
-from migrations.postgresql_migration_manager import PostgreSQLMigrationManager as MigrationManager
+from migrations.archive.postgresql_migration_manager import PostgreSQLMigrationManager as MigrationManager
 import logging
 import sys
 import os
@@ -46,7 +46,7 @@ def init_db():
     if "postgresql" in settings.DATABASE_URL:
         logger.info("PostgreSQL database detected - using PostgreSQL migration")
         try:
-            from migrations.postgresql_migration_manager import PostgreSQLMigrationManager
+            from migrations.archive.postgresql_migration_manager import PostgreSQLMigrationManager
             migration_manager = PostgreSQLMigrationManager()
             migration_manager.migrate()
         except ImportError:

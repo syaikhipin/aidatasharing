@@ -55,7 +55,7 @@ class MindsDBStorageConfig:
             
         config = self._load_mindsdb_config()
         storage_config = {
-            'storage_type': 'local',  # default
+            'storage_type': 'local',  # default: local or s3
             'local': {},
             's3': {},
             'paths': {}
