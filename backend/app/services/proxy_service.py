@@ -35,7 +35,7 @@ class APIGatewayService:
         self.mindsdb_service = MindsDBService()
         
         # Gateway configuration
-        self.gateway_base_url = "http://localhost:10103"  # API Gateway port
+        self.gateway_base_url = "http://localhost:8000/api/proxy"  # Unified API proxy path
         self.rate_limits = {
             "requests_per_minute": 60,
             "requests_per_hour": 1000,

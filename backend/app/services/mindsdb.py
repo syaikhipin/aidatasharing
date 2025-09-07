@@ -684,6 +684,7 @@ class MindsDBService:
                     "url": full_url,
                     "method": method,
                     "test_result": test_result,
+                    "working_table_name": test_result.get("table_name", "data"),  # Pass working table name
                     "message": f"Web connector {clean_name} created successfully"
                 }
                 
@@ -716,29 +717,87 @@ class MindsDBService:
                 return {"success": False, "error": "MindsDB connection not available"}
 
             # For web connectors, first check what tables are available
+            table_name = "data"  # Default table name for web connectors
             try:
                 show_tables_query = f"SHOW TABLES FROM {connector_name}"
                 logger.info(f"🔍 Checking available tables: {show_tables_query}")
                 tables_result = self.connection.query(show_tables_query)
                 
-                table_name = "data"  # Default table name for web connectors
                 if tables_result and hasattr(tables_result, 'fetch'):
                     tables_df = tables_result.fetch()
+                    logger.info(f"📊 Tables result: {tables_df}")
+                    
                     if not tables_df.empty and len(tables_df) > 0:
-                        # Use the first available table
-                        table_name = tables_df.iloc[0]['Tables_in_' + connector_name]
-                        logger.info(f"🎯 Found table: {table_name}")
+                        # Try different possible column names for table listing
+                        possible_columns = [
+                            f'Tables_in_{connector_name}',
+                            'table_name',
+                            'name',
+                            'TABLE_NAME'
+                        ]
+                        
+                        for col in possible_columns:
+                            if col in tables_df.columns:
+                                table_name = tables_df.iloc[0][col]
+                                logger.info(f"🎯 Found table: {table_name} using column: {col}")
+                                break
+                        else:
+                            # If no specific column found, try to get the first column value
+                            if len(tables_df.columns) > 0:
+                                table_name = tables_df.iloc[0, 0]
+                                logger.info(f"🎯 Using first column value as table name: {table_name}")
+                    else:
+                        logger.warning(f"⚠️ SHOW TABLES returned empty result, using default 'data'")
                 
             except Exception as e:
-                logger.warning(f"⚠️ Could not list tables, using default 'data': {e}")
+                logger.warning(f"⚠️ Could not list tables: {e}, using default 'data'")
                 table_name = "data"
             
-            # Test the connector with the found table name
-            test_query = f"SELECT * FROM {connector_name}.{table_name} LIMIT 3"
+            # Test the connector with multiple approaches
+            result = None
             
-            logger.info(f"🧪 Testing web connector: {test_query}")
-            
-            result = self.connection.query(test_query)
+            # Approach 1: Try with database context switching
+            try:
+                logger.info(f"🔄 Switching to database: {connector_name}")
+                self.connection.query(f"USE {connector_name}")
+                
+                simple_test_query = f"SELECT * FROM {table_name} LIMIT 3"
+                logger.info(f"🧪 Testing with context switch: {simple_test_query}")
+                result = self.connection.query(simple_test_query)
+                
+                # Switch back to mindsdb database
+                self.connection.query("USE mindsdb")
+                logger.info(f"✅ Context switch approach successful")
+                
+            except Exception as context_error:
+                logger.warning(f"⚠️ Context switch approach failed: {context_error}")
+                
+                # Approach 2: Try with fully qualified table name
+                try:
+                    # Ensure we're back in mindsdb context
+                    self.connection.query("USE mindsdb")
+                    
+                    full_test_query = f"SELECT * FROM {connector_name}.{table_name} LIMIT 3"
+                    logger.info(f"🧪 Testing with fully qualified name: {full_test_query}")
+                    result = self.connection.query(full_test_query)
+                    logger.info(f"✅ Fully qualified approach successful")
+                    
+                except Exception as qualified_error:
+                    logger.warning(f"⚠️ Fully qualified approach failed: {qualified_error}")
+                    
+                    # Approach 3: Try different common table names
+                    common_table_names = ["data", "table", "result", "response", "json"]
+                    for test_table_name in common_table_names:
+                        try:
+                            alternate_query = f"SELECT * FROM {connector_name}.{test_table_name} LIMIT 3"
+                            logger.info(f"🧪 Testing alternate table name: {alternate_query}")
+                            result = self.connection.query(alternate_query)
+                            logger.info(f"✅ Found working table name: {test_table_name}")
+                            table_name = test_table_name  # Update the working table name
+                            break
+                        except Exception as alt_error:
+                            logger.debug(f"❌ Table '{test_table_name}' not found: {alt_error}")
+                            continue
             
             if result and hasattr(result, 'fetch'):
                 df = result.fetch()
@@ -788,6 +847,7 @@ class MindsDBService:
             clean_dataset = dataset_name.lower().replace(' ', '_').replace('-', '_')
             
             # Create a view that can be used for ML models
+            # Ensure we're in the mindsdb database context for view creation
             create_view_sql = f"""
             CREATE OR REPLACE VIEW {clean_dataset}_view AS
             SELECT * FROM {clean_connector}.{table_name};
@@ -796,7 +856,13 @@ class MindsDBService:
             logger.info(f"📊 Creating dataset view: {clean_dataset}_view")
             logger.info(f"📄 SQL: {create_view_sql}")
             
-            result = self.connection.query(create_view_sql)
+            # Ensure we're in the mindsdb database for view creation
+            try:
+                self.connection.query("USE mindsdb")
+                result = self.connection.query(create_view_sql)
+            except Exception as view_error:
+                logger.error(f"❌ View creation failed: {view_error}")
+                raise view_error
             
             # Test the view
             test_query = f"SELECT * FROM {clean_dataset}_view LIMIT 5"

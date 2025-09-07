@@ -1,210 +1,133 @@
-# AI Share Platform Documentation
+# Simple AI Sharing Platform - Documentation
 
 ## 📖 Documentation Overview
 
-This directory contains comprehensive documentation for the AI Share Platform, covering both traditional file upload sharing and the new integrated proxy-based connector sharing.
+This directory contains documentation for the Simple AI Sharing platform with **unified single-port architecture** optimized for modern cloud deployment.
 
-## 📚 Available Guides
+## 📚 Key Documentation
 
-### 🚀 [Quick Start Guide](./QUICK_START.md)
-Get up and running in 3 simple steps. Perfect for first-time users.
+### 🚀 [DEPLOYMENT.md](./DEPLOYMENT.md)
+**Complete Production Deployment Guide**
+- Docker deployment with single port architecture
+- Railway, Render, and Vercel configuration
+- Environment variables and security setup
+- Frontend-backend integration
 
-**Contents:**
-- Prerequisites and installation
-- Service startup (backend + proxy)
+### 🔍 [FRONTEND_PATHS_VERIFICATION.md](./FRONTEND_PATHS_VERIFICATION.md) 
+**Frontend Integration & API Verification**
+- Single-port API architecture verification
+- Frontend code examples and configuration
+- API client setup for React/Next.js
+- Production deployment steps
+
+### ⚡ [QUICK_START.md](./QUICK_START.md)
+**Local Development Setup**
+- Quick setup for development
+- Basic usage examples
 - Demo accounts and testing
-- Basic API usage examples
 
-### 🔧 [Backend Startup Guide](./BACKEND_STARTUP_GUIDE.md)
-Detailed instructions for starting and managing the backend services.
+### 🔒 [SSL_AND_URL_CONFIGURATION.md](./SSL_AND_URL_CONFIGURATION.md)
+**Flexible SSL and URL Configuration**
+- Auto-detection of HTTPS/HTTP based on environment
+- Dynamic backend URL detection for any deployment platform
+- SSL middleware and security headers
+- Cloud platform integration (Railway, Render, Vercel)
 
-**Contents:**
-- Multiple startup methods
-- Service health verification
-- Environment configuration
-- Available endpoints
-- Troubleshooting
-
-### 🔗 [Proxy Mode Guide](./PROXY_MODE_GUIDE.md)
-Complete guide to the integrated proxy connector system for secure data sharing.
-
-**Contents:**
-- Proxy mode architecture
-- Creating database and API connectors
-- Using proxy endpoints
-- Security features
-- Monitoring and analytics
-
-## 🏗️ Architecture Overview
+## 🏗️ Unified Single-Port Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                   AI Share Platform                     │
+│                Simple AI Sharing Platform               │
 ├─────────────────────────────────────────────────────────┤
-│  ┌─────────────────┐    ┌─────────────────────────────┐ │
-│  │   Upload Mode   │    │     Connector Mode          │ │
-│  │                 │    │                             │ │
-│  │ • File Upload   │    │ • Database Connectors       │ │
-│  │ • Local Storage │    │ • API Connectors            │ │
-│  │ • Download      │    │ • Encrypted Credentials     │ │
-│  │   Links         │    │ • Proxy Endpoints           │ │
-│  │ • AI Chat       │    │ • Share Tokens              │ │
-│  └─────────────────┘    └─────────────────────────────┘ │
+│                    🌐 Single Port 8000                  │
 ├─────────────────────────────────────────────────────────┤
-│              Integrated Backend Service                 │
-│  ┌─────────────────────────────────────────────────────┐ │
-│  │ • FastAPI Main Server (Port 8000)                  │ │
-│  │ • Integrated Proxy Service                         │ │
-│  │ • Database Management                              │ │
-│  │ • Authentication & Authorization                   │ │
-│  │ • Google Gemini AI Integration                     │ │
-│  │ • MindsDB ML Engine                               │ │
-│  └─────────────────────────────────────────────────────┘ │
+│ /api/auth/        │ Authentication & JWT               │
+│ /api/datasets/    │ Dataset management & AI chat       │
+│ /api/files/       │ File upload/download               │
+│ /api/connectors/  │ Data connectors (MySQL, API, S3)  │
+│ /api/shared/      │ Public sharing & access            │
+│ /api/proxy/       │ Proxy operations                   │
+│ /api/organizations/ │ Organization management          │
+│ /docs             │ API documentation                  │
+│ /health           │ Health check                       │
+├─────────────────────────────────────────────────────────┤
+│                    🔧 Backend Services                  │
+│ • FastAPI unified server                               │
+│ • PostgreSQL database                                  │ 
+│ • Google Gemini AI                                     │
+│ • Encrypted credential storage                         │
+│ • JWT authentication                                   │
 └─────────────────────────────────────────────────────────┘
 ```
 
 ## 🚀 Quick Reference
 
-### Starting Services
+### Starting the Backend
 
 ```bash
-# Quick start (backend only)
+# Local development (single command)
 cd backend && python start.py
 
-# Full stack
-./start-dev.sh
+# Docker development
+docker-compose up -d
 
-# With custom MindsDB
-./start-mindsdb.sh && cd backend && python start.py
+# Production deployment
+# See DEPLOYMENT.md for Railway/Render/Vercel setup
 ```
 
-### Health Checks
+### Health Check
 
 ```bash
-# Main API
-curl http://localhost:8000/health
-
-# Proxy service
-curl http://localhost:8000/api/proxy/health
-
-# MindsDB
-curl http://localhost:47334/api/status
+# Unified API health check
+curl http://localhost:8000/api/health
+# Should return: {"status": "healthy", "endpoints": {...}}
 ```
 
 ### Key Endpoints
 
 | Endpoint | Purpose |
 |----------|---------|
-| `http://localhost:8000/docs` | API Documentation |
+| `http://localhost:8000/docs` | Interactive API Documentation |
 | `http://localhost:8000/api/auth/login` | Authentication |
-| `http://localhost:8000/api/datasets` | File Upload Mode |
-| `http://localhost:8000/api/proxy-connectors` | Connector Management |
-| `http://localhost:8000/api/proxy/*` | Proxy Data Access |
+| `http://localhost:8000/api/datasets` | Dataset management |
+| `http://localhost:8000/api/files/upload-file` | File uploads |
+| `http://localhost:8000/api/connectors` | Data connectors |
+| `http://localhost:8000/api/data-sharing/*` | Sharing & AI chat |
 
 ## 🔐 Authentication
 
-All API endpoints (except health checks and public shares) require JWT authentication:
+Demo accounts available for testing:
 
 ```bash
-# 1. Login
+# Login with demo account
 curl -X POST "http://localhost:8000/api/auth/login" \
-  -H "Content-Type: application/json" \
-  -d '{"email": "admin@example.com", "password": "SuperAdmin123!"}'
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=alice@techcorp.com&password=Password123!"
 
-# 2. Use token in subsequent requests
+# Use returned JWT token in requests
 curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   "http://localhost:8000/api/datasets"
 ```
 
-## 📊 Data Sharing Comparison
+## ✨ Key Features
 
-| Feature | Upload Mode | Connector Mode |
-|---------|-------------|----------------|
-| **Data Storage** | Local/Cloud files | External databases |
-| **Data Currency** | Static snapshots | Real-time access |
-| **Setup Complexity** | Simple | Moderate |
-| **Credential Management** | Not applicable | Encrypted & hidden |
-| **Scalability** | Storage limited | Database limited |
-| **Use Cases** | Reports, datasets | Live dashboards, APIs |
+✅ **Single Port**: All services through port 8000  
+✅ **Docker Ready**: Simple containerization  
+✅ **Cloud Deploy**: Railway/Render/Vercel configs  
+✅ **File Management**: Upload, share, manage datasets  
+✅ **Data Connectors**: MySQL, PostgreSQL, S3, APIs  
+✅ **AI Chat**: Interactive analysis with Gemini  
+✅ **Public Sharing**: Secure sharing with expiration  
+✅ **JWT Auth**: Secure authentication system  
 
-## 🛠️ Development
+## 🎯 Getting Started
 
-### Project Structure
-
-```
-simpleaisharing/
-├── backend/                 # Main backend service
-│   ├── app/
-│   │   ├── api/            # API endpoints
-│   │   ├── core/           # Configuration & database
-│   │   ├── models/         # Database models
-│   │   ├── services/       # Business logic
-│   │   └── utils/          # Utilities
-│   ├── main.py             # FastAPI application
-│   ├── start.py            # Startup script
-│   └── .env                # Environment configuration
-├── frontend/               # React frontend (optional)
-├── docs/                   # Documentation (this folder)
-├── storage/                # Data storage
-├── logs/                   # Log files
-└── scripts/                # Utility scripts
-```
-
-### Adding New Features
-
-1. **Database Models**: Add to `backend/app/models/`
-2. **API Endpoints**: Add to `backend/app/api/`
-3. **Business Logic**: Add to `backend/app/services/`
-4. **Database Migrations**: Use the migration system in `backend/migrations/`
-
-## 🔒 Security Considerations
-
-### For Production Deployment
-
-1. **Environment Variables**
-   - Use strong, unique JWT secrets
-   - Rotate API keys regularly
-   - Use production-grade databases
-
-2. **Network Security**
-   - Enable HTTPS/TLS
-   - Configure firewalls
-   - Use reverse proxy (nginx/Apache)
-
-3. **Database Security**
-   - Use read-only credentials when possible
-   - Enable connection encryption
-   - Monitor access logs
-
-4. **Access Control**
-   - Set appropriate token expiration
-   - Implement rate limiting
-   - Monitor failed authentication attempts
+1. **Quick Setup**: See [QUICK_START.md](./QUICK_START.md)
+2. **Production Deploy**: See [DEPLOYMENT.md](./DEPLOYMENT.md)
+3. **Frontend Integration**: See [FRONTEND_PATHS_VERIFICATION.md](./FRONTEND_PATHS_VERIFICATION.md)
 
 ## 📞 Support
 
-### Getting Help
-
-1. **Check Documentation**: Start with the relevant guide above
-2. **API Documentation**: Visit http://localhost:8000/docs for interactive API docs
-3. **Logs**: Check service logs for error details
-4. **Health Checks**: Verify all services are running properly
-
-### Common Issues
-
-- **Port conflicts**: Use `lsof -ti:PORT | xargs kill -9` to free ports
-- **Environment issues**: Ensure `.env` file is properly configured
-- **Database errors**: Check file permissions and storage directory
-- **Authentication problems**: Verify JWT tokens and user credentials
-
-## 🚀 What's Next?
-
-1. **Start with Quick Start**: Follow the [Quick Start Guide](./QUICK_START.md)
-2. **Explore Upload Mode**: Create and share traditional datasets
-3. **Try Connector Mode**: Set up database and API connectors
-4. **Build Applications**: Use the API to build custom interfaces
-5. **Scale for Production**: Implement security and performance optimizations
-
----
-
-**Happy coding! 🎉**
+- **API Docs**: http://localhost:8000/docs (when running)
+- **Health Check**: http://localhost:8000/api/health
+- **Issues**: Check logs and verify environment configuration

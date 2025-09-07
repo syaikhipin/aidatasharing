@@ -4,6 +4,7 @@
  */
 
 import axios, { AxiosInstance, AxiosRequestConfig } from 'axios'
+import apiConfig from './src/config/api.config'
 
 export interface ApiClientConfig {
   baseURL: string
@@ -150,7 +151,7 @@ export function createApiClient(config: ApiClientConfig): UnifiedApiClient {
 
 // Default client instance
 export const defaultApiClient = createApiClient({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
+  baseURL: apiConfig.baseUrl,
   timeout: 30000
 })
 
@@ -237,16 +238,16 @@ export const apiClient = {
 
     access: {
       mysql: (databaseName: string, token: string, query?: string) => 
-        fetch(`http://localhost:10101/${encodeURIComponent(databaseName)}?token=${token}&query=${encodeURIComponent(query || 'SELECT 1')}`).then(r => r.json()),
+        fetch(`${apiConfig.urls.proxy.mysql(databaseName, token)}&query=${encodeURIComponent(query || 'SELECT 1')}`).then(r => r.json()),
       
       postgresql: (databaseName: string, token: string, query?: string) => 
-        fetch(`http://localhost:10102/${encodeURIComponent(databaseName)}?token=${token}&query=${encodeURIComponent(query || 'SELECT 1')}`).then(r => r.json()),
+        fetch(`${apiConfig.urls.proxy.postgresql(databaseName, token)}&query=${encodeURIComponent(query || 'SELECT 1')}`).then(r => r.json()),
       
       api: (apiName: string, token: string, endpoint?: string) => 
-        fetch(`http://localhost:10103/api/${encodeURIComponent(apiName)}?token=${token}&endpoint=${encodeURIComponent(endpoint || '/posts')}`).then(r => r.json()),
+        fetch(`${apiConfig.urls.proxy.api(apiName, token)}&endpoint=${encodeURIComponent(endpoint || '/posts')}`).then(r => r.json()),
       
       shared: (shareId: string, query?: string) => 
-        fetch(`http://localhost:10107/share/${shareId}?query=${encodeURIComponent(query || 'SELECT 1')}`).then(r => r.json())
+        fetch(`${apiConfig.urls.sharing.public(shareId)}?query=${encodeURIComponent(query || 'SELECT 1')}`).then(r => r.json())
     },
 
     info: () => 

@@ -2,7 +2,7 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from app.models.user import User
-from app.models.dataset import Dataset, DatasetAccessLog, DatasetChatSession, ChatMessage, DatasetShareAccess
+from app.models.dataset import Dataset, DatasetAccessLog, DatasetChatSession, ChatMessage, DatasetShareAccess, DatabaseConnector
 from app.models.organization import Organization, DataSharingLevel, UserRole
 from datetime import datetime, timedelta
 import logging
@@ -136,8 +136,6 @@ class DataSharingService:
     def _get_connector_download_permissions(self, user: User, connector_id: int) -> Dict[str, Any]:
         """Get connector-specific download permissions"""
         try:
-            from app.models.dataset import DatabaseConnector
-            
             connector = self.db.query(DatabaseConnector).filter(
                 DatabaseConnector.id == connector_id
             ).first()
@@ -634,7 +632,6 @@ class DataSharingService:
         
         # Check if dataset depends on a connector and validate connector status
         if dataset.connector_id:
-            from app.models.dataset import DatabaseConnector
             connector = self.db.query(DatabaseConnector).filter(
                 DatabaseConnector.id == dataset.connector_id,
                 DatabaseConnector.is_deleted == False,
@@ -844,9 +841,11 @@ class DataSharingService:
         proxy_connection_info = None
         if dataset.connector_id:
             # For connector datasets, provide connection info only
+            # Get base URL dynamically
+            base_url = getattr(settings, 'BASE_URL', 'http://localhost:8000')
             proxy_connection_info = {
                 "connection_type": dataset.type.value,
-                "proxy_url": f"http://localhost:10103",
+                "proxy_url": f"{base_url}/api/proxy",
                 "access_token": share_token,
                 "database_name": dataset.name,
                 "supports_sql": dataset.type.value in ['csv', 'database', 'api']
@@ -1295,10 +1294,15 @@ Instructions: When answering, consider whether the dataset file is accessible vi
             from app.models.proxy_connector import ProxyConnector
             from app.services.proxy_service import ProxyService
             import json
+            from urllib.parse import quote
             
             # Check if proxy connector already exists for this dataset
+            # Try both original name and URL-safe name to handle existing connectors
             existing_connector = self.db.query(ProxyConnector).filter(
-                ProxyConnector.name == dataset.name,
+                or_(
+                    ProxyConnector.name == dataset.name,
+                    ProxyConnector.name == quote(dataset.name, safe='')
+                ),
                 ProxyConnector.organization_id == dataset.organization_id,
                 ProxyConnector.is_active == True
             ).first()
@@ -1350,10 +1354,15 @@ Instructions: When answering, consider whether the dataset file is accessible vi
             from app.models.proxy_connector import ProxyConnector
             import json
             import uuid
+            from urllib.parse import quote
             
             # Check if proxy connector already exists for this dataset
+            # Try both original name and URL-safe name to handle existing connectors
             existing_connector = self.db.query(ProxyConnector).filter(
-                ProxyConnector.name == dataset.name,
+                or_(
+                    ProxyConnector.name == dataset.name,
+                    ProxyConnector.name == quote(dataset.name, safe='')
+                ),
                 ProxyConnector.organization_id == dataset.organization_id,
                 ProxyConnector.is_active == True
             ).first()
@@ -1362,13 +1371,47 @@ Instructions: When answering, consider whether the dataset file is accessible vi
                 logger.info(f"Proxy connector already exists for dataset {dataset.name}")
                 return existing_connector
             
-            # Create proxy connector configuration
-            connection_config = {
-                "base_url": "https://jsonplaceholder.typicode.com",  # Default test API
-                "dataset_id": dataset.id,
-                "share_token": share_token,
-                "type": "dataset_api"
-            }
+            # Create proxy connector configuration based on dataset's connector
+            if dataset.connector_id:
+                # Get the original connector configuration
+                original_connector = self.db.query(DatabaseConnector).filter(
+                    DatabaseConnector.id == dataset.connector_id
+                ).first()
+                
+                if original_connector and original_connector.connection_config:
+                    # Use the original connector's configuration
+                    original_config = original_connector.connection_config
+                    connection_config = {
+                        "base_url": original_config.get("base_url", "https://jsonplaceholder.typicode.com"),
+                        "endpoint": original_config.get("endpoint", "/"),
+                        "dataset_id": dataset.id,
+                        "share_token": share_token,
+                        "type": "dataset_api"
+                    }
+                else:
+                    connection_config = {
+                        "base_url": "https://jsonplaceholder.typicode.com",  # Default fallback
+                        "dataset_id": dataset.id,
+                        "share_token": share_token,
+                        "type": "dataset_api"
+                    }
+            else:
+                # Use dataset's source_url if available
+                source_url = dataset.source_url or "https://jsonplaceholder.typicode.com/comments"
+                if source_url.count('/') > 2:  # Has path component
+                    base_url = '/'.join(source_url.split('/')[:3])  # protocol://host:port
+                    endpoint = '/' + '/'.join(source_url.split('/')[3:])  # /path/to/endpoint
+                else:
+                    base_url = source_url
+                    endpoint = "/"
+                
+                connection_config = {
+                    "base_url": base_url,
+                    "endpoint": endpoint,
+                    "dataset_id": dataset.id,
+                    "share_token": share_token,
+                    "type": "dataset_api"
+                }
             
             credentials = {
                 "api_key": None,
@@ -1381,7 +1424,7 @@ Instructions: When answering, consider whether the dataset file is accessible vi
                 name=dataset.name,
                 connector_type="api",
                 description=f"API access for shared dataset: {dataset.description or dataset.name}",
-                proxy_url=f"http://localhost:10103/api/{dataset.name}",
+                proxy_url=f"http://localhost:8000/api/proxy/api/{quote(dataset.name)}",
                 real_connection_config=json.dumps(connection_config),
                 real_credentials=json.dumps(credentials),
                 organization_id=dataset.organization_id,

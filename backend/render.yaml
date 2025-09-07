@@ -1,0 +1,62 @@
+# Render Blueprint Specification
+services:
+  # Backend API Service
+  - type: web
+    name: simpleaisharing-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    
+    # Health check
+    healthCheckPath: /api/health
+    
+    # Scaling
+    scaling:
+      minInstances: 1
+      maxInstances: 3
+      targetMemoryPercent: 80
+      targetCPUPercent: 80
+    
+    # Environment variables
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: simpleaisharing-db
+          property: connectionString
+      
+      - key: API_BASE_URL
+        value: https://simpleaisharing-backend.onrender.com
+      
+      - key: ENVIRONMENT
+        value: production
+      
+      - key: SECRET_KEY
+        generateValue: true
+      
+      - key: BACKEND_CORS_ORIGINS
+        value: https://your-app.vercel.app
+      
+      - key: GOOGLE_API_KEY
+        sync: false  # Set manually in Render dashboard
+      
+      - key: FIRST_SUPERUSER
+        sync: false  # Set manually in Render dashboard
+      
+      - key: FIRST_SUPERUSER_PASSWORD
+        sync: false  # Set manually in Render dashboard
+
+    # Disk for persistent storage
+    disk:
+      name: storage
+      mountPath: /app/storage
+      sizeGB: 10
+
+# Database
+databases:
+  - name: simpleaisharing-db
+    databaseName: simpleaisharing
+    user: simpleaisharing_user
+    plan: starter  # or 'standard' for production
+    
+    # Backup configuration
+    ipAllowList: []  # Allow connections from anywhere (configure as needed)

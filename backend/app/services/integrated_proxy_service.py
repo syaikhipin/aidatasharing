@@ -13,6 +13,7 @@ from fastapi import HTTPException, Request, Response, Depends, BackgroundTasks
 from fastapi.responses import JSONResponse
 import httpx
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 import mysql.connector
 import psycopg2
 import pymongo
@@ -31,9 +32,8 @@ class IntegratedProxyService:
     def __init__(self):
         self.proxy_service = ProxyService()
         self.app_config = get_app_config()
-        self.proxy_ports = self.app_config.proxy.get_proxy_ports()
+        # Use unified proxy approach - no separate ports needed
         self.proxy_enabled = self.app_config.proxy.PROXY_ENABLED
-        self.proxy_host = self.app_config.proxy.PROXY_HOST
         
         # Store running proxy tasks
         self.proxy_tasks = {}
@@ -110,12 +110,24 @@ class IntegratedProxyService:
         decoded_db_name = database_name
         
         try:
+            from urllib.parse import quote
+            
             # Find proxy connector by database name and type
+            # Try both original name and URL-encoded variants to handle different naming conventions
             proxy_connector = db.query(ProxyConnector).filter(
-                ProxyConnector.name == decoded_db_name,
+                or_(
+                    ProxyConnector.name == decoded_db_name,
+                    ProxyConnector.name == quote(decoded_db_name, safe=''),
+                    ProxyConnector.name == urllib.parse.unquote(decoded_db_name)
+                ),
                 ProxyConnector.connector_type.in_(["database", "api"]),
                 ProxyConnector.is_active == True
             ).first()
+            
+            if proxy_connector:
+                logger.info(f"Found proxy connector: {proxy_connector.name} (ID: {proxy_connector.id}, Type: {proxy_connector.connector_type})")
+            else:
+                logger.error(f"No proxy connector found for '{decoded_db_name}'")
             
             if not proxy_connector:
                 # Try case-insensitive search
@@ -149,9 +161,11 @@ class IntegratedProxyService:
                     "query": request.query_params.get("query", "SELECT 1"),
                     "operation": "select",
                     "method": "GET",
-                    "endpoint": request.query_params.get("endpoint", "/"),
                     "params": dict(request.query_params)
                 }
+                # Only add endpoint if explicitly provided in query params
+                if "endpoint" in request.query_params:
+                    operation_data["endpoint"] = request.query_params.get("endpoint")
             else:
                 try:
                     body = await request.json()
@@ -276,8 +290,39 @@ class IntegratedProxyService:
                     headers[auth_header] = f"{auth_prefix}{api_key}"
             
             # Build endpoint URL
-            endpoint = operation_data.get('endpoint', '/').lstrip('/')
-            full_url = f"{external_url.rstrip('/')}/{endpoint}"
+            # Use endpoint from connector config as default, allow request to override
+            default_endpoint = connection_config.get('endpoint', '/')
+            
+            # Auto-detect endpoint if not provided or is root
+            if default_endpoint == '/' or not default_endpoint:
+                # First, try to get from the stored dataset_endpoint
+                dataset_endpoint = connection_config.get('dataset_endpoint', '')
+                if dataset_endpoint and dataset_endpoint != '/':
+                    default_endpoint = dataset_endpoint
+                    logger.info(f"Using stored dataset endpoint: {default_endpoint}")
+                
+                # If no dataset_endpoint, try to extract from source_url
+                elif connection_config.get('source_url'):
+                    source_url = connection_config.get('source_url', '')
+                    if source_url and source_url.count('/') > 2:
+                        # Extract path from URL (e.g., https://api.example.com/comments -> /comments)
+                        url_parts = source_url.split('/', 3)
+                        if len(url_parts) > 3:
+                            default_endpoint = '/' + url_parts[3]
+                            logger.info(f"Auto-detected endpoint from source_url: {default_endpoint}")
+            
+            endpoint = operation_data.get('endpoint', default_endpoint)
+            # Remove leading slash for proper URL construction but keep the endpoint
+            if endpoint and endpoint.startswith('/'):
+                endpoint = endpoint[1:]
+            
+            # Build the full URL - if we have an endpoint, append it
+            if endpoint and endpoint != '':
+                full_url = f"{external_url.rstrip('/')}/{endpoint}"
+            else:
+                full_url = external_url
+            
+            logger.info(f"API Proxy: external_url={external_url}, default_endpoint={default_endpoint}, final_endpoint={endpoint}, full_url={full_url}")
             
             # Make HTTP request to external API
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -531,14 +576,17 @@ class IntegratedProxyService:
     
     def get_proxy_info(self) -> Dict[str, Any]:
         """Get proxy service information"""
+        # Unified proxy endpoints - all accessible via main API port
+        proxy_types = ["mysql", "postgresql", "api", "clickhouse", "mongodb", "s3", "shared"]
+        
         return {
             "enabled": self.proxy_enabled,
             "running": self.proxy_running,
-            "host": self.proxy_host,
-            "ports": self.proxy_ports,
+            "architecture": "unified_single_port",
+            "main_port": 8000,
             "endpoints": {
-                f"{proxy_type}": f"http://{self.proxy_host}:8000/api/proxy/{proxy_type}/{{database_name}}"
-                for proxy_type in self.proxy_ports.keys()
+                f"{proxy_type}": f"http://localhost:8000/api/proxy/{proxy_type}/{{database_name}}"
+                for proxy_type in proxy_types
             }
         }
 

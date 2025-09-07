@@ -651,6 +651,138 @@ class CreateDatasetFromConnector(BaseModel):
     sharing_level: str = "private"
 
 
+@router.post("/{connector_id}/test-api-endpoint")
+async def test_api_endpoint(
+    connector_id: int,
+    endpoint: str = "/",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Test an API endpoint and return preview data."""
+    import httpx
+    import json
+    
+    connector = db.query(DatabaseConnector).filter(
+        DatabaseConnector.id == connector_id,
+        DatabaseConnector.organization_id == current_user.organization_id,
+        DatabaseConnector.is_deleted == False
+    ).first()
+    
+    if not connector:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Connector not found"
+        )
+    
+    if connector.connector_type != "api":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This endpoint is only for API connectors"
+        )
+    
+    config = connector.connection_config
+    base_url = config.get("base_url", "")
+    
+    # Build full URL
+    if endpoint and endpoint != "/":
+        if not endpoint.startswith("/"):
+            endpoint = "/" + endpoint
+        full_url = base_url.rstrip("/") + endpoint
+    else:
+        full_url = base_url
+    
+    try:
+        # Test the API endpoint
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(full_url)
+            response.raise_for_status()
+            
+            # Parse response
+            content_type = response.headers.get("content-type", "").lower()
+            if "application/json" in content_type:
+                data = response.json()
+                
+                # Analyze the data structure
+                preview = {
+                    "success": True,
+                    "url_tested": full_url,
+                    "endpoint": endpoint,
+                    "status_code": response.status_code,
+                    "data_type": type(data).__name__,
+                    "preview_data": None,
+                    "detected_endpoint": endpoint,
+                    "row_count": 0,
+                    "column_count": 0,
+                    "columns": []
+                }
+                
+                # If data is a list, it's likely the correct endpoint
+                if isinstance(data, list):
+                    preview["preview_data"] = data[:3] if len(data) > 3 else data
+                    preview["row_count"] = len(data)
+                    if data:
+                        preview["columns"] = list(data[0].keys()) if isinstance(data[0], dict) else []
+                        preview["column_count"] = len(preview["columns"])
+                    preview["message"] = f"✅ Found {len(data)} items at this endpoint"
+                
+                # If data is a dict, check if it contains arrays
+                elif isinstance(data, dict):
+                    # Check for common API response patterns
+                    arrays_found = []
+                    for key, value in data.items():
+                        if isinstance(value, list) and value:
+                            arrays_found.append({
+                                "key": key,
+                                "count": len(value),
+                                "sample": value[0] if value else None
+                            })
+                    
+                    if arrays_found:
+                        # Suggest the best endpoint
+                        best_array = max(arrays_found, key=lambda x: x["count"])
+                        suggested_endpoint = endpoint.rstrip("/") + "/" + best_array["key"]
+                        preview["suggested_endpoints"] = [
+                            {
+                                "endpoint": endpoint.rstrip("/") + "/" + arr["key"],
+                                "count": arr["count"],
+                                "description": f"Array '{arr['key']}' with {arr['count']} items"
+                            }
+                            for arr in arrays_found
+                        ]
+                        preview["message"] = f"ℹ️ Found object with {len(arrays_found)} array(s). Try one of the suggested endpoints."
+                        preview["detected_endpoint"] = suggested_endpoint
+                    else:
+                        preview["message"] = "⚠️ Found object but no arrays. This might be a single item endpoint."
+                        preview["preview_data"] = data
+                
+                return preview
+                
+            else:
+                return {
+                    "success": False,
+                    "url_tested": full_url,
+                    "endpoint": endpoint,
+                    "status_code": response.status_code,
+                    "message": f"Response is not JSON (content-type: {content_type})"
+                }
+                
+    except httpx.HTTPStatusError as e:
+        return {
+            "success": False,
+            "url_tested": full_url,
+            "endpoint": endpoint,
+            "status_code": e.response.status_code,
+            "message": f"HTTP error: {e.response.status_code}"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "url_tested": full_url,
+            "endpoint": endpoint,
+            "message": f"Error: {str(e)}"
+        }
+
+
 @router.post("/{connector_id}/create-dataset")
 async def create_dataset_from_connector(
     connector_id: int,
@@ -1027,8 +1159,10 @@ async def _create_api_dataset(
             return await _create_api_dataset_fallback(connector, dataset_data, user_id)
         
         # Create dataset view from web connector
-        # Get table name from test result, or use 'data' as default
-        table_name = web_connector_result.get("test_result", {}).get("table_name", "data")
+        # Get table name from the working table name discovered during connector creation
+        table_name = web_connector_result.get("working_table_name", "data")
+        
+        logger.info(f"🎯 Using discovered table name: {table_name} for dataset view creation")
         
         dataset_view_result = mindsdb_service.create_dataset_from_web_connector(
             connector_name=web_connector_result["connector_name"],
@@ -1206,7 +1340,7 @@ async def _create_api_dataset_fallback(
         from app.utils.proxy_url_converter import ensure_localhost_proxy_uses_http
         
         parsed_url = urlparse(full_url)
-        if parsed_url.hostname in ['localhost', '127.0.0.1'] and parsed_url.port == 10103:
+        if parsed_url.hostname in ['localhost', '127.0.0.1'] and parsed_url.port == 8000:
             # This is a localhost proxy URL, ensure it uses HTTP
             full_url = ensure_localhost_proxy_uses_http(full_url)
             logger.info(f"🔓 Converted localhost proxy URL to HTTP: {full_url}")

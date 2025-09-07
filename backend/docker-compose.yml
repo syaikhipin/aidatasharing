@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  backend:
+    build: .
+    container_name: simpleaisharing-backend
+    ports:
+      - "8000:8000"  # Single port for all services
+    environment:
+      # Database Configuration
+      DATABASE_URL: ${DATABASE_URL}
+      
+      # API Configuration
+      API_BASE_URL: ${API_BASE_URL:-http://localhost:8000}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      SECRET_KEY: ${SECRET_KEY}
+      
+      # CORS Configuration for Frontend
+      BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-https://your-app.vercel.app}
+      
+      # Storage Configuration
+      STORAGE_BASE_PATH: /app/storage
+      UPLOAD_PATH: /app/storage/uploads
+      DOCUMENT_STORAGE_PATH: /app/storage/documents
+      IMAGE_STORAGE_PATH: /app/storage/images
+      DATASET_STORAGE_PATH: /app/storage/datasets
+      TEMPORARY_FILES_PATH: /app/storage/temp
+      
+      # Google API (if needed)
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      
+      # MindsDB Configuration (if needed)
+      MINDSDB_URL: ${MINDSDB_URL:-http://mindsdb:47334}
+      
+      # Admin Configuration
+      FIRST_SUPERUSER: ${FIRST_SUPERUSER}
+      FIRST_SUPERUSER_PASSWORD: ${FIRST_SUPERUSER_PASSWORD}
+    
+    volumes:
+      - storage_data:/app/storage
+      - encryption_keys:/app/data
+    
+    networks:
+      - app-network
+    
+    restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: MindsDB service if you want to include it
+  mindsdb:
+    image: mindsdb/mindsdb:latest
+    container_name: simpleaisharing-mindsdb
+    ports:
+      - "47334:47334"
+      - "47335:47335"
+    environment:
+      MINDSDB_STORAGE_DIR: /root/mindsdb_storage
+    volumes:
+      - mindsdb_data:/root/mindsdb_storage
+    networks:
+      - app-network
+    restart: unless-stopped
+    profiles:
+      - with-mindsdb  # Only start if explicitly requested
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  storage_data:
+    driver: local
+  encryption_keys:
+    driver: local
+  mindsdb_data:
+    driver: local

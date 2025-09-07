@@ -20,6 +20,7 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { SharingLevelSelector, SharingLevelBadge } from '@/components/datasets/SharingLevelSelector';
 import { datasetsAPI, dataSharingAPI } from '@/lib/api';
+import apiConfig from '@/config/api.config';
 
 import AccessInstructions from '@/components/shared/AccessInstructions';
 import Link from 'next/link';
@@ -176,7 +177,7 @@ function DatasetSharingContent() {
             console.log('Proxy connectors refreshed:', refreshData);
             
             // Show proxy access information
-            const proxyUrl = `http://localhost:10103/api/${encodeURIComponent(dataset.name)}?token=${response.share_token}`;
+            const proxyUrl = apiConfig.helpers.getProxyUrl('api', dataset.name, response.share_token);
             console.log('Proxy URL for dataset:', proxyUrl);
             
             showToast("Success", `Share link and proxy connector created! Proxy URL: ${proxyUrl}`);
@@ -252,24 +253,12 @@ function DatasetSharingContent() {
   const generateProxyConnectionString = (dataset: Dataset): string => {
     if (!dataset.share_token) return '';
     
-    const encodedDatasetName = encodeURIComponent(dataset.name);
-    
-    switch (dataset.type.toLowerCase()) {
-      case 'mysql':
-        return `mysql://proxy_user:${dataset.share_token}@localhost:10101/${encodedDatasetName}`;
-      case 'postgresql':
-        return `postgresql://proxy_user:${dataset.share_token}@localhost:10102/${encodedDatasetName}`;
-      case 'clickhouse':
-        return `clickhouse://proxy_user:${dataset.share_token}@localhost:10104/${encodedDatasetName}`;
-      case 's3':
-        return `s3://localhost:10106/${encodedDatasetName}?access_key=proxy_user&secret_key=${dataset.share_token}`;
-      case 'mongodb':
-        return `mongodb://proxy_user:${dataset.share_token}@localhost:10105/${encodedDatasetName}`;
-      case 'api':
-        return `http://localhost:10103/api/${encodedDatasetName}?token=${dataset.share_token}`;
-      default:
-        return `http://localhost:10103/api/${encodedDatasetName}?token=${dataset.share_token}`;
-    }
+    // Use the dynamic configuration helper
+    return apiConfig.helpers.getConnectionString(
+      dataset.type || 'api', 
+      dataset.name, 
+      dataset.share_token || ''
+    );
   };
 
   const getStatsForLevel = (level: 'private' | 'organization' | 'public') => {

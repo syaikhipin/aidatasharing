@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { dataSharingAPI } from '@/lib/api';
 import { Eye, Download, MessageSquare, Lock, User, Database, Shield, Copy } from 'lucide-react';
+import apiConfig from '@/config/api.config';
 
 interface SharedDataset {
   dataset_id: number;
@@ -298,46 +299,14 @@ export default function SharedDatasetPage() {
   };
 
   const generateConnectionString = (dataset: SharedDataset, token: string): string => {
-    const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-    const proxyHost = `${host}:${getPortForType(dataset.file_type)}`;
-    const encodedDatasetName = encodeURIComponent(dataset.dataset_name);
-    
-    switch (dataset.file_type?.toLowerCase()) {
-      case 'mysql':
-        return `mysql://proxy_user:${token}@${proxyHost}/${encodedDatasetName}`;
-      case 'postgresql':
-        return `postgresql://proxy_user:${token}@${proxyHost}/${encodedDatasetName}`;
-      case 'clickhouse':
-        return `clickhouse://proxy_user:${token}@${proxyHost}/${encodedDatasetName}`;
-      case 's3':
-        return `s3://${proxyHost}/${encodedDatasetName}?access_key=proxy_user&secret_key=${token}`;
-      case 'mongodb':
-        return `mongodb://proxy_user:${token}@${proxyHost}/${encodedDatasetName}`;
-      case 'api':
-        return `http://${proxyHost}/api/${encodedDatasetName}?token=${token}`;
-      default:
-        return `http://${proxyHost}/${encodedDatasetName}?token=${token}`;
-    }
+    // Use the centralized API configuration for consistent URL generation
+    return apiConfig.helpers.getConnectionString(
+      dataset.file_type || 'api',
+      dataset.dataset_name,
+      token
+    );
   };
 
-  const getPortForType = (fileType?: string): string => {
-    switch (fileType?.toLowerCase()) {
-      case 'mysql':
-        return '10101';  // MindsDB proxy MySQL port
-      case 'postgresql':
-        return '10102';  // MindsDB proxy PostgreSQL port
-      case 'clickhouse':
-        return '10104';  // MindsDB proxy ClickHouse port
-      case 'mongodb':
-        return '10105'; // MindsDB proxy MongoDB port
-      case 's3':
-        return '10106';  // MindsDB proxy S3 port
-      case 'api':
-        return '10103';  // MindsDB proxy API port
-      default:
-        return '10103';
-    }
-  };
 
   const getSupportedOperations = (fileType?: string): string[] => {
     switch (fileType?.toLowerCase()) {
@@ -707,7 +676,7 @@ export default function SharedDatasetPage() {
                     </div>
                     <div>
                       <span className="font-medium text-blue-900">Port:</span>
-                      <span className="ml-1 text-blue-700">{getPortForType(dataset.file_type)}</span>
+                      <span className="ml-1 text-blue-700">8000 (unified)</span>
                     </div>
                     <div>
                       <span className="font-medium text-blue-900">Database:</span>

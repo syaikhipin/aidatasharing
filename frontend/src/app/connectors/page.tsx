@@ -22,6 +22,7 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { dataConnectorsAPI } from '@/lib/api';
 import SimplifiedConnectorForm from '@/components/connectors/SimplifiedConnectorForm';
 import { parseConnectionUrl } from '@/utils/connectionParser';
+import apiConfig from '@/config/api.config';
 import Link from 'next/link';
 
 interface DatabaseConnector {
@@ -245,28 +246,11 @@ function ConnectorsContent() {
   const copyProxyConnection = (connector: DatabaseConnector) => {
     if (!connector.proxy_url || !connector.proxy_token) return;
     
-    let connectionString = '';
-    const encodedName = encodeURIComponent(connector.name);
-    
-    switch (connector.connector_type.toLowerCase()) {
-      case 'mysql':
-        connectionString = `mysql://proxy_user:${connector.proxy_token}@localhost:10101/${encodedName}`;
-        break;
-      case 'postgresql':
-        connectionString = `postgresql://proxy_user:${connector.proxy_token}@localhost:10102/${encodedName}`;
-        break;
-      case 'clickhouse':
-        connectionString = `clickhouse://proxy_user:${connector.proxy_token}@localhost:10104/${encodedName}`;
-        break;
-      case 's3':
-        connectionString = `s3://localhost:10106/${encodedName}?access_key=proxy_user&secret_key=${connector.proxy_token}`;
-        break;
-      case 'mongodb':
-        connectionString = `mongodb://proxy_user:${connector.proxy_token}@localhost:10105/${encodedName}`;
-        break;
-      default:
-        connectionString = `http://localhost:10103/api/${encodedName}?token=${connector.proxy_token}`;
-    }
+    const connectionString = apiConfig.helpers.getConnectionString(
+      connector.connector_type,
+      connector.name,
+      connector.proxy_token
+    );
     
     navigator.clipboard.writeText(connectionString);
     showToast("Success", "Proxy connection string copied to clipboard");

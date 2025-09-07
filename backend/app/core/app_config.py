@@ -45,29 +45,12 @@ class IntegrationsConfig:
 
 @dataclass
 class ProxyConfig:
-    """Proxy service configuration"""
-    
-    def get_proxy_ports(self) -> dict:
-        """Get proxy port configuration"""
-        return {
-            "mysql": int(os.getenv("PROXY_MYSQL_PORT", "10101")),
-            "postgresql": int(os.getenv("PROXY_POSTGRESQL_PORT", "10102")),
-            "api": int(os.getenv("PROXY_API_PORT", "10103")),
-            "clickhouse": int(os.getenv("PROXY_CLICKHOUSE_PORT", "10104")),
-            "mongodb": int(os.getenv("PROXY_MONGODB_PORT", "10105")),
-            "s3": int(os.getenv("PROXY_S3_PORT", "10106")),
-            "shared": int(os.getenv("PROXY_SHARED_PORT", "10107"))
-        }
+    """Unified proxy service configuration"""
     
     @property
     def PROXY_ENABLED(self) -> bool:
         """Check if proxy service is enabled"""
         return os.getenv("ENABLE_PROXY_SERVICE", "true").lower() == "true"
-    
-    @property
-    def PROXY_HOST(self) -> str:
-        """Get proxy host"""
-        return os.getenv("PROXY_HOST", "localhost")
 
 
 @dataclass
