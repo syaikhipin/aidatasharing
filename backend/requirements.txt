@@ -45,6 +45,12 @@ openai==1.91.0
 # Use: pip install mindsdb --no-deps
 # mindsdb-sdk==2.0.0
 
+# Data visualization and analysis
+lida==0.0.13
+matplotlib==3.7.2
+seaborn==0.12.2
+plotly==5.18.0
+
 # HTTP client and utilities
 httpx==0.28.1
 requests==2.32.3

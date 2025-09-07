@@ -63,7 +63,37 @@ interface MigrationResult {
   };
 }
 
-export default function StorageManagementPage() {
+// Helper functions
+const getStrategyIcon = (strategy: string) => {
+  switch (strategy) {
+    case 'local_primary': return <HardDrive className="h-5 w-5" />;
+    case 's3_primary': return <Cloud className="h-5 w-5" />;
+    case 'hybrid': return <Zap className="h-5 w-5" />;
+    case 'redundant': return <Shield className="h-5 w-5" />;
+    default: return <Database className="h-5 w-5" />;
+  }
+};
+
+const getStrategyColor = (strategy: string) => {
+  switch (strategy) {
+    case 'local_primary': return 'text-blue-600 bg-blue-50';
+    case 's3_primary': return 'text-green-600 bg-green-50';
+    case 'hybrid': return 'text-purple-600 bg-purple-50';
+    case 'redundant': return 'text-orange-600 bg-orange-50';
+    default: return 'text-gray-600 bg-gray-50';
+  }
+};
+
+const getPriorityColor = (priority: string) => {
+  switch (priority) {
+    case 'high': return 'text-red-600 bg-red-50 border-red-200';
+    case 'medium': return 'text-yellow-600 bg-yellow-50 border-yellow-200';
+    case 'low': return 'text-green-600 bg-green-50 border-green-200';
+    default: return 'text-gray-600 bg-gray-50 border-gray-200';
+  }
+};
+
+const StorageManagementPage = () => {
   const [storageStatus, setStorageStatus] = useState<StorageStatus | null>(null);
   const [recommendations, setRecommendations] = useState<StorageRecommendations | null>(null);
   const [loading, setLoading] = useState(true);
@@ -177,34 +207,6 @@ export default function StorageManagementPage() {
     loadData();
   }, []);
 
-  const getStrategyIcon = (strategy: string) => {
-    switch (strategy) {
-      case 'local_primary': return <HardDrive className="h-5 w-5" />;
-      case 's3_primary': return <Cloud className="h-5 w-5" />;
-      case 'hybrid': return <Zap className="h-5 w-5" />;
-      case 'redundant': return <Shield className="h-5 w-5" />;
-      default: return <Database className="h-5 w-5" />;
-    }
-  };
-
-  const getStrategyColor = (strategy: string) => {
-    switch (strategy) {
-      case 'local_primary': return 'text-blue-600 bg-blue-50';
-      case 's3_primary': return 'text-green-600 bg-green-50';
-      case 'hybrid': return 'text-purple-600 bg-purple-50';
-      case 'redundant': return 'text-orange-600 bg-orange-50';
-      default: return 'text-gray-600 bg-gray-50';
-    }
-  };
-
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'high': return 'text-red-600 bg-red-50 border-red-200';
-      case 'medium': return 'text-yellow-600 bg-yellow-50 border-yellow-200';
-      case 'low': return 'text-green-600 bg-green-50 border-green-200';
-      default: return 'text-gray-600 bg-gray-50 border-gray-200';
-    }
-  };
 
   if (loading) {
     return (
@@ -319,11 +321,11 @@ export default function StorageManagementPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="text-center p-3 bg-purple-50 rounded-lg">
                   <p className="text-xl font-bold text-purple-600">{recommendations.analysis.large_files_count}</p>
-                  <p className="text-sm text-gray-600">Large Files (>10MB)</p>
+                  <p className="text-sm text-gray-600">Large Files (&gt;10MB)</p>
                 </div>
                 <div className="text-center p-3 bg-orange-50 rounded-lg">
                   <p className="text-xl font-bold text-orange-600">{recommendations.analysis.small_files_count}</p>
-                  <p className="text-sm text-gray-600">Small Files (<10MB)</p>
+                  <p className="text-sm text-gray-600">Small Files (&lt;10MB)</p>
                 </div>
               </div>
             </div>
@@ -531,3 +533,4 @@ export default function StorageManagementPage() {
     </div>
   );
 }
+export default StorageManagementPage;

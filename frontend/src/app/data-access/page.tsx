@@ -134,7 +134,7 @@ function DataAccessContent() {
       console.log('Attempting to download dataset:', datasetId);
       
       // First initiate the download to get a secure token
-      const downloadInfo = await datasetsAPI.initiateDownload(datasetId, 'original');
+      const downloadInfo = await datasetsAPI.initiateDownload(datasetId);
       console.log('Download info received:', downloadInfo);
       
       if (downloadInfo.download_token) {
@@ -299,10 +299,10 @@ function DataAccessContent() {
                           <span className="mr-2">📁</span>
                           <span>{dataset.type?.toUpperCase() || 'Unknown'}</span>
                         </div>
-                        {dataset.size && (
+                        {dataset.size_bytes && (
                           <div className="flex items-center text-sm text-gray-600">
                             <span className="mr-2">💾</span>
-                            <span>{dataset.size} GB</span>
+                            <span>{Math.round(dataset.size_bytes / (1024 * 1024 * 1024) * 100) / 100} GB</span>
                           </div>
                         )}
                         <div className="flex items-center text-sm text-gray-600">
@@ -311,7 +311,7 @@ function DataAccessContent() {
                         </div>
                         <div className="flex items-center text-sm text-gray-600">
                           <span className="mr-2">📅</span>
-                          <span>{new Date(dataset.last_updated).toLocaleDateString()}</span>
+                          <span>{new Date(dataset.created_at).toLocaleDateString()}</span>
                         </div>
                       </div>
                       
@@ -334,7 +334,7 @@ function DataAccessContent() {
                               Download
                             </Button>
                           </>
-                        ) : dataset.can_request_access ? (
+                        ) : (
                           <Button 
                             variant="gradient" 
                             size="sm" 
@@ -344,7 +344,7 @@ function DataAccessContent() {
                             <span className="mr-1">🔑</span>
                             Request Access
                           </Button>
-                        ) : null}
+                        )}
                       </div>
                     </CardContent>
                   </Card>

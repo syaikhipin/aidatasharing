@@ -419,7 +419,7 @@ function AdminDatasetsContent() {
                             <h3 className="text-lg font-semibold text-gray-900 mr-3">
                               {dataset.name}
                             </h3>
-                            <SharingLevelBadge level={dataset.sharing_level || 'private'} />
+                            <SharingLevelBadge level={(dataset.sharing_level || 'private') as ('private' | 'organization' | 'public')} />
                             {dataset.is_deleted && (
                               <span className="ml-2 px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded-full">
                                 Deleted

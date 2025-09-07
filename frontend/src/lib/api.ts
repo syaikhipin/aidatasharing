@@ -479,6 +479,15 @@ export const datasetsAPI = {
     return response.data;
   },
 
+  visualizeDataset: async (datasetId: number, visualizationType?: string, maxVisualizations: number = 4) => {
+    const params: any = { max_visualizations: maxVisualizations };
+    if (visualizationType) {
+      params.visualization_type = visualizationType;
+    }
+    const response = await apiClient.get(`/api/datasets/${datasetId}/visualize`, { params });
+    return response.data;
+  },
+
   getDatasetModels: async (datasetId: number) => {
     const response = await apiClient.get(`/api/datasets/${datasetId}/models`);
     return response.data;

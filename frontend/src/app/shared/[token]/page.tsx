@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { dataSharingAPI } from '@/lib/api';
 import { Eye, Download, MessageSquare, Lock, User, Database, Shield, Copy } from 'lucide-react';
+import { DataVisualization } from '@/components/DataVisualization';
 import apiConfig from '@/config/api.config';
 
 interface SharedDataset {
@@ -209,6 +210,9 @@ export default function SharedDatasetPage() {
         timestamp: new Date().toISOString(),
         model: response.model,
         tokens_used: response.tokens_used,
+        visualizations: response.visualizations,
+        dataAnalysis: response.data_analysis,
+        hasVisualizations: response.has_visualizations || false,
         error: false
       };
       setChatHistory(prev => [...prev, aiMessage]);
@@ -840,35 +844,56 @@ export default function SharedDatasetPage() {
             <div className="px-6 py-4">
               {/* Chat History */}
               {chatHistory.length > 0 && (
-                <div className="mb-6 space-y-4 max-h-96 overflow-y-auto">
+                <div className="mb-6 space-y-4 max-h-[600px] overflow-y-auto">
                   {chatHistory.map((message) => (
-                    <div key={message.id} className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                        message.type === 'user' 
-                          ? 'bg-blue-600 text-white' 
-                          : message.error
-                          ? 'bg-red-50 border border-red-200 text-red-700'
-                          : 'bg-gray-100 text-gray-900'
-                      }`}>
-                        <div className="text-sm whitespace-pre-wrap prose prose-sm max-w-none">
-                          {message.type === 'ai' ? (
-                            <div dangerouslySetInnerHTML={{ 
-                              __html: message.message.replace(/\n/g, '<br/>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>') 
-                            }} />
-                          ) : (
-                            message.message
+                    <div key={message.id}>
+                      {message.type === 'user' ? (
+                        <div className="flex justify-end">
+                          <div className="max-w-xs lg:max-w-md px-4 py-2 rounded-lg bg-blue-600 text-white">
+                            <div className="text-sm whitespace-pre-wrap">
+                              {message.message}
+                            </div>
+                            <p className="text-xs mt-1 opacity-75">
+                              {new Date(message.timestamp).toLocaleTimeString()}
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          <div className="flex justify-start">
+                            <div className={`max-w-2xl px-4 py-2 rounded-lg ${
+                              message.error
+                                ? 'bg-red-50 border border-red-200 text-red-700'
+                                : 'bg-gray-100 text-gray-900'
+                            }`}>
+                              <div className="text-sm whitespace-pre-wrap prose prose-sm max-w-none">
+                                <div dangerouslySetInnerHTML={{ 
+                                  __html: message.message.replace(/\n/g, '<br/>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>') 
+                                }} />
+                              </div>
+                              <p className="text-xs mt-1 opacity-75">
+                                {new Date(message.timestamp).toLocaleTimeString()}
+                                {message.model && !message.error && (
+                                  <span className="ml-2">• {message.model}</span>
+                                )}
+                                {message.tokens_used && !message.error && (
+                                  <span className="ml-1">• {message.tokens_used} tokens</span>
+                                )}
+                              </p>
+                            </div>
+                          </div>
+                          
+                          {/* Show visualizations if available */}
+                          {message.hasVisualizations && (message.visualizations || message.dataAnalysis) && (
+                            <div className="ml-0">
+                              <DataVisualization
+                                visualizations={message.visualizations}
+                                dataAnalysis={message.dataAnalysis}
+                              />
+                            </div>
                           )}
                         </div>
-                        <p className="text-xs mt-1 opacity-75">
-                          {new Date(message.timestamp).toLocaleTimeString()}
-                          {message.model && !message.error && (
-                            <span className="ml-2">• {message.model}</span>
-                          )}
-                          {message.tokens_used && !message.error && (
-                            <span className="ml-1">• {message.tokens_used} tokens</span>
-                          )}
-                        </p>
-                      </div>
+                      )}
                     </div>
                   ))}
                   {isChatting && (

@@ -7,6 +7,7 @@ import { useParams } from 'next/navigation';
 import { datasetsAPI } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { DataVisualization } from '@/components/DataVisualization';
 import Link from 'next/link';
 
 export default function DatasetChatPage() {
@@ -75,6 +76,9 @@ function DatasetChatContent() {
         timestamp: new Date().toISOString(),
         model: response.model,
         tokens_used: response.tokens_used,
+        visualizations: response.visualizations,
+        dataAnalysis: response.data_analysis,
+        hasVisualizations: response.has_visualizations || false,
         error: false
       };
       setChatHistory(prev => [...prev, aiMessage]);
@@ -210,27 +214,50 @@ function DatasetChatContent() {
           <CardContent>
             {/* Chat History */}
             {chatHistory.length > 0 && (
-              <div className="mb-6 space-y-4 max-h-96 overflow-y-auto">
+              <div className="mb-6 space-y-4 max-h-[600px] overflow-y-auto">
                 {chatHistory.map((message) => (
-                  <div key={message.id} className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                      message.type === 'user' 
-                        ? 'bg-blue-600 text-white' 
-                        : message.error
-                        ? 'bg-red-50 border border-red-200 text-red-700'
-                        : 'bg-gray-100 text-gray-900'
-                    }`}>
-                      <p className="text-sm whitespace-pre-wrap">{message.message}</p>
-                      <p className="text-xs mt-1 opacity-75">
-                        {new Date(message.timestamp).toLocaleTimeString()}
-                        {message.model && !message.error && (
-                          <span className="ml-2">• {message.model}</span>
+                  <div key={message.id}>
+                    {message.type === 'user' ? (
+                      <div className="flex justify-end">
+                        <div className="max-w-xs lg:max-w-md px-4 py-2 rounded-lg bg-blue-600 text-white">
+                          <p className="text-sm whitespace-pre-wrap">{message.message}</p>
+                          <p className="text-xs mt-1 opacity-75">
+                            {new Date(message.timestamp).toLocaleTimeString()}
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex justify-start">
+                          <div className={`max-w-2xl px-4 py-2 rounded-lg ${
+                            message.error
+                              ? 'bg-red-50 border border-red-200 text-red-700'
+                              : 'bg-gray-100 text-gray-900'
+                          }`}>
+                            <p className="text-sm whitespace-pre-wrap">{message.message}</p>
+                            <p className="text-xs mt-1 opacity-75">
+                              {new Date(message.timestamp).toLocaleTimeString()}
+                              {message.model && !message.error && (
+                                <span className="ml-2">• {message.model}</span>
+                              )}
+                              {message.tokens_used && !message.error && (
+                                <span className="ml-1">• {message.tokens_used} tokens</span>
+                              )}
+                            </p>
+                          </div>
+                        </div>
+                        
+                        {/* Show visualizations if available */}
+                        {message.hasVisualizations && (message.visualizations || message.dataAnalysis) && (
+                          <div className="ml-0">
+                            <DataVisualization
+                              visualizations={message.visualizations}
+                              dataAnalysis={message.dataAnalysis}
+                            />
+                          </div>
                         )}
-                        {message.tokens_used && !message.error && (
-                          <span className="ml-1">• {message.tokens_used} tokens</span>
-                        )}
-                      </p>
-                    </div>
+                      </div>
+                    )}
                   </div>
                 ))}
                 {isChatting && (
@@ -289,12 +316,12 @@ function DatasetChatContent() {
                   <h4 className="text-sm font-medium text-blue-800 mb-2">💡 Try asking questions like:</h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                     {[
-                      "What insights can you provide about this dataset?",
-                      "How many records are in this dataset?",
+                      "Show me visualizations of this dataset",
+                      "Analyze the data and create charts",
                       "What are the key patterns in the data?",
-                      "Can you summarize the main findings?",
-                      "What columns are available in this dataset?",
-                      "Are there any data quality issues?"
+                      "Show me the distribution of values",
+                      "Create a correlation analysis",
+                      "What insights can you provide with visualizations?"
                     ].map((suggestion, index) => (
                       <button
                         key={index}

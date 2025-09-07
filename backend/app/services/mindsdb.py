@@ -9,6 +9,8 @@ import os
 from datetime import datetime
 import time
 import requests
+import pandas as pd
+import io
 
 # Import for type hints
 from typing import TYPE_CHECKING
@@ -1283,7 +1285,7 @@ class MindsDBService:
             }
 
     def chat_with_dataset(self, dataset_id: str, message: str, user_id: Optional[int] = None, session_id: Optional[str] = None, organization_id: Optional[int] = None) -> Dict[str, Any]:
-        """Chat with dataset using MindsDB connectors and native AI models."""
+        """Chat with dataset using MindsDB connectors, native AI models, and data visualization."""
         try:
             import time
             start_time = time.time()
@@ -1295,6 +1297,9 @@ class MindsDBService:
             dataset_context = ""
             is_web_connector = False
             web_connector_info = {}
+            visualizations = []
+            data_analysis = {}
+            dataset_df = None
             
             try:
                 from app.core.database import get_db
@@ -1314,6 +1319,43 @@ class MindsDBService:
                     }
                 
                 logger.info(f"🔍 Processing chat for dataset: {dataset.name} (ID: {dataset_id})")
+                
+                # Check if user is asking for visualization or analysis
+                needs_visualization = any(keyword in message.lower() for keyword in [
+                    'visualiz', 'chart', 'graph', 'plot', 'diagram', 'show', 'display',
+                    'analyze', 'analysis', 'insight', 'pattern', 'trend', 'distribution',
+                    'correlation', 'relationship', 'compare', 'histogram', 'scatter',
+                    'heatmap', 'bar', 'line', 'pie'
+                ])
+                
+                # Try to load dataset data for visualization if needed
+                if needs_visualization:
+                    try:
+                        dataset_df = self._load_dataset_for_visualization(dataset, db)
+                        if dataset_df is not None and not dataset_df.empty:
+                            logger.info(f"📊 Loaded dataset with {len(dataset_df)} rows for visualization")
+                            
+                            # Generate visualizations using LIDA
+                            from app.services.data_visualization import get_visualization_service
+                            viz_service = get_visualization_service(self.api_key)
+                            
+                            # Analyze the dataset
+                            data_analysis = viz_service.analyze_dataset(dataset_df, dataset.name)
+                            
+                            # Generate visualizations
+                            visualizations = viz_service.generate_visualizations_with_lida(
+                                dataset_df,
+                                query=message,
+                                max_visualizations=3
+                            )
+                            
+                            logger.info(f"📈 Generated {len(visualizations)} visualizations")
+                        else:
+                            logger.warning("Could not load dataset data for visualization")
+                    except Exception as viz_error:
+                        logger.error(f"Error generating visualizations: {viz_error}")
+                        visualizations = []
+                        data_analysis = {}
                 
                 # Check if this is a web connector dataset (only if it has a connector_id and actual API URL)
                 if dataset.connector_id and dataset.source_url and (
@@ -1397,45 +1439,105 @@ class MindsDBService:
                 # For uploaded files, ensure they have a database connector
                 logger.info(f"🗄️ Processing uploaded file dataset: {dataset.name}")
                 
-                # Get the file upload record
-                file_upload = None
-                try:
+                # Check if this is a multi-file dataset
+                if dataset.is_multi_file_dataset:
+                    logger.info(f"📁 Processing multi-file dataset with {dataset.file_count or 'multiple'} files")
+                    
+                    # Get the primary file for multi-file datasets
+                    from app.models.dataset import DatasetFile
+                    dataset_files = db.query(DatasetFile).filter(
+                        DatasetFile.dataset_id == dataset.id,
+                        DatasetFile.is_deleted == False
+                    ).order_by(DatasetFile.is_primary.desc(), DatasetFile.file_order.asc()).all()
+                    
+                    if dataset_files:
+                        primary_file = next((f for f in dataset_files if f.is_primary), dataset_files[0])
+                        logger.info(f"📄 Using primary file for chat: {primary_file.filename}")
+                        
+                        # Build context for multi-file dataset
+                        file_list = "\n".join([f"  - {f.filename} ({f.file_type}, {'Primary' if f.is_primary else 'Supporting'})" for f in dataset_files[:10]])
+                        if len(dataset_files) > 10:
+                            file_list += f"\n  ... and {len(dataset_files) - 10} more files"
+                        
+                        dataset_context = f"""
+                Dataset Information (Multi-File Dataset):
+                - Name: {dataset.name}
+                - Type: Multi-file dataset ({len(dataset_files)} files)
+                - Description: {dataset.description or 'No description available'}
+                - Primary File: {primary_file.filename} ({primary_file.file_type})
+                - Total Files: {len(dataset_files)}
+                - Files in Dataset:
+{file_list}
+                - Created: {dataset.created_at}
+                - Data Access: Analysis based on primary file content
+                - Note: This is a multi-file dataset. The AI analysis is primarily based on the primary file ({primary_file.filename}).
+                       Other files in the dataset provide supporting context but are not directly analyzed in this chat.
+                """
+                        
+                        # Try to get file upload record for the primary file
+                        from app.models.file_handler import FileUpload
+                        file_upload = db.query(FileUpload).filter(
+                            FileUpload.dataset_id == dataset.id,
+                            FileUpload.original_filename == primary_file.filename
+                        ).first()
+                        
+                        if not file_upload:
+                            # Fallback to any file upload for this dataset
+                            file_upload = db.query(FileUpload).filter(
+                                FileUpload.dataset_id == dataset.id
+                            ).first()
+                    else:
+                        logger.warning(f"⚠️ No files found for multi-file dataset {dataset.id}")
+                        dataset_context = f"""
+                Dataset Information (Multi-File Dataset):
+                - Name: {dataset.name}
+                - Type: Multi-file dataset
+                - Description: {dataset.description or 'No description available'}
+                - Created: {dataset.created_at}
+                - Warning: No files found in this multi-file dataset
+                """
+                        file_upload = None
+                else:
+                    # Single file dataset - original logic
                     from app.models.file_handler import FileUpload
                     file_upload = db.query(FileUpload).filter(
                         FileUpload.dataset_id == dataset.id
                     ).first()
+                
+                # Process file upload if found (for both single and multi-file datasets)
+                if file_upload:
+                    logger.info(f"📁 Found file upload record: {file_upload.original_filename}")
                     
-                    if file_upload:
-                        logger.info(f"📁 Found file upload record: {file_upload.original_filename}")
+                    # Check if file needs MindsDB processing setup and do it automatically
+                    needs_setup = self._check_if_file_needs_mindsdb_setup(dataset, file_upload)
+                    
+                    if needs_setup:
+                        logger.info(f"🔄 File processing not set up yet, automatically setting up MindsDB processing...")
+                        setup_result = self._setup_file_processing_automatically(dataset, file_upload, db)
                         
-                        # Check if file needs MindsDB processing setup and do it automatically
-                        needs_setup = self._check_if_file_needs_mindsdb_setup(dataset, file_upload)
+                        if setup_result.get("success"):
+                            logger.info(f"✅ Automatic MindsDB setup completed: {setup_result.get('model_name')}")
+                            # Refresh dataset to get updated info
+                            db.refresh(dataset)
+                        else:
+                            logger.warning(f"⚠️ Automatic MindsDB setup failed: {setup_result.get('error')}")
+                    
+                    # Create database connector for this file if it doesn't exist
+                    connector_result = self.create_file_database_connector(file_upload)
+                    
+                    if connector_result.get("success"):
+                        logger.info(f"✅ Database connector ready: {connector_result.get('database_name')}")
                         
-                        if needs_setup:
-                            logger.info(f"🔄 File processing not set up yet, automatically setting up MindsDB processing...")
-                            setup_result = self._setup_file_processing_automatically(dataset, file_upload, db)
+                        # Try to get sample data from the file database
+                        database_name = connector_result.get("database_name")
+                        test_result = connector_result.get("test_result", {})
+                        
+                        if test_result.get("success") and test_result.get("sample_data"):
+                            sample_data = test_result.get("sample_data", [])
+                            columns = test_result.get("columns", [])
                             
-                            if setup_result.get("success"):
-                                logger.info(f"✅ Automatic MindsDB setup completed: {setup_result.get('model_name')}")
-                                # Refresh dataset to get updated info
-                                db.refresh(dataset)
-                            else:
-                                logger.warning(f"⚠️ Automatic MindsDB setup failed: {setup_result.get('error')}")
-                        
-                        # Create database connector for this file if it doesn't exist
-                        connector_result = self.create_file_database_connector(file_upload)
-                        
-                        if connector_result.get("success"):
-                            logger.info(f"✅ Database connector ready: {connector_result.get('database_name')}")
-                            
-                            # Try to get sample data from the file database
-                            database_name = connector_result.get("database_name")
-                            test_result = connector_result.get("test_result", {})
-                            
-                            if test_result.get("success") and test_result.get("sample_data"):
-                                sample_data = test_result.get("sample_data", [])
-                                columns = test_result.get("columns", [])
-                                
+                            # Update dataset_context if not already set for multi-file
+                            if not dataset.is_multi_file_dataset:
                                 dataset_context = f"""
                 Dataset Information (Uploaded File):
                 - Name: {dataset.name}
@@ -1451,7 +1553,9 @@ class MindsDBService:
                 - Available Columns: {columns}
                 - Sample Data: {sample_data[:2] if sample_data else 'No sample data available'}
                 """
-                            else:
+                        else:
+                            # Update dataset_context if not already set for multi-file
+                            if not dataset.is_multi_file_dataset:
                                 dataset_context = f"""
                 Dataset Information (Uploaded File):
                 - Name: {dataset.name}
@@ -1466,8 +1570,10 @@ class MindsDBService:
                 - Database Name: {database_name}
                 - Note: Database connector created but data access needs verification
                 """
-                        else:
-                            logger.warning(f"⚠️ Failed to create database connector: {connector_result.get('error')}")
+                    else:
+                        logger.warning(f"⚠️ Failed to create database connector: {connector_result.get('error')}")
+                        # Update dataset_context if not already set for multi-file
+                        if not dataset.is_multi_file_dataset:
                             dataset_context = f"""
                 Dataset Information (Uploaded File):
                 - Name: {dataset.name}
@@ -1481,8 +1587,10 @@ class MindsDBService:
                 - Data Access: File data (connector creation failed)
                 - Warning: Database connector could not be created - {connector_result.get('error')}
                 """
-                    else:
-                        logger.warning(f"⚠️ No file upload record found for dataset {dataset.id}")
+                else:
+                    logger.warning(f"⚠️ No file upload record found for dataset {dataset.id}")
+                    # Only set dataset_context if not already set for multi-file
+                    if not dataset.is_multi_file_dataset or 'dataset_context' not in locals():
                         dataset_context = f"""
                 Dataset Information (Uploaded File):
                 - Name: {dataset.name}
@@ -1494,21 +1602,6 @@ class MindsDBService:
                 - Created: {dataset.created_at}
                 - Data Access: Static file data
                 - Warning: File upload record not found
-                """
-                        
-                except Exception as file_error:
-                    logger.error(f"❌ Error processing file upload for dataset {dataset.id}: {file_error}")
-                    dataset_context = f"""
-                Dataset Information (Uploaded File):
-                - Name: {dataset.name}
-                - Type: {dataset.type}
-                - Description: {dataset.description or 'No description available'}
-                - Data Source: Uploaded file
-                - Rows: {dataset.row_count or 'Unknown'}
-                - Columns: {dataset.column_count or 'Unknown'}
-                - Created: {dataset.created_at}
-                - Data Access: Static file data
-                - Error: Could not process file upload - {str(file_error)}
                 """
             
             # Build enhanced prompt based on dataset type
@@ -1610,6 +1703,25 @@ class MindsDBService:
             
             if result and isinstance(result, dict) and result.get("answer"):
                 response_time = time.time() - start_time
+                
+                # Add visualization data if available
+                if visualizations:
+                    result["visualizations"] = visualizations
+                    result["data_analysis"] = data_analysis
+                    result["has_visualizations"] = True
+                    
+                    # Enhance the answer with visualization insights
+                    viz_summary = f"\n\n📊 **Data Visualizations Generated:**\n"
+                    for i, viz in enumerate(visualizations, 1):
+                        viz_summary += f"{i}. {viz.get('title', 'Visualization')}\n"
+                    
+                    if data_analysis and data_analysis.get('recommendations'):
+                        viz_summary += f"\n📌 **Key Recommendations:**\n"
+                        for rec in data_analysis['recommendations'][:3]:
+                            viz_summary += f"• {rec}\n"
+                    
+                    result["answer"] = result["answer"] + viz_summary
+                
                 result.update({
                     "dataset_id": dataset_id,
                     "dataset_name": dataset.name,
@@ -1620,7 +1732,8 @@ class MindsDBService:
                     "response_time_seconds": response_time,
                     "user_id": user_id,
                     "session_id": session_id,
-                    "organization_id": organization_id or dataset.organization_id
+                    "organization_id": organization_id or dataset.organization_id,
+                    "has_visualizations": len(visualizations) > 0 if visualizations else False
                 })
                 
                 logger.info(f"✅ Successfully processed {'web connector' if is_web_connector else 'standard'} dataset chat in {response_time:.2f}s")
@@ -2063,6 +2176,70 @@ Please provide a comprehensive answer about this dataset:"""
             logger.error(f"❌ Error setting up file dataset processing: {e}")
             db_session.rollback()
             return {"success": False, "error": str(e)}
+    
+    def _load_dataset_for_visualization(self, dataset, db) -> Optional[pd.DataFrame]:
+        """Load dataset data into a DataFrame for visualization"""
+        try:
+            # Check if dataset has files
+            if dataset.is_multi_file_dataset:
+                # For multi-file datasets, load the primary file
+                from app.models.dataset import DatasetFile
+                dataset_files = db.query(DatasetFile).filter(
+                    DatasetFile.dataset_id == dataset.id,
+                    DatasetFile.is_deleted == False
+                ).order_by(DatasetFile.is_primary.desc()).all()
+                
+                if dataset_files:
+                    primary_file = dataset_files[0]
+                    file_path = primary_file.file_path
+                else:
+                    logger.warning(f"No files found for multi-file dataset {dataset.id}")
+                    return None
+            else:
+                # For single file datasets
+                file_path = dataset.file_path
+                if not file_path and dataset.source_url and not dataset.source_url.startswith('http'):
+                    # Try to construct file path from source_url
+                    import os
+                    possible_paths = [
+                        f"storage/{dataset.source_url}",
+                        f"../storage/{dataset.source_url}",
+                        dataset.source_url
+                    ]
+                    for path in possible_paths:
+                        if os.path.exists(path):
+                            file_path = path
+                            break
+            
+            if not file_path or not os.path.exists(file_path):
+                logger.warning(f"File not found for dataset {dataset.id}: {file_path}")
+                return None
+            
+            # Load file based on type
+            file_extension = file_path.split('.')[-1].lower()
+            
+            if file_extension == 'csv':
+                df = pd.read_csv(file_path)
+            elif file_extension in ['xlsx', 'xls']:
+                df = pd.read_excel(file_path)
+            elif file_extension == 'json':
+                df = pd.read_json(file_path)
+            elif file_extension == 'parquet':
+                df = pd.read_parquet(file_path)
+            else:
+                logger.warning(f"Unsupported file type for visualization: {file_extension}")
+                return None
+            
+            # Limit rows for performance
+            if len(df) > 10000:
+                logger.info(f"Dataset has {len(df)} rows, sampling 10000 for visualization")
+                df = df.sample(n=10000, random_state=42)
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error loading dataset for visualization: {e}")
+            return None
 
 
 # Create service instance

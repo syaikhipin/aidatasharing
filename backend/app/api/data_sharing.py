@@ -684,10 +684,48 @@ async def download_shared_dataset(
         ).all()
         
         if dataset_files:
-            # For single file, use the first/primary file
-            primary_file = next((f for f in dataset_files if f.is_primary), dataset_files[0])
-            if primary_file.file_path and os.path.exists(primary_file.file_path):
-                file_path = primary_file.file_path
+            # For multi-file datasets, create a zip
+            if dataset.is_multi_file_dataset and len(dataset_files) > 1:
+                import tempfile
+                import zipfile
+                
+                # Create a temporary zip file
+                temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+                
+                try:
+                    with zipfile.ZipFile(temp_zip, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                        for dataset_file in dataset_files:
+                            if os.path.exists(dataset_file.file_path):
+                                zip_file.write(dataset_file.file_path, dataset_file.filename)
+                    
+                    temp_zip.close()
+                    
+                    # Return zip file
+                    download_name = f"{dataset.name}_all_files.zip"
+                    return FileResponse(
+                        path=temp_zip.name,
+                        filename=download_name,
+                        media_type='application/zip',
+                        headers={
+                            "Content-Disposition": f"attachment; filename=\"{download_name}\"",
+                            "Cache-Control": "no-cache, no-store, must-revalidate",
+                            "Pragma": "no-cache",
+                            "Expires": "0"
+                        }
+                    )
+                except Exception as e:
+                    # Clean up temp file on error
+                    if os.path.exists(temp_zip.name):
+                        os.unlink(temp_zip.name)
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"Failed to create zip file: {str(e)}"
+                    )
+            else:
+                # For single file, use the first/primary file
+                primary_file = next((f for f in dataset_files if f.is_primary), dataset_files[0])
+                if primary_file.file_path and os.path.exists(primary_file.file_path):
+                    file_path = primary_file.file_path
     
     # Method 2: Use source_url if available
     if not file_path and dataset.source_url:
@@ -806,10 +844,48 @@ async def download_shared_dataset_authenticated(
         ).all()
         
         if dataset_files:
-            # For single file, use the first/primary file
-            primary_file = next((f for f in dataset_files if f.is_primary), dataset_files[0])
-            if primary_file.file_path and os.path.exists(primary_file.file_path):
-                file_path = primary_file.file_path
+            # For multi-file datasets, create a zip
+            if dataset.is_multi_file_dataset and len(dataset_files) > 1:
+                import tempfile
+                import zipfile
+                
+                # Create a temporary zip file
+                temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+                
+                try:
+                    with zipfile.ZipFile(temp_zip, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                        for dataset_file in dataset_files:
+                            if os.path.exists(dataset_file.file_path):
+                                zip_file.write(dataset_file.file_path, dataset_file.filename)
+                    
+                    temp_zip.close()
+                    
+                    # Return zip file
+                    download_name = f"{dataset.name}_all_files.zip"
+                    return FileResponse(
+                        path=temp_zip.name,
+                        filename=download_name,
+                        media_type='application/zip',
+                        headers={
+                            "Content-Disposition": f"attachment; filename=\"{download_name}\"",
+                            "Cache-Control": "no-cache, no-store, must-revalidate",
+                            "Pragma": "no-cache",
+                            "Expires": "0"
+                        }
+                    )
+                except Exception as e:
+                    # Clean up temp file on error
+                    if os.path.exists(temp_zip.name):
+                        os.unlink(temp_zip.name)
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"Failed to create zip file: {str(e)}"
+                    )
+            else:
+                # For single file, use the first/primary file
+                primary_file = next((f for f in dataset_files if f.is_primary), dataset_files[0])
+                if primary_file.file_path and os.path.exists(primary_file.file_path):
+                    file_path = primary_file.file_path
     
     # Method 2: Use source_url if available
     if not file_path and dataset.source_url:

@@ -644,9 +644,51 @@ async def delete_dataset(
     except Exception as e:
         logger.warning(f"ML models cleanup failed: {e}")
     
-    # Clean up uploaded file (if it exists)
-    file_deletion_result = None
-    if dataset.file_path or dataset.source_url:
+    # Clean up all associated files (for both single and multi-file datasets)
+    file_deletion_results = []
+    
+    # First, check if this dataset has files in the DatasetFile table
+    from app.models.dataset import DatasetFile
+    dataset_files = db.query(DatasetFile).filter(
+        DatasetFile.dataset_id == dataset_id,
+        DatasetFile.is_deleted == False
+    ).all()
+    
+    if dataset_files:
+        # Delete all files from DatasetFile records
+        logger.info(f"Found {len(dataset_files)} files in DatasetFile table for dataset {dataset_id}")
+        for dataset_file in dataset_files:
+            try:
+                if dataset_file.file_path and os.path.exists(dataset_file.file_path):
+                    os.remove(dataset_file.file_path)
+                    logger.info(f"Deleted file: {dataset_file.file_path}")
+                    file_deletion_results.append({
+                        "file": dataset_file.filename,
+                        "success": True,
+                        "method": "direct_file_deletion"
+                    })
+                else:
+                    logger.warning(f"File not found: {dataset_file.file_path}")
+                    file_deletion_results.append({
+                        "file": dataset_file.filename,
+                        "success": False,
+                        "error": "File not found on disk"
+                    })
+                
+                # Mark the DatasetFile record as deleted
+                dataset_file.is_deleted = True
+                dataset_file.deleted_at = datetime.utcnow()
+                
+            except Exception as e:
+                logger.error(f"Error deleting file {dataset_file.filename}: {e}")
+                file_deletion_results.append({
+                    "file": dataset_file.filename,
+                    "success": False,
+                    "error": str(e)
+                })
+    
+    # Also check legacy file_path and source_url fields for backward compatibility
+    elif dataset.file_path or dataset.source_url:
         try:
             file_path_to_delete = None
             
@@ -654,37 +696,63 @@ async def delete_dataset(
             if dataset.file_path and os.path.exists(dataset.file_path):
                 # Use absolute file path if it exists
                 file_path_to_delete = dataset.file_path
-                logger.info(f"Deleting file using absolute path: {file_path_to_delete}")
+                logger.info(f"Deleting legacy file using absolute path: {file_path_to_delete}")
                 os.remove(file_path_to_delete)
-                file_deletion_result = {"success": True, "method": "direct_file_deletion", "path": file_path_to_delete}
+                file_deletion_results.append({
+                    "file": os.path.basename(file_path_to_delete),
+                    "success": True,
+                    "method": "direct_file_deletion"
+                })
             elif dataset.source_url and not dataset.source_url.startswith('http'):
                 # Use relative path through storage service for uploaded files
                 file_path_to_delete = dataset.source_url
-                logger.info(f"Deleting file using storage service: {file_path_to_delete}")
+                logger.info(f"Deleting legacy file using storage service: {file_path_to_delete}")
                 success = await storage_service.delete_dataset_file(file_path_to_delete)
-                file_deletion_result = {"success": success, "method": "storage_service", "path": file_path_to_delete}
+                file_deletion_results.append({
+                    "file": file_path_to_delete,
+                    "success": success,
+                    "method": "storage_service"
+                })
             else:
                 logger.info(f"Dataset {dataset_id} has no local file to delete (connector-based or external URL)")
-                file_deletion_result = {"success": True, "method": "no_file", "message": "No local file to delete"}
-            
-            if file_deletion_result and file_deletion_result.get("success"):
-                logger.info(f"Successfully deleted file for dataset {dataset_id}: {file_deletion_result}")
-            else:
-                logger.warning(f"Failed to delete file for dataset {dataset_id}: {file_deletion_result}")
+                file_deletion_results.append({
+                    "message": "No local file to delete",
+                    "success": True,
+                    "method": "no_file"
+                })
                 
         except Exception as e:
-            logger.error(f"Error deleting file for dataset {dataset_id}: {e}")
-            file_deletion_result = {"success": False, "error": str(e)}
+            logger.error(f"Error deleting legacy file for dataset {dataset_id}: {e}")
+            file_deletion_results.append({
+                "file": "legacy_file",
+                "success": False,
+                "error": str(e)
+            })
     else:
-        logger.info(f"Dataset {dataset_id} has no file to delete")
-        file_deletion_result = {"success": True, "method": "no_file", "message": "No file to delete"}
+        logger.info(f"Dataset {dataset_id} has no files to delete")
+        file_deletion_results.append({
+            "message": "No files to delete",
+            "success": True,
+            "method": "no_file"
+        })
+    
+    # Summarize file deletion results
+    successful_deletions = sum(1 for r in file_deletion_results if r.get("success"))
+    failed_deletions = len(file_deletion_results) - successful_deletions
+    
+    file_deletion_result = {
+        "total_files": len(file_deletion_results),
+        "successful": successful_deletions,
+        "failed": failed_deletions,
+        "details": file_deletion_results
+    }
     
     if force_delete and current_user.is_superuser:
         # Hard delete (only for superusers) - need to clean up related records first
         logger.info(f"Performing hard delete of dataset {dataset_id}")
         
         # Delete related records that have NOT NULL foreign keys
-        from app.models.dataset import DatasetAccessLog, DatasetDownload, DatasetModel, DatasetChatSession, ChatMessage, DatasetShareAccess
+        from app.models.dataset import DatasetAccessLog, DatasetDownload, DatasetModel, DatasetChatSession, ChatMessage, DatasetShareAccess, DatasetFile
         
         # Delete chat messages first (they reference chat sessions)
         chat_sessions = db.query(DatasetChatSession).filter(DatasetChatSession.dataset_id == dataset_id).all()
@@ -705,6 +773,9 @@ async def delete_dataset(
         
         # Delete share accesses
         db.query(DatasetShareAccess).filter(DatasetShareAccess.dataset_id == dataset_id).delete()
+        
+        # Delete DatasetFile records (for multi-file datasets)
+        db.query(DatasetFile).filter(DatasetFile.dataset_id == dataset_id).delete()
         
         # Now delete the dataset itself
         db.delete(dataset)
@@ -2589,4 +2660,91 @@ async def reupload_dataset_file(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to reupload file: {str(e)}"
+        )
+
+@router.get("/{dataset_id}/visualize")
+async def visualize_dataset(
+    dataset_id: int,
+    visualization_type: Optional[str] = None,
+    max_visualizations: int = 4,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Generate visualizations for a dataset using LIDA."""
+    try:
+        # Get dataset
+        dataset = db.query(Dataset).filter(
+            Dataset.id == dataset_id,
+            Dataset.is_deleted == False
+        ).first()
+        
+        if not dataset:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Dataset not found"
+            )
+        
+        # Check permissions
+        data_service = DataSharingService(db)
+        if not data_service.can_access_dataset(current_user, dataset):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to visualize this dataset"
+            )
+        
+        # Load dataset data
+        dataset_df = mindsdb_service._load_dataset_for_visualization(dataset, db)
+        
+        if dataset_df is None or dataset_df.empty:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unable to load dataset data for visualization"
+            )
+        
+        # Get visualization service
+        from app.services.data_visualization import get_visualization_service
+        from app.core.app_config import get_app_config
+        
+        app_config = get_app_config()
+        api_key = app_config.integrations.GOOGLE_API_KEY
+        viz_service = get_visualization_service(api_key)
+        
+        # Analyze dataset
+        data_analysis = viz_service.analyze_dataset(dataset_df, dataset.name)
+        
+        # Generate visualizations
+        if visualization_type:
+            query = f"Generate {visualization_type} visualizations for this dataset"
+        else:
+            query = "Generate useful visualizations for this dataset"
+        
+        visualizations = viz_service.generate_visualizations_with_lida(
+            dataset_df,
+            query=query,
+            max_visualizations=max_visualizations
+        )
+        
+        # Log access
+        data_service.log_access(
+            user=current_user,
+            dataset=dataset,
+            access_type="visualization"
+        )
+        
+        return {
+            "dataset_id": dataset_id,
+            "dataset_name": dataset.name,
+            "data_analysis": data_analysis,
+            "visualizations": visualizations,
+            "visualization_count": len(visualizations),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to generate visualizations for dataset {dataset_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate visualizations: {str(e)}"
         )
