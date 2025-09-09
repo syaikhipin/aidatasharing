@@ -311,7 +311,7 @@ async def get_access_requests(
             requester_id=req.requester_id,
             requester_name=req.requester.full_name or req.requester.email.split('@')[0],
             requester_email=req.requester.email,
-            requester_department="Current Department",  # TODO: Get from user model
+            requester_department=req.requester.role or "Not specified",
             dataset_id=req.dataset_id,
             dataset_name=req.dataset.name,
             dataset_owner=req.dataset.owner.full_name or req.dataset.owner.email.split('@')[0],
