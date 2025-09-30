@@ -532,6 +532,21 @@ export const datasetsAPI = {
     const response = await apiClient.get(`/api/datasets/${datasetId}/stats`, { params });
     return response.data;
   },
+
+  getShareTokens: async (datasetId: number) => {
+    const response = await apiClient.get(`/api/datasets/${datasetId}/share-tokens`);
+    return response.data;
+  },
+
+  generateShareToken: async (datasetId: number) => {
+    const response = await apiClient.post(`/api/datasets/${datasetId}/generate-share-token`);
+    return response.data;
+  },
+
+  revokeShareToken: async (datasetId: number, tokenId: number | string) => {
+    const response = await apiClient.delete(`/api/datasets/${datasetId}/share-tokens/${tokenId}`);
+    return response.data;
+  },
 };
 
 // Data Sharing API
@@ -548,6 +563,13 @@ export const dataSharingAPI = {
   getSharedDataset: async (shareToken: string, password?: string) => {
     const params = password ? { password } : {};
     const response = await apiClient.get(`/api/data-sharing/shared/${shareToken}`, { params });
+    return response.data;
+  },
+
+  getSharedDatasetData: async (shareToken: string, page: number = 1, limit: number = 50) => {
+    const response = await apiClient.get(`/api/data-sharing/shared/${shareToken}/data`, {
+      params: { page, limit }
+    });
     return response.data;
   },
 

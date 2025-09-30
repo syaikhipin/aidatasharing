@@ -56,8 +56,8 @@ function DatasetDetailContent() {
   
   // Initialize unified API client
   const unifiedClient = createApiClient({
-    baseUrl: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
-    getAuthToken: () => localStorage.getItem('access_token')
+    baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
+    token: localStorage.getItem('access_token') || undefined
   });
   
   const [dataset, setDataset] = useState<any>(null);
@@ -231,7 +231,7 @@ function DatasetDetailContent() {
       setEnhancedPreview({
         type: 'error',
         message: 'Preview could not be loaded',
-        error: error.response?.data?.detail || error.message
+        error: (error as any).response?.data?.detail || (error as Error).message
       });
     } finally {
       setIsLoadingPreview(false);

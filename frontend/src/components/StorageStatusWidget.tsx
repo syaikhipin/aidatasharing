@@ -174,7 +174,7 @@ export default function StorageStatusWidget({ showDetails = true, className = ""
           <div className="flex items-center justify-between text-xs text-gray-500">
             <span>Backend: {storageStatus.backend_info.backend_type}</span>
             {storageStatus.backend_info.supports_presigned_urls && (
-              <CheckCircle className="h-3 w-3 text-green-600" title="Supports presigned URLs" />
+              <CheckCircle className="h-3 w-3 text-green-600" />
             )}
           </div>
         </div>

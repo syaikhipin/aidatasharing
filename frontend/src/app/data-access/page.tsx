@@ -33,6 +33,8 @@ interface AccessRequest {
   status: string;
   created_at: string;
   purpose?: string;
+  requested_level?: string;
+  justification?: string;
 }
 
 export default function DataAccessPage() {
@@ -397,7 +399,7 @@ function DataAccessContent() {
                             Justification: {request.justification}
                           </p>
                           <p className="text-xs text-gray-500 mt-2">
-                            Requested on {new Date(request.request_date).toLocaleDateString()}
+                            Requested on {new Date(request.created_at).toLocaleDateString()}
                           </p>
                         </div>
                         <span className={`px-2 py-1 text-xs rounded-full ${

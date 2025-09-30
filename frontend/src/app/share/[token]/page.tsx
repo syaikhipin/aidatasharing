@@ -50,7 +50,7 @@ export default function SharedDatasetPage() {
     try {
       setIsLoading(true);
       setError(null);
-      const response = await datasetsAPI.getSharedDataset(token);
+      const response = await dataSharingAPI.getSharedDataset(token);
       setDataset(response);
       
       // Also fetch the data
@@ -66,7 +66,7 @@ export default function SharedDatasetPage() {
   const fetchSharedData = async (page: number) => {
     try {
       setIsLoadingData(true);
-      const response = await datasetsAPI.getSharedDatasetData(token, page, itemsPerPage);
+      const response = await dataSharingAPI.getSharedDatasetData(token, page, itemsPerPage);
       setData(response.data || []);
       setTotalPages(Math.ceil((response.total || 0) / itemsPerPage));
       setCurrentPage(page);

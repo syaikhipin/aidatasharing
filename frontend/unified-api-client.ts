@@ -45,11 +45,7 @@ export class UnifiedApiClient {
     // Response interceptor
     this.client.interceptors.response.use(
       (response) => {
-        return {
-          data: response.data,
-          success: true,
-          status: response.status
-        }
+        return response
       },
       (error) => {
         const errorResponse = {
