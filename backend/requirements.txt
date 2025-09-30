@@ -33,9 +33,7 @@ odfpy==1.4.1
 # Database connectors
 pymysql==1.1.1  # Updated from 1.1.0 to fix CVE-2024-36039 SQL injection
 boto3==1.38.44
-snowflake-connector-python==3.12.3  # Updated from 3.5.0 to fix multiple CVEs
 google-cloud-bigquery==3.17.2
-redshift-connector==2.1.3  # Updated from 2.0.918 to fix OAuth2 issue
 clickhouse-driver==0.2.9
 
 # AI and ML dependencies
