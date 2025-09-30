@@ -177,8 +177,8 @@ class Settings(BaseSettings):
         )
     
     # Admin user
-    FIRST_SUPERUSER: str
-    FIRST_SUPERUSER_PASSWORD: str
+    FIRST_SUPERUSER: Optional[str] = None
+    FIRST_SUPERUSER_PASSWORD: Optional[str] = None
     
     class Config:
         env_file = ".env"  # Use local .env file in backend directory

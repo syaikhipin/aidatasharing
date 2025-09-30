@@ -4,9 +4,11 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { datasetsAPI } from '@/lib/api';
+import { datasetsAPI, agentsAPI } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
 import { DataVisualization } from '@/components/DataVisualization';
 import Link from 'next/link';
 
@@ -30,9 +32,14 @@ function DatasetChatContent() {
   const [chatMessage, setChatMessage] = useState('');
   const [chatHistory, setChatHistory] = useState<any[]>([]);
   const [isChatting, setIsChatting] = useState(false);
+  const [availableAgents, setAvailableAgents] = useState<any[]>([]);
+  const [selectedAgent, setSelectedAgent] = useState<string>('auto');
+  const [useAgents, setUseAgents] = useState(true);
+  const [agentsLoading, setAgentsLoading] = useState(false);
 
   useEffect(() => {
     fetchDataset();
+    fetchAvailableAgents();
   }, [datasetId]);
 
   const fetchDataset = async () => {
@@ -46,6 +53,20 @@ function DatasetChatContent() {
       setError(error.response?.data?.detail || 'Failed to fetch dataset');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const fetchAvailableAgents = async () => {
+    try {
+      setAgentsLoading(true);
+      const agents = await agentsAPI.getAvailableAgents();
+      setAvailableAgents(agents);
+    } catch (error: any) {
+      console.error('Failed to fetch available agents:', error);
+      // Don't show error for agents, just disable agent features
+      setUseAgents(false);
+    } finally {
+      setAgentsLoading(false);
     }
   };
 
@@ -66,8 +87,12 @@ function DatasetChatContent() {
     
     try {
       setIsChatting(true);
-      const response = await datasetsAPI.chatWithDataset(datasetId, userMessage);
-      
+
+      // Determine agent to use
+      const agentName = selectedAgent === 'auto' ? undefined : selectedAgent;
+
+      const response = await datasetsAPI.chatWithDataset(datasetId, userMessage, agentName, useAgents);
+
       // Add AI response to history
       const aiMessage = {
         id: Date.now() + 1,
@@ -76,9 +101,16 @@ function DatasetChatContent() {
         timestamp: new Date().toISOString(),
         model: response.model,
         tokens_used: response.tokens_used,
-        visualizations: response.visualizations,
+        visualizations: response.visualizations || [], // New combined visualizations array
+        plotly_figures: response.plotly_figures || [], // Plotly-specific figures
+        matplotlib_figures: response.matplotlib_figures || [], // Matplotlib-specific figures
         dataAnalysis: response.data_analysis,
-        hasVisualizations: response.has_visualizations || false,
+        hasVisualizations: response.has_visualizations || (response.visualizations && response.visualizations.length > 0) || false,
+        agent_used: response.agent_used,
+        agent_system: response.agent_system,
+        planner: response.planner,
+        code: response.code,
+        execution_output: response.execution_output,
         error: false
       };
       setChatHistory(prev => [...prev, aiMessage]);
@@ -234,7 +266,50 @@ function DatasetChatContent() {
                               ? 'bg-red-50 border border-red-200 text-red-700'
                               : 'bg-gray-100 text-gray-900'
                           }`}>
+                            {/* Agent information */}
+                            {message.agent_system && message.agent_used && (
+                              <div className="mb-2 p-2 bg-blue-50 border border-blue-200 rounded text-xs">
+                                <div className="flex items-center space-x-2">
+                                  <span className="text-blue-600 font-medium">
+                                    🤖 Agent: {availableAgents.find(a => a.name === message.agent_used)?.display_name || message.agent_used}
+                                  </span>
+                                  {message.planner && (
+                                    <Badge variant="outline" className="text-xs">
+                                      Auto-routed by Planner
+                                    </Badge>
+                                  )}
+                                </div>
+                                {message.planner?.reasoning && (
+                                  <p className="text-blue-600 mt-1">{message.planner.reasoning}</p>
+                                )}
+                              </div>
+                            )}
+
                             <p className="text-sm whitespace-pre-wrap">{message.message}</p>
+
+                            {/* Show generated code if available */}
+                            {message.code && (
+                              <div className="mt-3 p-3 bg-gray-800 text-green-400 rounded text-xs font-mono overflow-x-auto">
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="text-gray-300">Generated Code:</span>
+                                  <Badge variant="secondary" className="text-xs">
+                                    {message.agent_used || 'AI'}
+                                  </Badge>
+                                </div>
+                                <pre className="whitespace-pre-wrap">{message.code}</pre>
+                              </div>
+                            )}
+
+                            {/* Show execution output if available */}
+                            {message.execution_output && (
+                              <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded text-xs">
+                                <div className="flex items-center mb-2">
+                                  <span className="text-blue-700 font-medium">📄 Execution Output:</span>
+                                </div>
+                                <pre className="whitespace-pre-wrap text-blue-600">{message.execution_output}</pre>
+                              </div>
+                            )}
+
                             <p className="text-xs mt-1 opacity-75">
                               {new Date(message.timestamp).toLocaleTimeString()}
                               {message.model && !message.error && (
@@ -242,6 +317,9 @@ function DatasetChatContent() {
                               )}
                               {message.tokens_used && !message.error && (
                                 <span className="ml-1">• {message.tokens_used} tokens</span>
+                              )}
+                              {message.agent_system && (
+                                <span className="ml-1 text-blue-600">• Agent System</span>
                               )}
                             </p>
                           </div>
@@ -273,6 +351,54 @@ function DatasetChatContent() {
               </div>
             )}
 
+            {/* Agent Selection */}
+            {useAgents && availableAgents.length > 0 && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-medium text-blue-800">🤖 AI Agent Selection</h4>
+                  <Badge variant="secondary" className="text-xs">
+                    {useAgents ? 'Agents Enabled' : 'Standard Chat'}
+                  </Badge>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-blue-700 mb-1">
+                      Choose Agent
+                    </label>
+                    <Select value={selectedAgent} onValueChange={setSelectedAgent}>
+                      <SelectTrigger className="bg-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="auto">
+                          🎯 Auto-Route (Planner chooses best agent)
+                        </SelectItem>
+                        {availableAgents.map((agent) => (
+                          <SelectItem key={agent.name} value={agent.name}>
+                            {agent.icon} {agent.display_name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-blue-700 mb-1">
+                      Agent Description
+                    </label>
+                    <div className="text-xs text-blue-600 bg-white p-2 rounded border min-h-[2.5rem] flex items-center">
+                      {selectedAgent === 'auto' ? (
+                        'Let the AI planner automatically choose the most suitable agent for your task.'
+                      ) : (
+                        availableAgents.find(a => a.name === selectedAgent)?.description || 'Select an agent to see description'
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Chat Input */}
             <div className="space-y-4">
               <div>
@@ -284,7 +410,7 @@ function DatasetChatContent() {
                     type="text"
                     value={chatMessage}
                     onChange={(e) => setChatMessage(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleChat()}
+                    onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleChat()}
                     placeholder="What insights can you provide about this dataset?"
                     className="flex-1 border border-gray-300 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     disabled={isChatting}
@@ -313,14 +439,21 @@ function DatasetChatContent() {
               {/* Suggestions */}
               {chatHistory.length === 0 && (
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <h4 className="text-sm font-medium text-blue-800 mb-2">💡 Try asking questions like:</h4>
+                  <h4 className="text-sm font-medium text-blue-800 mb-2">
+                    💡 Try asking questions like:
+                    {useAgents && availableAgents.length > 0 && (
+                      <span className="ml-2 text-xs font-normal">(Agents will automatically assist)</span>
+                    )}
+                  </h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                     {[
-                      "Show me visualizations of this dataset",
-                      "Analyze the data and create charts",
+                      "@preprocessing_agent Clean and prepare this dataset",
+                      "@data_viz_agent Create visualizations of this dataset",
+                      "@statistical_analytics_agent Perform statistical analysis",
+                      "@ml_agent Train a machine learning model",
                       "What are the key patterns in the data?",
-                      "Show me the distribution of values",
-                      "Create a correlation analysis",
+                      "Show me the data quality and missing values",
+                      "Create a comprehensive data report",
                       "What insights can you provide with visualizations?"
                     ].map((suggestion, index) => (
                       <button
@@ -328,7 +461,14 @@ function DatasetChatContent() {
                         onClick={() => setChatMessage(suggestion)}
                         className="text-left text-sm text-blue-700 hover:text-blue-900 p-2 rounded hover:bg-blue-100 transition-colors"
                       >
-                        "{suggestion}"
+                        <span className="block">
+                          {suggestion.startsWith('@') && (
+                            <Badge variant="outline" className="mr-1 text-xs">
+                              Agent
+                            </Badge>
+                          )}
+                          "{suggestion}"
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -346,8 +486,18 @@ function DatasetChatContent() {
                       <h4 className="text-sm font-medium text-gray-800">Chat Information</h4>
                       <div className="mt-1 text-sm text-gray-600">
                         <p>
-                          This chat feature uses MindsDB to analyze your dataset and provide insights. 
-                          Make sure MindsDB is running and properly configured with Google Gemini API for the best experience.
+                          {useAgents && availableAgents.length > 0 ? (
+                            <>
+                              This chat feature uses AI agents to analyze your dataset and provide specialized insights.
+                              Agents can help with data preprocessing, statistical analysis, machine learning, and visualization.
+                              You can specify an agent with "@agent_name" or let the planner auto-route your request.
+                            </>
+                          ) : (
+                            <>
+                              This chat feature uses MindsDB to analyze your dataset and provide insights.
+                              Make sure MindsDB is running and properly configured with Google Gemini API for the best experience.
+                            </>
+                          )}
                         </p>
                       </div>
                     </div>

@@ -472,39 +472,77 @@ class StorageService:
         return self.backend.get_file_url(file_path, expires_in)
     
     def generate_download_token(self, dataset_id: int, user_id: Optional[int] = None, expires_in_hours: int = 24) -> str:
-        """Generate a secure download token for a dataset"""
-        random_part = secrets.token_urlsafe(16)
-        timestamp = int(datetime.now().timestamp())
+        """Generate a simple download token for a dataset"""
+        # Simple token generation without expiry
+        random_part = secrets.token_urlsafe(32)  # Longer random part for security
         
-        token_parts = [random_part, str(dataset_id), str(timestamp)]
-        if user_id:
-            token_parts.append(str(user_id))
+        # Create simple payload
+        payload_parts = [
+            str(dataset_id),
+            str(user_id) if user_id else "anon"
+        ]
+        payload = "-".join(payload_parts)
         
-        token_base = "_".join(token_parts)
-        token_hash = hashlib.sha256(token_base.encode()).hexdigest()[:32]
+        # Create hash without secret key dependency
+        token_data = f"{payload}-{random_part}"
+        token_hash = hashlib.sha256(token_data.encode()).hexdigest()[:16]
         
-        return f"{random_part}_{token_hash}"
+        # Return simple format: payload.random.hash
+        return f"{payload}.{random_part}.{token_hash}"
     
     def validate_download_token(self, token: str) -> bool:
-        """Validate download token format"""
+        """Validate simple download token format"""
         if not token or not isinstance(token, str):
             return False
         
-        parts = token.split("_")
-        if len(parts) != 2:
+        try:
+            # Split token: payload.random.hash
+            parts = token.split(".")
+            if len(parts) != 3:
+                return False
+                
+            payload, random_part, provided_hash = parts
+            
+            # Validate payload format (dataset_id-user_id or dataset_id-anon)
+            if "-" not in payload:
+                return False
+                
+            payload_parts = payload.split("-")
+            if len(payload_parts) != 2:
+                return False
+                
+            dataset_id_str, user_id_str = payload_parts
+            
+            # Validate dataset_id is numeric
+            try:
+                int(dataset_id_str)
+            except ValueError:
+                return False
+            
+            # Validate user_id is numeric or "anon"
+            if user_id_str != "anon":
+                try:
+                    int(user_id_str)
+                except ValueError:
+                    return False
+            
+            # Validate random part length (should be ~43 chars for urlsafe_b64encode of 32 bytes)
+            if len(random_part) < 40:
+                return False
+            
+            # Validate hash format
+            if len(provided_hash) != 16:
+                return False
+            
+            # Verify hash
+            token_data = f"{payload}-{random_part}"
+            expected_hash = hashlib.sha256(token_data.encode()).hexdigest()[:16]
+            
+            return provided_hash == expected_hash
+            
+        except Exception as e:
+            logger.error(f"Token validation error: {str(e)}")
             return False
-        
-        # First part should be exactly 22 characters (URL-safe base64 from 16 bytes)
-        # Second part should be exactly 32 characters (SHA256 hash truncated)
-        if len(parts[0]) != 22 or len(parts[1]) != 32:
-            return False
-        
-        # Check if parts contain only valid characters
-        import re
-        if not re.match(r'^[A-Za-z0-9_-]+$', parts[0]) or not re.match(r'^[a-f0-9]+$', parts[1]):
-            return False
-        
-        return True
     
     async def cleanup_orphaned_files(self, db_session) -> Dict[str, Any]:
         """Clean up files that no longer have corresponding dataset records"""

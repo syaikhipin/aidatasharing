@@ -236,8 +236,47 @@ async def validate_shared_resources(
                     
                     # Check file exists for uploaded datasets
                     file_valid = True
-                    if dataset.file_path and not dataset.connector_id:
-                        file_valid = os.path.exists(dataset.file_path)
+                    if not dataset.connector_id:  # Only for non-connector datasets
+                        # Check dataset_files table first (new upload system)
+                        from app.models.dataset import DatasetFile
+                        dataset_files = db.query(DatasetFile).filter(
+                            DatasetFile.dataset_id == dataset.id,
+                            DatasetFile.is_deleted == False
+                        ).all()
+
+                        if dataset_files:
+                            # Check if files exist using storage service
+                            from app.services.storage import storage_service
+                            files_exist = False
+                            for dataset_file in dataset_files:
+                                if dataset_file.file_path:
+                                    try:
+                                        file_path = dataset_file.relative_path or dataset_file.file_path
+                                        content = await storage_service.retrieve_dataset_file(file_path)
+                                        if content is not None:
+                                            files_exist = True
+                                            break
+                                    except Exception:
+                                        continue
+                            file_valid = files_exist
+                        elif dataset.file_path:
+                            # Legacy file_path validation using storage service
+                            from app.services.storage import storage_service
+                            try:
+                                content = await storage_service.retrieve_dataset_file(dataset.file_path)
+                                file_valid = content is not None
+                            except Exception:
+                                file_valid = False
+                        elif dataset.source_url and not dataset.source_url.startswith(('http://', 'https://')):
+                            # Check source_url using storage service
+                            from app.services.storage import storage_service
+                            try:
+                                content = await storage_service.retrieve_dataset_file(dataset.source_url)
+                                file_valid = content is not None
+                            except Exception:
+                                file_valid = False
+                        else:
+                            file_valid = False
                     
                     validation_results["share_tokens"][token] = {
                         "valid": not is_expired and connector_valid and file_valid,
@@ -323,35 +362,63 @@ async def get_my_shared_datasets(
             ).first()
             connector_valid = connector is not None
         
-        # Check file validity - but be more lenient for different dataset types
+        # Check file validity - proper logic for different dataset types
         file_valid = True
-        if dataset.file_path and not dataset.connector_id:
-            # Use proper storage path resolution
-            from app.services.storage import StorageService
-            try:
-                storage_service = StorageService()
-                # Get the actual storage base path from storage service
-                if hasattr(storage_service, 'backend') and hasattr(storage_service.backend, 'storage_dir'):
-                    storage_base = storage_service.backend.storage_dir
-                else:
-                    from app.core.config import settings
-                    storage_base = os.path.abspath(settings.STORAGE_BASE_PATH)
-                
-                full_path = os.path.join(storage_base, dataset.file_path)
-                file_valid = os.path.exists(full_path)
-                logger.debug(f"File validation for dataset {dataset.id}: {full_path} exists: {file_valid}")
-            except Exception as e:
-                # Fallback to direct path check if storage service fails
-                logger.warning(f"Storage service validation failed for dataset {dataset.id}: {e}")
-                file_valid = os.path.exists(dataset.file_path)
-        elif not dataset.file_path and not dataset.connector_id:
-            # For datasets without file_path or connector_id, check if it has dataset_files
+
+        # For uploaded files, check both file_path and dataset_files table
+        if not dataset.connector_id:  # Only for non-connector datasets
+            # First check if dataset has files in the dataset_files table (new upload system)
             from app.models.dataset import DatasetFile
-            has_dataset_files = db.query(DatasetFile).filter(
+            dataset_files = db.query(DatasetFile).filter(
                 DatasetFile.dataset_id == dataset.id,
                 DatasetFile.is_deleted == False
-            ).first() is not None
-            file_valid = has_dataset_files
+            ).all()
+
+            if dataset_files:
+                # For datasets with entries in dataset_files table, check if files exist using storage service
+                from app.services.storage import storage_service
+                files_exist = False
+                for dataset_file in dataset_files:
+                    if dataset_file.file_path:
+                        try:
+                            # Use storage service to check file existence (works for both S3 and local)
+                            file_path = dataset_file.relative_path or dataset_file.file_path
+                            content = await storage_service.retrieve_dataset_file(file_path)
+                            if content is not None:
+                                files_exist = True
+                                break
+                        except Exception as e:
+                            logger.debug(f"File check failed for {dataset_file.file_path}: {e}")
+                            continue
+                file_valid = files_exist
+                logger.debug(f"Dataset {dataset.id} file validation via dataset_files: {file_valid}")
+            elif dataset.file_path:
+                # For legacy datasets with file_path, use storage service
+                from app.services.storage import storage_service
+                try:
+                    content = await storage_service.retrieve_dataset_file(dataset.file_path)
+                    file_valid = content is not None
+                    logger.debug(f"Dataset {dataset.id} legacy file validation via storage service: {file_valid}")
+                except Exception as e:
+                    logger.warning(f"Storage service validation failed for dataset {dataset.id}: {e}")
+                    file_valid = False
+            elif dataset.source_url and not dataset.source_url.startswith(('http://', 'https://')):
+                # For source_url based datasets (non-HTTP URLs are file paths)
+                from app.services.storage import storage_service
+                try:
+                    content = await storage_service.retrieve_dataset_file(dataset.source_url)
+                    file_valid = content is not None
+                    logger.debug(f"Dataset {dataset.id} source_url file validation via storage service: {file_valid}")
+                except Exception as e:
+                    logger.warning(f"Storage service validation failed for source_url {dataset.source_url}: {e}")
+                    file_valid = False
+            else:
+                # No file references found
+                file_valid = False
+                logger.debug(f"Dataset {dataset.id} has no file references")
+        else:
+            # For connector-based datasets, file validation is not applicable
+            file_valid = True
         
         is_valid = not is_expired and connector_valid and file_valid
         

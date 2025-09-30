@@ -1608,32 +1608,89 @@ async def chat_with_dataset(
     """Chat with the AI model specifically trained for this dataset."""
     # Check if dataset exists and user has access
     data_service = DataSharingService(db)
-    
+
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
     if not dataset:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Dataset not found"
         )
-    
+
     # Check access permissions
     if not data_service.can_access_dataset(current_user, dataset):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied to this dataset"
         )
-    
-    # Extract message
+
+    # Extract message and agent preference
     user_message = message.get("message", "")
-    
+    agent_name = message.get("agent_name")  # Optional agent specification like '@preprocessing_agent'
+    use_agents = message.get("use_agents", True)  # Default to using agents
+
     if not user_message:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Message is required"
         )
-    
+
     try:
-        # Use dataset-specific chat with analytics
+        # Try agent-based chat first if enabled
+        if use_agents:
+            try:
+                from app.services.agent_service import create_agent_service
+                agent_service = create_agent_service(db)
+
+                agent_response = agent_service.chat_with_dataset(
+                    dataset_id=dataset_id,
+                    message=user_message,
+                    agent_name=agent_name,
+                    user_id=current_user.id
+                )
+
+                if agent_response.get("success"):
+                    # Log the interaction
+                    data_service.log_access(
+                        user=current_user,
+                        dataset=dataset,
+                        access_type="agent_chat"
+                    )
+
+                    # Check if we have visualizations
+                    has_viz = bool(
+                        agent_response.get("plotly_figures") or
+                        agent_response.get("matplotlib_figures") or
+                        agent_response.get("visualizations")
+                    )
+
+                    return {
+                        "dataset_id": dataset_id,
+                        "dataset_name": dataset.name,
+                        "question": user_message,
+                        "model_type": "agent",
+                        "agent_used": agent_response.get("agent"),
+                        "answer": agent_response.get("response"),
+                        "response": agent_response.get("response"),
+                        "code": agent_response.get("code"),
+                        "planner": agent_response.get("planner"),
+                        "timestamp": agent_response.get("timestamp"),
+                        "has_visualizations": has_viz,
+                        "agent_system": True,
+                        # Include visualization data
+                        "plotly_figures": agent_response.get("plotly_figures", []),
+                        "matplotlib_figures": agent_response.get("matplotlib_figures", []),
+                        "visualizations": agent_response.get("visualizations", []),
+                        "execution_output": agent_response.get("execution_output")
+                    }
+                else:
+                    logger.warning(f"Agent chat failed, falling back to MindsDB: {agent_response.get('error')}")
+
+            except ImportError:
+                logger.warning("Agent service not available, falling back to MindsDB")
+            except Exception as e:
+                logger.warning(f"Agent chat error, falling back to MindsDB: {str(e)}")
+
+        # Fallback to original MindsDB chat
         response = mindsdb_service.chat_with_dataset(
             dataset_id=str(dataset_id),
             message=user_message,
@@ -1641,22 +1698,23 @@ async def chat_with_dataset(
             session_id=message.get("session_id"),
             organization_id=current_user.organization_id
         )
-        
+
         # Log the interaction
         data_service.log_access(
             user=current_user,
             dataset=dataset,
             access_type="ai_chat"
         )
-        
+
         return {
             "dataset_id": dataset_id,
             "dataset_name": dataset.name,
             "question": user_message,
             "model_type": "chat",
+            "agent_system": False,
             **response
         }
-        
+
     except Exception as e:
         logger.error(f"Dataset chat failed for dataset {dataset_id}: {e}")
         raise HTTPException(

@@ -10,18 +10,25 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { BarChart3, LineChart, PieChart, ScatterChart, Activity, AlertCircle } from 'lucide-react';
 
 // Dynamically import Plotly to avoid SSR issues
-const Plot = dynamic(() => import('react-plotly.js'), { 
+const Plot = dynamic(() => import('react-plotly.js'), {
   ssr: false,
   loading: () => <Skeleton className="w-full h-[400px]" />
-});
+}) as any;
 
 interface Visualization {
   type: string;
-  title: string;
-  description: string;
-  chart: any;
+  title?: string;
+  description?: string;
+  chart?: any;
+  data?: any; // For plotly data directly
+  layout?: any; // For plotly layout directly
+  config?: any; // For plotly config
+  image?: string; // For matplotlib base64 images
+  format?: string; // Image format
   insights?: string[];
   code?: string;
+  isImage?: boolean; // Processed flag for image-based visualizations
+  imageData?: string; // Processed image data URL
 }
 
 interface DataAnalysis {
@@ -82,16 +89,45 @@ export function DataVisualization({
   
   // Process Plotly charts
   const processedVisualizations = useMemo(() => {
-    return visualizations.map(viz => {
+    return visualizations.map((viz, index) => {
+      // Handle matplotlib images (base64 encoded)
+      if (viz.type === 'matplotlib' && viz.image) {
+        return {
+          ...viz,
+          isImage: true,
+          imageData: `data:image/${viz.format || 'png'};base64,${viz.image}`,
+          title: viz.title || `Matplotlib Chart ${index + 1}`,
+          description: viz.description || 'Generated with matplotlib'
+        };
+      }
+
+      // Handle plotly figures (direct data/layout)
+      if (viz.type === 'plotly' && viz.data) {
+        return {
+          ...viz,
+          chart: {
+            data: viz.data,
+            layout: viz.layout || {},
+          },
+          title: viz.title || viz.layout?.title?.text || `Plotly Chart ${index + 1}`,
+          description: viz.description || 'Generated with plotly'
+        };
+      }
+
+      // Handle legacy format
       if (viz.chart?.type === 'image') {
-        // Handle image-based visualizations
         return {
           ...viz,
           isImage: true,
           imageData: viz.chart.data
         };
       }
-      return viz;
+
+      return {
+        ...viz,
+        title: viz.title || `Chart ${index + 1}`,
+        description: viz.description || 'Data visualization'
+      };
     });
   }, [visualizations]);
 

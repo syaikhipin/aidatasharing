@@ -14,7 +14,7 @@ except ImportError:
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth, organizations, datasets, models, mindsdb, admin, analytics, data_access, data_sharing, data_sharing_files, file_handler, file_server, data_connectors, llm_configurations, environment, proxy_connectors, gateway, storage_management, unified_router, integrated_proxy
+from app.api import auth, organizations, datasets, models, mindsdb, admin, analytics, data_access, data_sharing, data_sharing_files, file_handler, file_server, data_connectors, llm_configurations, environment, proxy_connectors, gateway, storage_management, unified_router, integrated_proxy, agents
 from app.core.config import settings
 from app.middleware import SSLMiddleware, FlexibleSSLConfig
 from app.core.config_validator import validate_and_exit_on_failure
@@ -155,6 +155,14 @@ tags_metadata = [
         },
     },
     {
+        "name": "agents",
+        "description": "**DSPy-based AI agents**. Intelligent agents for data analysis, preprocessing, machine learning, and visualization using agentic workflows.",
+        "externalDocs": {
+            "description": "Agent System Documentation",
+            "url": "https://github.com/your-org/ai-share-platform/docs/agents",
+        },
+    },
+    {
         "name": "data-sharing",
         "description": "**Data sharing and AI chat**. Create shareable dataset links with AI chat capabilities powered by Gemini.",
         "externalDocs": {
@@ -291,6 +299,7 @@ app.include_router(organizations.router, prefix="/api/organizations", tags=["org
 app.include_router(datasets.router, prefix="/api/datasets", tags=["datasets"])
 app.include_router(models.router, prefix="/api/models", tags=["models"])
 app.include_router(mindsdb.router, prefix="/api/mindsdb", tags=["ai-models"])
+app.include_router(agents.router, prefix="/api", tags=["agents"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
 app.include_router(data_access.router, prefix="/api/data-access", tags=["data-access"])

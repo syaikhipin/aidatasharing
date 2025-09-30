@@ -168,7 +168,7 @@ async def get_environment_variables(
             "file_upload": ["MAX_FILE_SIZE_MB", "ALLOWED_FILE_TYPES", "UPLOAD_PATH", "MAX_DOCUMENT_SIZE_MB", "SUPPORTED_DOCUMENT_TYPES", "DOCUMENT_STORAGE_PATH", "MAX_IMAGE_SIZE_MB", "SUPPORTED_IMAGE_TYPES", "IMAGE_STORAGE_PATH", "ENABLE_IMAGE_PROCESSING", "IMAGE_THUMBNAIL_SIZE"],
             "storage": ["STORAGE_TYPE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "S3_BUCKET_NAME", "S3_COMPATIBLE_ENDPOINT", "S3_COMPATIBLE_ACCESS_KEY", "S3_COMPATIBLE_SECRET_KEY", "S3_COMPATIBLE_BUCKET_NAME", "S3_COMPATIBLE_REGION", "S3_COMPATIBLE_USE_SSL", "S3_COMPATIBLE_ADDRESSING_STYLE"],
             "connectors": ["CONNECTOR_TIMEOUT", "MAX_CONNECTORS_PER_ORG", "ENABLE_S3_CONNECTOR", "ENABLE_DATABASE_CONNECTORS"],
-            "admin": ["FIRST_SUPERUSER", "FIRST_SUPERUSER_PASSWORD", "NODE_ENV"]
+            "admin": ["FIRST_SUPERUSER", "NODE_ENV"]
         }
         
         # Categorize variables
@@ -178,7 +178,7 @@ async def get_environment_variables(
                 if key in keys:
                     categorized_vars[category][key] = {
                         "value": value,
-                        "is_sensitive": key in ["SECRET_KEY", "GOOGLE_API_KEY", "MINDSDB_PASSWORD", "AWS_SECRET_ACCESS_KEY", "S3_COMPATIBLE_SECRET_KEY", "FIRST_SUPERUSER_PASSWORD"],
+                        "is_sensitive": key in ["SECRET_KEY", "GOOGLE_API_KEY", "MINDSDB_PASSWORD", "AWS_SECRET_ACCESS_KEY", "S3_COMPATIBLE_SECRET_KEY"],
                         "description": get_env_var_description(key)
                     }
                     categorized = True
@@ -341,7 +341,7 @@ async def get_environment_variable(
         if value is None:
             raise HTTPException(status_code=404, detail=f"Environment variable '{var_name}' not found")
         
-        is_sensitive = var_name in ["SECRET_KEY", "GOOGLE_API_KEY", "MINDSDB_PASSWORD", "AWS_SECRET_ACCESS_KEY", "FIRST_SUPERUSER_PASSWORD"]
+        is_sensitive = var_name in ["SECRET_KEY", "GOOGLE_API_KEY", "MINDSDB_PASSWORD", "AWS_SECRET_ACCESS_KEY"]
         
         return {
             "name": var_name,
@@ -462,7 +462,6 @@ def get_env_var_description(var_name: str) -> str:
         "ENABLE_S3_CONNECTOR": "Enable/disable S3 connector",
         "ENABLE_DATABASE_CONNECTORS": "Enable/disable database connectors",
         "FIRST_SUPERUSER": "First superuser email",
-        "FIRST_SUPERUSER_PASSWORD": "First superuser password",
         "NODE_ENV": "Node.js environment (development/production)"
     }
     

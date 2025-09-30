@@ -24,6 +24,7 @@ class MigrationRequest(BaseModel):
 
 class StorageStatusResponse(BaseModel):
     current_backend: str
+    storage_strategy: str
     local_backend_available: bool
     s3_backend_available: bool
     backend_info: dict
@@ -45,10 +46,25 @@ async def get_storage_status(
         # Get migration service status
         migration_status = migration_service.get_storage_status()
         
+        # Determine storage strategy based on configuration
+        storage_type = backend_info.get('storage_type', 'unknown')
+        local_available = migration_status['local_backend_available']
+        s3_available = migration_status['s3_backend_available']
+        
+        if storage_type == 'local':
+            storage_strategy = 'local_primary'
+        elif storage_type == 's3':
+            storage_strategy = 's3_primary'
+        elif local_available and s3_available:
+            storage_strategy = 'hybrid'
+        else:
+            storage_strategy = 'local_primary'  # default fallback
+        
         return StorageStatusResponse(
-            current_backend=backend_info.get('storage_type', 'unknown'),
-            local_backend_available=migration_status['local_backend_available'],
-            s3_backend_available=migration_status['s3_backend_available'],
+            current_backend=storage_type,
+            storage_strategy=storage_strategy,
+            local_backend_available=local_available,
+            s3_backend_available=s3_available,
             backend_info={
                 **backend_info,
                 'local_storage_dir': migration_status.get('local_storage_dir'),

@@ -660,20 +660,20 @@ class DataSharingService:
                 ).all()
                 
                 # Use storage service to check file existence properly
-                from app.services.storage import StorageService
-                storage_service = StorageService()
+                from app.services.storage import storage_service
                 
                 file_exists = False
                 for f in existing_files:
                     if f.file_path:
+                        # Check if file exists using storage service (works for both S3 and local)
                         try:
-                            # Try to get file info through storage service
-                            content = await storage_service.retrieve_dataset_file(f.file_path)
-                            if content:
+                            file_path = f.relative_path or f.file_path
+                            content = await storage_service.retrieve_dataset_file(file_path)
+                            if content is not None:
                                 file_exists = True
                                 break
-                        except Exception:
-                            # File doesn't exist or can't be retrieved
+                        except Exception as e:
+                            logger.debug(f"File check failed for {f.file_path}: {e}")
                             continue
                 
                 if not file_exists:
@@ -685,12 +685,10 @@ class DataSharingService:
                         detail="Dataset files are no longer available"
                     )
             elif dataset.file_path:
-                # Single file check - use storage service instead of direct os.path.exists
-                from app.services.storage import StorageService
-                storage_service = StorageService()
-                
+                # Single file check - use proper path resolution
+                from app.services.storage import storage_service
                 try:
-                    # Try to get file info through storage service
+                    # Use storage service to check file existence (works for both S3 and local)
                     content = await storage_service.retrieve_dataset_file(dataset.file_path)
                     file_exists = content is not None
                 except Exception:
@@ -746,11 +744,16 @@ class DataSharingService:
                         }
                     }
                     
-                    # Try to preview primary file if it's CSV
-                    if (primary_file.file_type and primary_file.file_type.lower() == 'csv' 
-                        and primary_file.file_path and os.path.exists(primary_file.file_path)):
+                    # Try to preview primary file if it's CSV (only for local storage for now)
+                    if (primary_file.file_type and primary_file.file_type.lower() == 'csv'
+                        and primary_file.file_path and hasattr(storage_service.backend, 'storage_dir')):
                         try:
-                            df = pd.read_csv(primary_file.file_path, nrows=10)
+                            # Resolve full path for local storage
+                            full_file_path = os.path.join(storage_service.backend.storage_dir, primary_file.file_path)
+                            if os.path.exists(full_file_path):
+                                df = pd.read_csv(full_file_path, nrows=10)
+                            else:
+                                raise FileNotFoundError(f"File not found: {full_file_path}")  # Skip preview if file doesn't exist
                             headers = df.columns.tolist()
                             rows = []
                             for row in df.values:
@@ -778,35 +781,49 @@ class DataSharingService:
                             logger.warning(f"Failed to preview primary file {primary_file.filename}: {e}")
                             
             # Handle single file datasets
-            elif dataset.file_path and os.path.exists(dataset.file_path):
-                if dataset.type.value.lower() == 'csv':
-                    df = pd.read_csv(dataset.file_path, nrows=10)
-                    headers = df.columns.tolist()
-                    
-                    # Convert to native Python types
-                    rows = []
-                    for row in df.values:
-                        converted_row = []
-                        for val in row:
-                            if pd.isna(val):
-                                converted_row.append(None)
-                            elif isinstance(val, (np.integer, int)):
-                                converted_row.append(int(val))
-                            elif isinstance(val, (np.floating, float)):
-                                converted_row.append(float(val))
-                            elif isinstance(val, np.bool_):
-                                converted_row.append(bool(val))
-                            else:
-                                converted_row.append(str(val))
-                        rows.append(converted_row)
-                    
-                    preview_data = {
-                        "headers": headers,
-                        "rows": rows,
-                        "total_rows": len(rows),
-                        "type": "csv",
-                        "preview_source": "single_file"
-                    }
+            elif dataset.file_path:
+                # Check file existence using storage service (works for both S3 and local)
+                file_exists = False
+                actual_file_path = None
+                from app.services.storage import storage_service
+                try:
+                    content = await storage_service.retrieve_dataset_file(dataset.file_path)
+                    file_exists = content is not None
+                    # For local storage, set actual file path for CSV preview
+                    if file_exists and hasattr(storage_service.backend, 'storage_dir'):
+                        actual_file_path = os.path.join(storage_service.backend.storage_dir, dataset.file_path)
+                except Exception:
+                    file_exists = False
+
+                if file_exists and actual_file_path:
+                    if dataset.type.value.lower() == 'csv':
+                        df = pd.read_csv(actual_file_path, nrows=10)
+                        headers = df.columns.tolist()
+
+                        # Convert to native Python types
+                        rows = []
+                        for row in df.values:
+                            converted_row = []
+                            for val in row:
+                                if pd.isna(val):
+                                    converted_row.append(None)
+                                elif isinstance(val, (np.integer, int)):
+                                    converted_row.append(int(val))
+                                elif isinstance(val, (np.floating, float)):
+                                    converted_row.append(float(val))
+                                elif isinstance(val, np.bool_):
+                                    converted_row.append(bool(val))
+                                else:
+                                    converted_row.append(str(val))
+                            rows.append(converted_row)
+
+                        preview_data = {
+                            "headers": headers,
+                            "rows": rows,
+                            "total_rows": len(rows),
+                            "type": "csv",
+                            "preview_source": "single_file"
+                        }
                     
             if preview_data and preview_data.get('rows'):
                 logger.info(f"Generated preview data for shared dataset {dataset.id}: {len(preview_data.get('rows', []))} rows of {preview_data.get('type', 'unknown')} data")
