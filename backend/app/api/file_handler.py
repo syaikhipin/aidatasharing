@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/upload")
+@router.post("/upload", operation_id="upload_file_to_mindsdb")
 async def upload_file(
     background_tasks: BackgroundTasks,
     dataset_id: int,

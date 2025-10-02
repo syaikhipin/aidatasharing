@@ -1028,7 +1028,7 @@ async def bulk_update_configurations(
         raise HTTPException(status_code=500, detail=f"Error updating configurations: {str(e)}")
 
 
-@router.post("/restart-required")
+@router.post("/restart-required", operation_id="check_restart_required_v1")
 async def check_restart_required(
     current_user: User = Depends(get_current_superuser),
     db: Session = Depends(get_db)
@@ -1057,7 +1057,7 @@ async def check_restart_required(
     except Exception as e:
         logger.error(f"Error checking restart requirement: {e}")
         raise HTTPException(status_code=500, detail=f"Error checking restart requirement: {str(e)}")
-@router.get("/unified-config", response_model=Dict[str, Any])
+@router.get("/unified-config", response_model=Dict[str, Any], operation_id="get_unified_configuration_v1")
 async def get_unified_configuration(
     current_user: User = Depends(get_current_superuser),
     db: Session = Depends(get_db)
@@ -1275,7 +1275,7 @@ async def update_mindsdb_configuration(
         raise HTTPException(status_code=500, detail=f"Error updating MindsDB configuration: {str(e)}")
 
 
-@router.post("/restart-required")
+@router.post("/restart-required", operation_id="check_restart_required_v2")
 async def check_restart_required(
     current_user: User = Depends(get_current_superuser),
     db: Session = Depends(get_db)
@@ -1310,7 +1310,7 @@ async def check_restart_required(
 
 # New Unified Configuration API Endpoints
 
-@router.get("/unified-config")
+@router.get("/unified-config", operation_id="get_unified_configuration_v2")
 async def get_unified_configuration(
     current_user: User = Depends(get_current_superuser),
     db: Session = Depends(get_db)

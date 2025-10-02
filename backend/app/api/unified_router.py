@@ -58,7 +58,7 @@ class FileUploadResponse(BaseModel):
 
 # ============= File Management Endpoints =============
 
-@files_router.post("/upload", response_model=FileUploadResponse)
+@files_router.post("/upload", response_model=FileUploadResponse, operation_id="upload_file_unified")
 async def upload_file(
     file: UploadFile = File(...),
     description: Optional[str] = None,
