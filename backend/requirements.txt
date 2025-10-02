@@ -40,9 +40,8 @@ clickhouse-driver==0.2.9
 google-generativeai==0.8.3
 openai==1.91.0
 dspy-ai==2.4.9
-# MindsDB - install separately to avoid conflicts
-# Use: pip install mindsdb --no-deps
-# mindsdb-sdk==2.0.0
+# MindsDB SDK
+mindsdb-sdk==2.0.0
 
 # Data visualization and analysis
 lida==0.0.13
