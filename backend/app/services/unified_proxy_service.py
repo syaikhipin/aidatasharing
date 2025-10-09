@@ -60,20 +60,26 @@ class UnifiedProxyService:
         """Get or create encryption key for credential storage"""
         # Use relative path for local development, absolute for production
         if os.getenv("ENVIRONMENT") == "production":
-            key_file = os.getenv("ENCRYPTION_KEY_FILE", "/app/data/encryption.key")
+            key_file = os.getenv("ENCRYPTION_KEY_FILE", "/tmp/encryption.key")
         else:
             key_file = os.getenv("ENCRYPTION_KEY_FILE", "../storage/encryption.key")
-        
-        # Ensure directory exists
-        os.makedirs(os.path.dirname(key_file), exist_ok=True)
-        
+
+        # Ensure directory exists (only if not /tmp)
+        key_dir = os.path.dirname(key_file)
+        if key_dir and key_dir != '/tmp':
+            os.makedirs(key_dir, exist_ok=True)
+
         if os.path.exists(key_file):
             with open(key_file, "rb") as f:
                 return f.read()
         else:
             key = Fernet.generate_key()
-            with open(key_file, "wb") as f:
-                f.write(key)
+            try:
+                with open(key_file, "wb") as f:
+                    f.write(key)
+            except (OSError, PermissionError):
+                # If can't write, just use in-memory key
+                logger.warning(f"Could not write encryption key to {key_file}, using in-memory key")
             return key
     
     def _get_ssl_configuration(self) -> Dict[str, Any]:

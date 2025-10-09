@@ -24,16 +24,15 @@ class SSLMiddleware(BaseHTTPMiddleware):
         
     def _load_ssl_config(self) -> Dict[str, Any]:
         """Load SSL configuration from environment"""
-        environment = os.getenv("ENVIRONMENT", "development").lower()
         node_env = os.getenv("NODE_ENV", "development").lower()
-        
-        # SSL is enabled only in production
-        is_production = environment == "production" or node_env == "production"
-        
+
+        # Simple: production = SSL enabled, development = no SSL
+        ssl_enabled = (node_env == "production")
+
+        logger.info(f"SSL Middleware Config: node_env={node_env}, ssl_enabled={ssl_enabled}")
+
         return {
-            "environment": environment,
-            "is_production": is_production,
-            "ssl_enabled": is_production
+            "ssl_enabled": ssl_enabled
         }
     
     async def dispatch(self, request: Request, call_next):
@@ -54,21 +53,21 @@ class SSLMiddleware(BaseHTTPMiddleware):
     
     def _should_redirect_to_https(self, request: Request) -> bool:
         """Determine if request should be redirected to HTTPS"""
-        
+
+        # Only redirect if SSL is enabled (NODE_ENV=production)
+        if not self.ssl_config["ssl_enabled"]:
+            return False
+
         # Skip if already HTTPS
         if self._is_https_request(request):
             return False
-        
-        # Only redirect in production
-        if not self.ssl_config["ssl_enabled"]:
-            return False
-        
+
         host = request.headers.get("host", "")
-        
-        # Never redirect localhost/development hosts even in production
+
+        # Never redirect localhost/development hosts
         if self._is_development_host(host):
             return False
-        
+
         return True
     
     def _is_https_request(self, request: Request) -> bool:
@@ -136,29 +135,20 @@ class FlexibleSSLConfig:
     """
     Utility class for SSL configuration management
     """
-    
+
     @staticmethod
     def get_ssl_settings() -> Dict[str, str]:
         """Get current SSL settings for debugging"""
-        environment = os.getenv("ENVIRONMENT", "development")
         node_env = os.getenv("NODE_ENV", "development")
-        is_production = environment.lower() == "production" or node_env.lower() == "production"
-        
+        ssl_enabled = node_env.lower() == "production"
+
         return {
-            "ENVIRONMENT": environment,
             "NODE_ENV": node_env,
-            "SSL_ENABLED": str(is_production),
-            "SSL_REDIRECT": str(is_production)
+            "SSL_ENABLED": str(ssl_enabled)
         }
-    
+
     @staticmethod
     def is_ssl_enabled() -> bool:
         """Check if SSL is currently enabled"""
-        environment = os.getenv("ENVIRONMENT", "development").lower()
         node_env = os.getenv("NODE_ENV", "development").lower()
-        return environment == "production" or node_env == "production"
-    
-    @staticmethod
-    def should_redirect_ssl() -> bool:
-        """Check if SSL redirects are enabled"""
-        return FlexibleSSLConfig.is_ssl_enabled()
+        return node_env == "production"
