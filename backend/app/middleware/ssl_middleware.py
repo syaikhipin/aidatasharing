@@ -37,18 +37,26 @@ class SSLMiddleware(BaseHTTPMiddleware):
     
     async def dispatch(self, request: Request, call_next):
         """Process request and handle SSL redirects if needed"""
-        
+
         # Check if SSL redirect is needed
         if self._should_redirect_to_https(request):
             https_url = self._build_https_url(request)
             return RedirectResponse(url=https_url, status_code=301)
-        
+
         # Add security headers for HTTPS responses
         response = await call_next(request)
-        
+
+        # Fix any HTTP redirects to use HTTPS in production
+        if self._is_https_request(request) and response.status_code in (301, 302, 303, 307, 308):
+            location = response.headers.get("location")
+            if location and location.startswith("http://"):
+                # Replace http:// with https:// to prevent protocol downgrade
+                response.headers["location"] = location.replace("http://", "https://", 1)
+                logger.info(f"Fixed redirect from HTTP to HTTPS: {location} -> {response.headers['location']}")
+
         if self._is_https_response(request):
             self._add_security_headers(response)
-        
+
         return response
     
     def _should_redirect_to_https(self, request: Request) -> bool:
