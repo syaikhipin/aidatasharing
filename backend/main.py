@@ -248,6 +248,7 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
+    redirect_slashes=False,  # Disable automatic slash redirects to prevent HTTPS downgrade
     swagger_ui_parameters={
         "deepLinking": True,
         "displayRequestDuration": True,
