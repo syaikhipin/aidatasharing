@@ -508,8 +508,8 @@ class MindsDBService:
             # Configure Gemini API
             genai.configure(api_key=self.api_key)
             
-            # Use a stable model
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            # Use model from environment configuration
+            model = genai.GenerativeModel(self.default_model)
             
             # Generate response
             response = model.generate_content(message)
@@ -518,7 +518,7 @@ class MindsDBService:
                 logger.info(f"✅ Direct Google API chat successful")
                 return {
                     "answer": response.text.strip(),
-                    "model": "gemini-1.5-flash (Direct API)",
+                    "model": f"{self.default_model} (Direct API)",
                     "timestamp": datetime.utcnow().isoformat(),
                     "tokens_used": len(message.split()) + len(response.text.split()),
                     "source": "google_direct_api"
