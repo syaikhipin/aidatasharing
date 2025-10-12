@@ -241,40 +241,78 @@ export function DataVisualization({
                     
                     {/* Render the chart */}
                     {viz.isImage ? (
-                      <img 
-                        src={viz.imageData} 
-                        alt={viz.title}
-                        className="w-full rounded-lg border"
-                      />
+                      <div className="relative group">
+                        <img
+                          src={viz.imageData}
+                          alt={viz.title}
+                          className="w-full rounded-lg border shadow-sm hover:shadow-md transition-shadow"
+                        />
+                        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => {
+                              const link = document.createElement('a');
+                              link.href = viz.imageData;
+                              link.download = `${viz.title.replace(/\s+/g, '_')}.png`;
+                              link.click();
+                            }}
+                            className="px-2 py-1 bg-white rounded shadow text-xs hover:bg-gray-100"
+                          >
+                            💾 Download
+                          </button>
+                        </div>
+                      </div>
                     ) : viz.chart ? (
-                      <div className="w-full overflow-x-auto">
+                      <div className="w-full overflow-x-auto rounded-lg border shadow-sm bg-gradient-to-br from-white/90 to-gray-50/90 backdrop-blur-sm">
                         <Plot
                           data={viz.chart.data || []}
                           layout={{
                             ...viz.chart.layout,
                             autosize: true,
-                            margin: { t: 40, r: 40, b: 40, l: 40 },
-                            paper_bgcolor: 'transparent',
-                            plot_bgcolor: 'transparent',
-                            font: { color: 'currentColor' }
+                            margin: { t: 40, r: 40, b: 60, l: 60 },
+                            paper_bgcolor: 'rgba(255, 255, 255, 0.9)',
+                            plot_bgcolor: 'rgba(255, 255, 255, 0.5)',
+                            font: {
+                              family: 'Inter, system-ui, sans-serif',
+                              size: 12,
+                              color: '#374151'
+                            },
+                            hoverlabel: {
+                              bgcolor: 'white',
+                              bordercolor: '#e5e7eb',
+                              font: { size: 13 }
+                            }
                           }}
                           config={{
                             responsive: true,
                             displayModeBar: true,
-                            displaylogo: false
+                            displaylogo: false,
+                            modeBarButtonsToAdd: [],
+                            toImageButtonOptions: {
+                              format: 'png',
+                              filename: viz.title.replace(/\s+/g, '_'),
+                              height: 600,
+                              width: 1000,
+                              scale: 2
+                            }
                           }}
                           className="w-full"
-                          style={{ width: '100%', height: '400px' }}
+                          style={{ width: '100%', height: '450px' }}
                         />
                       </div>
                     ) : null}
-                    
+
                     {/* Insights */}
                     {viz.insights && viz.insights.length > 0 && (
-                      <div className="mt-2 space-y-1">
-                        {viz.insights.map((insight, i) => (
-                          <p key={i} className="text-sm text-muted-foreground">• {insight}</p>
-                        ))}
+                      <div className="mt-3 p-3 bg-blue-50 border border-blue-100 rounded-lg">
+                        <h5 className="text-sm font-semibold text-blue-900 mb-2">📊 Key Insights</h5>
+                        <div className="space-y-1">
+                          {viz.insights.map((insight, i) => (
+                            <p key={i} className="text-sm text-blue-800 flex items-start">
+                              <span className="text-blue-600 mr-2">•</span>
+                              <span>{insight}</span>
+                            </p>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -306,41 +344,78 @@ export function DataVisualization({
                     
                     {/* Render the chart */}
                     {viz.isImage ? (
-                      <img 
-                        src={viz.imageData} 
-                        alt={viz.title}
-                        className="w-full rounded-lg border"
-                      />
+                      <div className="relative group">
+                        <img
+                          src={viz.imageData}
+                          alt={viz.title}
+                          className="w-full rounded-lg border shadow-sm hover:shadow-md transition-shadow"
+                        />
+                        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => {
+                              const link = document.createElement('a');
+                              link.href = viz.imageData;
+                              link.download = `${viz.title.replace(/\s+/g, '_')}.png`;
+                              link.click();
+                            }}
+                            className="px-2 py-1 bg-white rounded shadow text-xs hover:bg-gray-100"
+                          >
+                            💾 Download
+                          </button>
+                        </div>
+                      </div>
                     ) : viz.chart ? (
-                      <div className="w-full overflow-x-auto">
+                      <div className="w-full overflow-x-auto rounded-lg border shadow-sm bg-gradient-to-br from-white/90 to-gray-50/90 backdrop-blur-sm">
                         <Plot
                           data={viz.chart.data || []}
                           layout={{
                             ...viz.chart.layout,
                             autosize: true,
-                            margin: { t: 40, r: 40, b: 40, l: 40 },
-                            paper_bgcolor: 'transparent',
-                            plot_bgcolor: 'transparent',
-                            font: { color: 'currentColor' }
+                            margin: { t: 40, r: 40, b: 60, l: 60 },
+                            paper_bgcolor: 'rgba(255, 255, 255, 0.9)',
+                            plot_bgcolor: 'rgba(255, 255, 255, 0.5)',
+                            font: {
+                              family: 'Inter, system-ui, sans-serif',
+                              size: 12,
+                              color: '#374151'
+                            },
+                            hoverlabel: {
+                              bgcolor: 'white',
+                              bordercolor: '#e5e7eb',
+                              font: { size: 13 }
+                            }
                           }}
                           config={{
                             responsive: true,
                             displayModeBar: true,
-                            displaylogo: false
+                            displaylogo: false,
+                            modeBarButtonsToAdd: [],
+                            toImageButtonOptions: {
+                              format: 'png',
+                              filename: viz.title.replace(/\s+/g, '_'),
+                              height: 600,
+                              width: 1000,
+                              scale: 2
+                            }
                           }}
                           className="w-full"
-                          style={{ width: '100%', height: '400px' }}
+                          style={{ width: '100%', height: '450px' }}
                         />
                       </div>
                     ) : null}
-                    
+
                     {/* Insights */}
                     {viz.insights && viz.insights.length > 0 && (
-                      <div className="space-y-1">
-                        <h4 className="text-sm font-medium">Key Insights:</h4>
-                        {viz.insights.map((insight, i) => (
-                          <p key={i} className="text-sm text-muted-foreground">• {insight}</p>
-                        ))}
+                      <div className="mt-3 p-3 bg-blue-50 border border-blue-100 rounded-lg">
+                        <h5 className="text-sm font-semibold text-blue-900 mb-2">📊 Key Insights</h5>
+                        <div className="space-y-1">
+                          {viz.insights.map((insight, i) => (
+                            <p key={i} className="text-sm text-blue-800 flex items-start">
+                              <span className="text-blue-600 mr-2">•</span>
+                              <span>{insight}</span>
+                            </p>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </TabsContent>

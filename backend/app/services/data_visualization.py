@@ -240,46 +240,69 @@ class DataVisualizationService:
             return self.generate_standard_visualizations(data)
     
     def generate_standard_visualizations(self, data: pd.DataFrame) -> List[Dict[str, Any]]:
-        """Generate standard visualizations without LIDA"""
+        """Generate enhanced standard visualizations with more chart types"""
         visualizations = []
-        
+
         try:
             numeric_cols = data.select_dtypes(include=[np.number]).columns.tolist()
             categorical_cols = data.select_dtypes(include=['object', 'category']).columns.tolist()
             datetime_cols = data.select_dtypes(include=['datetime64']).columns.tolist()
-            
-            # 1. Distribution plot for first numeric column
+
+            # 1. Distribution plot for first numeric column with box plot
             if numeric_cols:
                 viz = self._create_distribution_plot(data, numeric_cols[0])
                 if viz:
                     visualizations.append(viz)
-            
+
+                # Add box plot for outlier detection
+                viz = self._create_box_plot(data, numeric_cols[0])
+                if viz:
+                    visualizations.append(viz)
+
             # 2. Bar chart for first categorical column
             if categorical_cols:
                 viz = self._create_bar_chart(data, categorical_cols[0])
                 if viz:
                     visualizations.append(viz)
-            
+
+                # Add pie chart if not too many categories
+                if data[categorical_cols[0]].nunique() <= 10:
+                    viz = self._create_pie_chart(data, categorical_cols[0])
+                    if viz:
+                        visualizations.append(viz)
+
             # 3. Correlation heatmap if multiple numeric columns
             if len(numeric_cols) > 1:
                 viz = self._create_correlation_heatmap(data, numeric_cols)
                 if viz:
                     visualizations.append(viz)
-            
+
             # 4. Time series plot if datetime column exists
             if datetime_cols and numeric_cols:
                 viz = self._create_time_series_plot(data, datetime_cols[0], numeric_cols[0])
                 if viz:
                     visualizations.append(viz)
-            
+
             # 5. Scatter plot for first two numeric columns
             if len(numeric_cols) >= 2:
                 viz = self._create_scatter_plot(data, numeric_cols[0], numeric_cols[1])
                 if viz:
                     visualizations.append(viz)
-            
+
+            # 6. Multi-variable analysis if we have numeric and categorical
+            if numeric_cols and categorical_cols and len(data) < 1000:
+                viz = self._create_grouped_bar_chart(data, categorical_cols[0], numeric_cols[0])
+                if viz:
+                    visualizations.append(viz)
+
+            # 7. Data summary stats visualization
+            if numeric_cols:
+                viz = self._create_stats_summary(data, numeric_cols[:5])
+                if viz:
+                    visualizations.append(viz)
+
             return visualizations
-            
+
         except Exception as e:
             logger.error(f"Error generating standard visualizations: {e}")
             return []
@@ -455,7 +478,169 @@ class DataVisualizationService:
         except Exception as e:
             logger.error(f"Error creating scatter plot: {e}")
             return None
-    
+
+    def _create_box_plot(self, data: pd.DataFrame, column: str) -> Optional[Dict[str, Any]]:
+        """Create a box plot for outlier detection"""
+        try:
+            fig = px.box(
+                data,
+                y=column,
+                title=f"Box Plot: {column} (Outlier Detection)",
+                labels={column: column}
+            )
+
+            fig.update_layout(
+                height=400,
+                template='plotly_white',
+                showlegend=False
+            )
+
+            q1 = data[column].quantile(0.25)
+            q3 = data[column].quantile(0.75)
+            iqr = q3 - q1
+            outliers = data[(data[column] < q1 - 1.5*iqr) | (data[column] > q3 + 1.5*iqr)]
+
+            return {
+                "type": "box_plot",
+                "title": f"Box Plot: {column}",
+                "description": f"Box plot showing distribution and outliers for {column}",
+                "chart": json.loads(fig.to_json()),
+                "insights": [
+                    f"Q1 (25%): {q1:.2f}",
+                    f"Median: {data[column].median():.2f}",
+                    f"Q3 (75%): {q3:.2f}",
+                    f"IQR: {iqr:.2f}",
+                    f"Potential outliers: {len(outliers)} ({len(outliers)/len(data)*100:.1f}%)"
+                ]
+            }
+        except Exception as e:
+            logger.error(f"Error creating box plot: {e}")
+            return None
+
+    def _create_pie_chart(self, data: pd.DataFrame, column: str) -> Optional[Dict[str, Any]]:
+        """Create a pie chart for categorical data"""
+        try:
+            value_counts = data[column].value_counts().head(10)
+
+            fig = px.pie(
+                values=value_counts.values,
+                names=value_counts.index,
+                title=f"Distribution of {column}",
+                hole=0.3  # Donut chart style
+            )
+
+            fig.update_layout(
+                height=400,
+                template='plotly_white'
+            )
+
+            return {
+                "type": "pie_chart",
+                "title": f"Distribution of {column}",
+                "description": f"Pie chart showing proportion of {column} categories",
+                "chart": json.loads(fig.to_json()),
+                "insights": [
+                    f"Total categories: {data[column].nunique()}",
+                    f"Largest category: {value_counts.index[0]} ({value_counts.values[0]/len(data)*100:.1f}%)",
+                    f"Showing top {len(value_counts)} categories"
+                ]
+            }
+        except Exception as e:
+            logger.error(f"Error creating pie chart: {e}")
+            return None
+
+    def _create_grouped_bar_chart(self, data: pd.DataFrame, cat_col: str, num_col: str) -> Optional[Dict[str, Any]]:
+        """Create a grouped bar chart showing numeric values by category"""
+        try:
+            # Aggregate by category
+            grouped = data.groupby(cat_col)[num_col].agg(['mean', 'median', 'std']).reset_index()
+            grouped = grouped.head(10)  # Top 10 categories
+
+            fig = go.Figure()
+
+            fig.add_trace(go.Bar(
+                name='Mean',
+                x=grouped[cat_col],
+                y=grouped['mean'],
+                marker_color='#3b82f6'
+            ))
+
+            fig.add_trace(go.Bar(
+                name='Median',
+                x=grouped[cat_col],
+                y=grouped['median'],
+                marker_color='#10b981'
+            ))
+
+            fig.update_layout(
+                title=f"{num_col} by {cat_col}",
+                xaxis_title=cat_col,
+                yaxis_title=num_col,
+                barmode='group',
+                height=400,
+                template='plotly_white'
+            )
+
+            return {
+                "type": "grouped_bar",
+                "title": f"{num_col} by {cat_col}",
+                "description": f"Comparison of {num_col} across different {cat_col} categories",
+                "chart": json.loads(fig.to_json()),
+                "insights": [
+                    f"Highest mean: {grouped['mean'].max():.2f} in {grouped.loc[grouped['mean'].idxmax(), cat_col]}",
+                    f"Lowest mean: {grouped['mean'].min():.2f} in {grouped.loc[grouped['mean'].idxmin(), cat_col]}",
+                    f"Average std dev: {grouped['std'].mean():.2f}"
+                ]
+            }
+        except Exception as e:
+            logger.error(f"Error creating grouped bar chart: {e}")
+            return None
+
+    def _create_stats_summary(self, data: pd.DataFrame, numeric_cols: List[str]) -> Optional[Dict[str, Any]]:
+        """Create a visual summary of statistical metrics"""
+        try:
+            # Prepare summary statistics
+            stats = data[numeric_cols].describe().T
+
+            fig = go.Figure()
+
+            # Add mean as bars
+            fig.add_trace(go.Bar(
+                name='Mean',
+                x=stats.index,
+                y=stats['mean'],
+                marker_color='#3b82f6',
+                error_y=dict(
+                    type='data',
+                    array=stats['std'],
+                    visible=True
+                )
+            ))
+
+            fig.update_layout(
+                title="Statistical Summary of Numeric Features",
+                xaxis_title="Features",
+                yaxis_title="Mean Value (±1 SD)",
+                height=400,
+                template='plotly_white',
+                showlegend=True
+            )
+
+            return {
+                "type": "stats_summary",
+                "title": "Statistical Summary",
+                "description": "Overview of mean values with standard deviation for numeric features",
+                "chart": json.loads(fig.to_json()),
+                "insights": [
+                    f"Features analyzed: {len(numeric_cols)}",
+                    f"Highest mean: {stats['mean'].max():.2f} ({stats['mean'].idxmax()})",
+                    f"Highest variability: {stats['std'].max():.2f} ({stats['std'].idxmax()})"
+                ]
+            }
+        except Exception as e:
+            logger.error(f"Error creating stats summary: {e}")
+            return None
+
     def _execute_visualization_code(self, code: str, data: pd.DataFrame, title: str) -> Optional[Dict[str, Any]]:
         """Execute LIDA-generated visualization code safely"""
         try:
