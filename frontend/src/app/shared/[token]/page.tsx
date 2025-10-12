@@ -951,12 +951,12 @@ export default function SharedDatasetPage() {
                     <h4 className="text-sm font-medium text-blue-800 mb-2">💡 Try asking questions like:</h4>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                       {[
-                        "What insights can you provide about this dataset?",
-                        "Analyze the data distribution and patterns",
-                        "What are the key statistics in this data?",
-                        "Can you summarize the main findings?",
-                        "What columns are available in this dataset?",
-                        "Suggest visualizations for this data"
+                        "📊 Create visualizations for this dataset",
+                        "📈 Analyze the data distribution with charts",
+                        "🔍 What insights can you provide with graphs?",
+                        "📉 Show statistical analysis with visualizations",
+                        "What are the key patterns and correlations?",
+                        "Create a comprehensive data report with charts"
                       ].map((suggestion, index) => (
                         <button
                           key={index}

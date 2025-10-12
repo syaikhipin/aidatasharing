@@ -447,14 +447,14 @@ function DatasetChatContent() {
                   </h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                     {[
-                      "@preprocessing_agent Clean and prepare this dataset",
-                      "@data_viz_agent Create visualizations of this dataset",
+                      "📊 Show visualizations of this dataset",
+                      "📈 Analyze the data distribution with charts",
+                      "🔍 What are the key patterns and correlations?",
+                      "📉 Create statistical analysis with graphs",
+                      "@data_viz_agent Create advanced visualizations",
                       "@statistical_analytics_agent Perform statistical analysis",
-                      "@ml_agent Train a machine learning model",
-                      "What are the key patterns in the data?",
                       "Show me the data quality and missing values",
-                      "Create a comprehensive data report",
-                      "What insights can you provide with visualizations?"
+                      "Create a comprehensive data report with charts"
                     ].map((suggestion, index) => (
                       <button
                         key={index}
