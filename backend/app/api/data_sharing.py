@@ -739,34 +739,45 @@ async def download_shared_dataset(
             detail="Cannot download external URL datasets. This dataset is hosted externally."
         )
     
-    # Try to find the file using multiple methods
-    file_path = None
-    
+    # Import storage service
+    from app.services.storage import storage_service
+    from app.models.dataset import DatasetFile
+
     # Method 1: Check dataset_files table first (new upload system)
     if dataset.is_multi_file_dataset or not dataset.source_url:
-        from app.models.dataset import DatasetFile
         dataset_files = db.query(DatasetFile).filter(
             DatasetFile.dataset_id == dataset.id,
             DatasetFile.is_deleted == False
         ).all()
-        
+
         if dataset_files:
             # For multi-file datasets, create a zip
             if dataset.is_multi_file_dataset and len(dataset_files) > 1:
                 import tempfile
                 import zipfile
-                
+
                 # Create a temporary zip file
                 temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
-                
+
                 try:
                     with zipfile.ZipFile(temp_zip, 'w', zipfile.ZIP_DEFLATED) as zip_file:
                         for dataset_file in dataset_files:
-                            if os.path.exists(dataset_file.file_path):
-                                zip_file.write(dataset_file.file_path, dataset_file.filename)
-                    
+                            try:
+                                # Retrieve file from storage service (works with S3 and local)
+                                file_path_to_retrieve = dataset_file.relative_path or dataset_file.file_path
+                                file_content = await storage_service.retrieve_dataset_file(file_path_to_retrieve)
+
+                                if file_content:
+                                    # Write to zip using BytesIO
+                                    from io import BytesIO
+                                    zip_file.writestr(dataset_file.filename, file_content)
+                                else:
+                                    logger.warning(f"File not found: {dataset_file.filename}")
+                            except Exception as e:
+                                logger.error(f"Failed to add file {dataset_file.filename} to zip: {str(e)}")
+
                     temp_zip.close()
-                    
+
                     # Return zip file
                     download_name = f"{dataset.name}_all_files.zip"
                     return FileResponse(
@@ -789,70 +800,43 @@ async def download_shared_dataset(
                         detail=f"Failed to create zip file: {str(e)}"
                     )
             else:
-                # For single file, use the first/primary file
+                # For single file, use the first/primary file with storage service
                 primary_file = next((f for f in dataset_files if f.is_primary), dataset_files[0])
-                if primary_file.file_path and os.path.exists(primary_file.file_path):
-                    file_path = primary_file.file_path
-    
-    # Method 2: Use source_url if available
-    if not file_path and dataset.source_url:
-        possible_paths = [
-            f"storage/{dataset.source_url}",  # Main storage directory
-            f"../storage/{dataset.source_url}",  # Alternative storage path
-            dataset.source_url,  # Direct path (if absolute)
-            f"uploads/{dataset.source_url}",  # Legacy uploads directory
-        ]
-        
-        for path in possible_paths:
-            abs_path = os.path.abspath(path)
-            if os.path.exists(abs_path):
-                file_path = abs_path
-                break
-    
-    # Method 3: Search by dataset ID pattern if still not found
-    if not file_path:
-        import glob
-        
-        # Search for files with dataset ID in the filename
-        search_patterns = [
-            f"storage/*/dataset_{dataset.id}_*",
-            f"../storage/*/dataset_{dataset.id}_*", 
-            f"storage/dataset_{dataset.id}_*",
-            f"../storage/dataset_{dataset.id}_*"
-        ]
-        
-        for pattern in search_patterns:
-            matches = glob.glob(pattern)
-            if matches:
-                # Use the first match found
-                file_path = os.path.abspath(matches[0])
-                break
-    
-    if not file_path:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="File not found on server"
-        )
-    
-    # Determine MIME type
-    mime_type, _ = mimetypes.guess_type(file_path)
-    if not mime_type:
-        mime_type = f"application/{dataset.type}" if dataset.type else "application/octet-stream"
-    
-    # Create appropriate filename
-    filename = f"{dataset.name}.{dataset.type}" if dataset.type else dataset.name
-    
-    # Return file response
-    return FileResponse(
-        path=file_path,
-        filename=filename,
-        media_type=mime_type,
-        headers={
-            "Content-Disposition": f"attachment; filename=\"{filename}\"",
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache",
-            "Expires": "0"
-        }
+                file_path_to_retrieve = primary_file.relative_path or primary_file.file_path
+
+                try:
+                    # Use storage service to get file stream
+                    return await storage_service.get_file_stream(file_path_to_retrieve)
+                except Exception as e:
+                    logger.error(f"Failed to retrieve file from storage: {str(e)}")
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="File not found on server"
+                    )
+
+    # Method 2: Use source_url or file_path with storage service
+    file_path_to_retrieve = None
+
+    if dataset.file_path:
+        file_path_to_retrieve = dataset.file_path
+    elif dataset.source_url and not dataset.source_url.startswith(('http://', 'https://')):
+        file_path_to_retrieve = dataset.source_url
+
+    if file_path_to_retrieve:
+        try:
+            # Use storage service to get file stream (works with both S3 and local)
+            return await storage_service.get_file_stream(file_path_to_retrieve)
+        except Exception as e:
+            logger.error(f"Failed to retrieve file from storage: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="File not found on server"
+            )
+
+    # If we get here, no file was found
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="File not found on server"
     )
 @router.get("/shared/{share_token}/download")
 async def download_shared_dataset_authenticated(
@@ -899,34 +883,45 @@ async def download_shared_dataset_authenticated(
             detail="Cannot download external URL datasets. This dataset is hosted externally."
         )
     
-    # Try to find the file using multiple methods (same as public endpoint)
-    file_path = None
-    
+    # Import storage service
+    from app.services.storage import storage_service
+    from app.models.dataset import DatasetFile
+
     # Method 1: Check dataset_files table first (new upload system)
     if dataset.is_multi_file_dataset or not dataset.source_url:
-        from app.models.dataset import DatasetFile
         dataset_files = db.query(DatasetFile).filter(
             DatasetFile.dataset_id == dataset.id,
             DatasetFile.is_deleted == False
         ).all()
-        
+
         if dataset_files:
             # For multi-file datasets, create a zip
             if dataset.is_multi_file_dataset and len(dataset_files) > 1:
                 import tempfile
                 import zipfile
-                
+
                 # Create a temporary zip file
                 temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
-                
+
                 try:
                     with zipfile.ZipFile(temp_zip, 'w', zipfile.ZIP_DEFLATED) as zip_file:
                         for dataset_file in dataset_files:
-                            if os.path.exists(dataset_file.file_path):
-                                zip_file.write(dataset_file.file_path, dataset_file.filename)
-                    
+                            try:
+                                # Retrieve file from storage service (works with S3 and local)
+                                file_path_to_retrieve = dataset_file.relative_path or dataset_file.file_path
+                                file_content = await storage_service.retrieve_dataset_file(file_path_to_retrieve)
+
+                                if file_content:
+                                    # Write to zip using BytesIO
+                                    from io import BytesIO
+                                    zip_file.writestr(dataset_file.filename, file_content)
+                                else:
+                                    logger.warning(f"File not found: {dataset_file.filename}")
+                            except Exception as e:
+                                logger.error(f"Failed to add file {dataset_file.filename} to zip: {str(e)}")
+
                     temp_zip.close()
-                    
+
                     # Return zip file
                     download_name = f"{dataset.name}_all_files.zip"
                     return FileResponse(
@@ -949,69 +944,42 @@ async def download_shared_dataset_authenticated(
                         detail=f"Failed to create zip file: {str(e)}"
                     )
             else:
-                # For single file, use the first/primary file
+                # For single file, use the first/primary file with storage service
                 primary_file = next((f for f in dataset_files if f.is_primary), dataset_files[0])
-                if primary_file.file_path and os.path.exists(primary_file.file_path):
-                    file_path = primary_file.file_path
-    
-    # Method 2: Use source_url if available
-    if not file_path and dataset.source_url:
-        possible_paths = [
-            f"storage/{dataset.source_url}",  # Main storage directory
-            f"../storage/{dataset.source_url}",  # Alternative storage path
-            dataset.source_url,  # Direct path (if absolute)
-            f"uploads/{dataset.source_url}",  # Legacy uploads directory
-        ]
-        
-        for path in possible_paths:
-            abs_path = os.path.abspath(path)
-            if os.path.exists(abs_path):
-                file_path = abs_path
-                break
-    
-    # Method 3: Search by dataset ID pattern if still not found
-    if not file_path:
-        import glob
-        
-        # Search for files with dataset ID in the filename
-        search_patterns = [
-            f"storage/*/dataset_{dataset.id}_*",
-            f"../storage/*/dataset_{dataset.id}_*", 
-            f"storage/dataset_{dataset.id}_*",
-            f"../storage/dataset_{dataset.id}_*"
-        ]
-        
-        for pattern in search_patterns:
-            matches = glob.glob(pattern)
-            if matches:
-                # Use the first match found
-                file_path = os.path.abspath(matches[0])
-                break
-    
-    if not file_path:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="File not found on server"
-        )
-    
-    # Determine MIME type
-    mime_type, _ = mimetypes.guess_type(file_path)
-    if not mime_type:
-        mime_type = f"application/{dataset.type}" if dataset.type else "application/octet-stream"
-    
-    # Create appropriate filename
-    filename = f"{dataset.name}.{dataset.type}" if dataset.type else dataset.name
-    
-    # Return file response
-    return FileResponse(
-        path=file_path,
-        filename=filename,
-        media_type=mime_type,
-        headers={
-            "Content-Disposition": f"attachment; filename=\"{filename}\"",
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache",
-            "Expires": "0"
-        }
+                file_path_to_retrieve = primary_file.relative_path or primary_file.file_path
+
+                try:
+                    # Use storage service to get file stream
+                    return await storage_service.get_file_stream(file_path_to_retrieve)
+                except Exception as e:
+                    logger.error(f"Failed to retrieve file from storage: {str(e)}")
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="File not found on server"
+                    )
+
+    # Method 2: Use source_url or file_path with storage service
+    file_path_to_retrieve = None
+
+    if dataset.file_path:
+        file_path_to_retrieve = dataset.file_path
+    elif dataset.source_url and not dataset.source_url.startswith(('http://', 'https://')):
+        file_path_to_retrieve = dataset.source_url
+
+    if file_path_to_retrieve:
+        try:
+            # Use storage service to get file stream (works with both S3 and local)
+            return await storage_service.get_file_stream(file_path_to_retrieve)
+        except Exception as e:
+            logger.error(f"Failed to retrieve file from storage: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="File not found on server"
+            )
+
+    # If we get here, no file was found
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="File not found on server"
     )
 

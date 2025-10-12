@@ -129,35 +129,28 @@ async def download_individual_file(
             detail="File not found or not accessible"
         )
     
-    # Check if file exists on disk
-    if not os.path.exists(dataset_file.file_path):
-        raise HTTPException(
-            status_code=status.HTTP_410_GONE,
-            detail="File is no longer available"
-        )
-    
     # Log the download
     logger.info(f"Individual file download: {dataset_file.filename} from dataset {dataset.id} via token {share_token[:8]}...")
-    
-    # Determine MIME type
-    mime_type = dataset_file.mime_type or 'application/octet-stream'
-    if not mime_type:
-        mime_type, _ = mimetypes.guess_type(dataset_file.file_path)
-        if not mime_type:
-            mime_type = 'application/octet-stream'
-    
-    # Return file response
-    return FileResponse(
-        path=dataset_file.file_path,
-        filename=dataset_file.filename,
-        media_type=mime_type,
-        headers={
-            "Content-Disposition": f"attachment; filename=\"{dataset_file.filename}\"",
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache",
-            "Expires": "0"
-        }
-    )
+
+    # Use storage service to get file stream (works with both S3 and local storage)
+    try:
+        from app.services.storage import storage_service
+
+        # Use relative_path if available, otherwise use file_path
+        file_path_to_retrieve = dataset_file.relative_path or dataset_file.file_path
+
+        # Get file stream from storage service
+        return await storage_service.get_file_stream(file_path_to_retrieve)
+
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 404)
+        raise
+    except Exception as e:
+        logger.error(f"File download failed for {dataset_file.filename}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to download file: {str(e)}"
+        )
 
 
 @router.post("/public/shared/{share_token}/files/download-selected")
