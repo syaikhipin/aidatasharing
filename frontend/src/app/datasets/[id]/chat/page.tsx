@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { DataVisualization } from '@/components/DataVisualization';
+import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import Link from 'next/link';
 
 export default function DatasetChatPage() {
@@ -264,63 +265,18 @@ function DatasetChatContent() {
                           <div className={`max-w-2xl px-4 py-2 rounded-lg ${
                             message.error
                               ? 'bg-red-50 border border-red-200 text-red-700'
-                              : 'bg-gray-100 text-gray-900'
+                              : 'bg-white border border-gray-200 shadow-sm'
                           }`}>
-                            {/* Agent information */}
-                            {message.agent_system && message.agent_used && (
-                              <div className="mb-2 p-2 bg-blue-50 border border-blue-200 rounded text-xs">
-                                <div className="flex items-center space-x-2">
-                                  <span className="text-blue-600 font-medium">
-                                    🤖 Agent: {availableAgents.find(a => a.name === message.agent_used)?.display_name || message.agent_used}
-                                  </span>
-                                  {message.planner && (
-                                    <Badge variant="outline" className="text-xs">
-                                      Auto-routed by Planner
-                                    </Badge>
-                                  )}
-                                </div>
-                                {message.planner?.reasoning && (
-                                  <p className="text-blue-600 mt-1">{message.planner.reasoning}</p>
-                                )}
-                              </div>
-                            )}
+                            <div className="text-sm">
+                              {message.error ? (
+                                <div className="text-red-700 whitespace-pre-wrap">{message.message}</div>
+                              ) : (
+                                <MarkdownRenderer content={message.message} />
+                              )}
+                            </div>
 
-                            <p className="text-sm whitespace-pre-wrap">{message.message}</p>
-
-                            {/* Show generated code if available */}
-                            {message.code && (
-                              <div className="mt-3 p-3 bg-gray-800 text-green-400 rounded text-xs font-mono overflow-x-auto">
-                                <div className="flex items-center justify-between mb-2">
-                                  <span className="text-gray-300">Generated Code:</span>
-                                  <Badge variant="secondary" className="text-xs">
-                                    {message.agent_used || 'AI'}
-                                  </Badge>
-                                </div>
-                                <pre className="whitespace-pre-wrap">{message.code}</pre>
-                              </div>
-                            )}
-
-                            {/* Show execution output if available */}
-                            {message.execution_output && (
-                              <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded text-xs">
-                                <div className="flex items-center mb-2">
-                                  <span className="text-blue-700 font-medium">📄 Execution Output:</span>
-                                </div>
-                                <pre className="whitespace-pre-wrap text-blue-600">{message.execution_output}</pre>
-                              </div>
-                            )}
-
-                            <p className="text-xs mt-1 opacity-75">
+                            <p className="text-xs mt-3 pt-3 border-t border-gray-100 opacity-60">
                               {new Date(message.timestamp).toLocaleTimeString()}
-                              {message.model && !message.error && (
-                                <span className="ml-2">• {message.model}</span>
-                              )}
-                              {message.tokens_used && !message.error && (
-                                <span className="ml-1">• {message.tokens_used} tokens</span>
-                              )}
-                              {message.agent_system && (
-                                <span className="ml-1 text-blue-600">• Agent System</span>
-                              )}
                             </p>
                           </div>
                         </div>
@@ -351,53 +307,6 @@ function DatasetChatContent() {
               </div>
             )}
 
-            {/* Agent Selection */}
-            {useAgents && availableAgents.length > 0 && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-sm font-medium text-blue-800">🤖 AI Agent Selection</h4>
-                  <Badge variant="secondary" className="text-xs">
-                    {useAgents ? 'Agents Enabled' : 'Standard Chat'}
-                  </Badge>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-blue-700 mb-1">
-                      Choose Agent
-                    </label>
-                    <Select value={selectedAgent} onValueChange={setSelectedAgent}>
-                      <SelectTrigger className="bg-white">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="auto">
-                          🎯 Auto-Route (Planner chooses best agent)
-                        </SelectItem>
-                        {availableAgents.map((agent) => (
-                          <SelectItem key={agent.name} value={agent.name}>
-                            {agent.icon} {agent.display_name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-blue-700 mb-1">
-                      Agent Description
-                    </label>
-                    <div className="text-xs text-blue-600 bg-white p-2 rounded border min-h-[2.5rem] flex items-center">
-                      {selectedAgent === 'auto' ? (
-                        'Let the AI planner automatically choose the most suitable agent for your task.'
-                      ) : (
-                        availableAgents.find(a => a.name === selectedAgent)?.description || 'Select an agent to see description'
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
 
             {/* Chat Input */}
             <div className="space-y-4">
@@ -438,12 +347,10 @@ function DatasetChatContent() {
 
               {/* Suggestions */}
               {chatHistory.length === 0 && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <h4 className="text-sm font-medium text-blue-800 mb-2">
-                    💡 Try asking questions like:
-                    {useAgents && availableAgents.length > 0 && (
-                      <span className="ml-2 text-xs font-normal">(Agents will automatically assist)</span>
-                    )}
+                <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg p-4">
+                  <h4 className="text-sm font-semibold text-gray-900 mb-3 flex items-center">
+                    <span className="text-xl mr-2">💡</span>
+                    Try these examples to get started:
                   </h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                     {[
@@ -451,24 +358,17 @@ function DatasetChatContent() {
                       "📈 Analyze the data distribution with charts",
                       "🔍 What are the key patterns and correlations?",
                       "📉 Create statistical analysis with graphs",
-                      "@data_viz_agent Create advanced visualizations",
-                      "@statistical_analytics_agent Perform statistical analysis",
-                      "Show me the data quality and missing values",
-                      "Create a comprehensive data report with charts"
+                      "💾 Summarize the dataset structure",
+                      "📋 Show me data quality issues",
+                      "🎯 What insights can you find?",
+                      "📊 Create a comprehensive data report"
                     ].map((suggestion, index) => (
                       <button
                         key={index}
                         onClick={() => setChatMessage(suggestion)}
-                        className="text-left text-sm text-blue-700 hover:text-blue-900 p-2 rounded hover:bg-blue-100 transition-colors"
+                        className="text-left text-sm text-gray-700 hover:text-gray-900 p-3 rounded-lg hover:bg-white hover:shadow-sm transition-all border border-transparent hover:border-blue-200"
                       >
-                        <span className="block">
-                          {suggestion.startsWith('@') && (
-                            <Badge variant="outline" className="mr-1 text-xs">
-                              Agent
-                            </Badge>
-                          )}
-                          "{suggestion}"
-                        </span>
+                        "{suggestion}"
                       </button>
                     ))}
                   </div>
@@ -476,34 +376,21 @@ function DatasetChatContent() {
               )}
 
               {/* Information */}
-              <Card variant="outlined" className="bg-gray-50 border-gray-200">
-                <CardContent className="p-4">
-                  <div className="flex">
-                    <div className="flex-shrink-0">
-                      <span className="text-gray-500 text-lg">ℹ️</span>
-                    </div>
-                    <div className="ml-3">
-                      <h4 className="text-sm font-medium text-gray-800">Chat Information</h4>
-                      <div className="mt-1 text-sm text-gray-600">
-                        <p>
-                          {useAgents && availableAgents.length > 0 ? (
-                            <>
-                              This chat feature uses AI agents to analyze your dataset and provide specialized insights.
-                              Agents can help with data preprocessing, statistical analysis, machine learning, and visualization.
-                              You can specify an agent with "@agent_name" or let the planner auto-route your request.
-                            </>
-                          ) : (
-                            <>
-                              This chat feature uses MindsDB to analyze your dataset and provide insights.
-                              Make sure MindsDB is running and properly configured with Google Gemini API for the best experience.
-                            </>
-                          )}
-                        </p>
-                      </div>
-                    </div>
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <div className="flex">
+                  <div className="flex-shrink-0">
+                    <span className="text-gray-500 text-lg">ℹ️</span>
                   </div>
-                </CardContent>
-              </Card>
+                  <div className="ml-3">
+                    <h4 className="text-sm font-medium text-gray-800">About AI Chat</h4>
+                    <p className="mt-1 text-sm text-gray-600">
+                      Ask questions in natural language and get AI-powered insights with visualizations,
+                      statistical analysis, and data summaries. The AI will automatically create charts
+                      and graphs when helpful.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>

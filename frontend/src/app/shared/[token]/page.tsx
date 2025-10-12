@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { dataSharingAPI } from '@/lib/api';
 import { Eye, Download, MessageSquare, Lock, User, Database, Shield, Copy } from 'lucide-react';
 import { DataVisualization } from '@/components/DataVisualization';
+import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import apiConfig from '@/config/api.config';
 
 interface SharedDataset {
@@ -864,21 +865,17 @@ export default function SharedDatasetPage() {
                             <div className={`max-w-2xl px-4 py-2 rounded-lg ${
                               message.error
                                 ? 'bg-red-50 border border-red-200 text-red-700'
-                                : 'bg-gray-100 text-gray-900'
+                                : 'bg-white border border-gray-200 shadow-sm'
                             }`}>
-                              <div className="text-sm whitespace-pre-wrap prose prose-sm max-w-none">
-                                <div dangerouslySetInnerHTML={{ 
-                                  __html: message.message.replace(/\n/g, '<br/>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>') 
-                                }} />
+                              <div className="text-sm">
+                                {message.error ? (
+                                  <div className="text-red-700 whitespace-pre-wrap">{message.message}</div>
+                                ) : (
+                                  <MarkdownRenderer content={message.message} />
+                                )}
                               </div>
-                              <p className="text-xs mt-1 opacity-75">
+                              <p className="text-xs mt-3 pt-3 border-t border-gray-100 opacity-60">
                                 {new Date(message.timestamp).toLocaleTimeString()}
-                                {message.model && !message.error && (
-                                  <span className="ml-2">• {message.model}</span>
-                                )}
-                                {message.tokens_used && !message.error && (
-                                  <span className="ml-1">• {message.tokens_used} tokens</span>
-                                )}
                               </p>
                             </div>
                           </div>
@@ -947,21 +944,24 @@ export default function SharedDatasetPage() {
 
                 {/* Suggestions */}
                 {chatHistory.length === 0 && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <h4 className="text-sm font-medium text-blue-800 mb-2">💡 Try asking questions like:</h4>
+                  <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg p-4">
+                    <h4 className="text-sm font-semibold text-gray-900 mb-3 flex items-center">
+                      <span className="text-xl mr-2">💡</span>
+                      Try these examples to get started:
+                    </h4>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                       {[
-                        "📊 Create visualizations for this dataset",
+                        "📊 Show visualizations of this dataset",
                         "📈 Analyze the data distribution with charts",
-                        "🔍 What insights can you provide with graphs?",
-                        "📉 Show statistical analysis with visualizations",
-                        "What are the key patterns and correlations?",
-                        "Create a comprehensive data report with charts"
+                        "🔍 What are the key patterns and correlations?",
+                        "📉 Create statistical analysis with graphs",
+                        "💾 Summarize the dataset structure",
+                        "📋 Show me data quality issues"
                       ].map((suggestion, index) => (
                         <button
                           key={index}
                           onClick={() => setChatMessage(suggestion)}
-                          className="text-left text-sm text-blue-700 hover:text-blue-900 p-2 rounded hover:bg-blue-100 transition-colors"
+                          className="text-left text-sm text-gray-700 hover:text-gray-900 p-3 rounded-lg hover:bg-white hover:shadow-sm transition-all border border-transparent hover:border-blue-200"
                         >
                           "{suggestion}"
                         </button>
