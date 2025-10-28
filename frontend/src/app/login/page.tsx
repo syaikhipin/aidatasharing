@@ -57,7 +57,7 @@ export default function LoginPage() {
           setDemoUsers([
             {
               email: "admin@example.com",
-              password: "admin123",
+              password: "SuperAdmin123!",
               role: "admin",
               description: "System Administrator",
               organization: null,
